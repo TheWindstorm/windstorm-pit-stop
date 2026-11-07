@@ -1,8 +1,10 @@
-# Pit Stop
+# Windstorm Pit Stop
 
-**A context optimizer for Claude Code.**
+**A context optimizer for Claude Code, by The Windstorm.**
 
-A race car never stops mid-corner. It waits for the pit stop, then refuels, changes tyres and goes back out. Pit Stop gives Claude Code sessions the same rhythm. At a break between tasks, and never in the middle of one, a session:
+<img src=".claude-plugin/icon.png" width="120" alt="The Windstorm">
+
+A race car never stops mid-corner. It waits for the pit stop, then refuels, changes tyres and goes back out. Pit Stop gives Claude Code sessions the same rhythm (the command is `/pit-stop`). At a break between tasks, and never in the middle of one, a session:
 
 1. **Refuels.** It compacts its context at a break, at a compaction point tuned to that folder's work.
 2. **Changes tyres.** It moves onto the newest installed Claude Code. *(Optional fleet mode.)*
@@ -11,8 +13,8 @@ A race car never stops mid-corner. It waits for the pit stop, then refuels, chan
 ## Install
 
 ```text
-/plugin marketplace add TheWindstorm/pit-stop
-/plugin install pit-stop@thewindstorm
+/plugin marketplace add TheWindstorm/windstorm-pit-stop
+/plugin install windstorm-pit-stop@thewindstorm
 ```
 
 Requirements: Claude Code, plus `python3` (3.10+, standard library only). Fleet mode also needs tmux on Linux or macOS.
@@ -66,4 +68,4 @@ The hook and the restart helper were first built by **Windy Boss**, an AI agent 
 
 ## License
 
-[Apache License 2.0](LICENSE). "Pit Stop" and "The Windstorm" are names of The Windstorm and are not licensed as trademarks; see [NOTICE](NOTICE).
+[Apache License 2.0](LICENSE). "Windstorm Pit Stop" and "The Windstorm" are names of The Windstorm and are not licensed as trademarks; see [NOTICE](NOTICE).

@@ -1,14 +1,24 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
-  "name": "pit-stop",
+  "name": "windstorm-pit-stop",
   "version": "0.1.0",
-  "description": "A context optimizer for Claude Code: compact at a break, restart onto the newest version at a break, keep each session's re-read files under the load limits, and tune each folder's compaction point from its own history.",
+  "description": "Windstorm Pit Stop, a context optimizer for Claude Code: compact at a break, restart onto the newest version at a break, keep each session's re-read files under the load limits, and tune each folder's compaction point from its own history.",
   "author": {
     "name": "The Windstorm",
     "url": "https://github.com/TheWindstorm"
   },
-  "homepage": "https://github.com/TheWindstorm/pit-stop",
-  "repository": "https://github.com/TheWindstorm/pit-stop",
+  "homepage": "https://github.com/TheWindstorm/windstorm-pit-stop",
+  "repository": "https://github.com/TheWindstorm/windstorm-pit-stop",
   "license": "Apache-2.0",
-  "keywords": ["context", "compaction", "auto-compact", "memory", "optimizer", "restart", "update", "hooks"]
+  "keywords": [
+    "context",
+    "compaction",
+    "auto-compact",
+    "memory",
+    "optimizer",
+    "restart",
+    "update",
+    "hooks"
+  ],
+  "icon": "./.claude-plugin/icon.png"
 }

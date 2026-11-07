@@ -1,14 +1,15 @@
 {
   "name": "thewindstorm",
+  "description": "Claude Code plugins by The Windstorm.",
   "owner": {
     "name": "The Windstorm",
     "url": "https://github.com/TheWindstorm"
   },
   "plugins": [
     {
-      "name": "pit-stop",
+      "name": "windstorm-pit-stop",
       "source": "./",
-      "description": "A context optimizer for Claude Code: compact at a break, restart at a break, clean reload, per-folder tuning."
+      "description": "Windstorm Pit Stop, a context optimizer for Claude Code: compact at a break, restart at a break, clean reload, per-folder tuning."
     }
   ]
 }

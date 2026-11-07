@@ -1,9 +1,9 @@
-Pit Stop
+Windstorm Pit Stop
 Copyright 2026 The Windstorm (Grant Whitmer)
 
 The compact-at-a-break hook and the restart-at-the-break helper were first
 built and run by Windy Boss, an AI agent in The Windstorm's Windy fleet, on a
 Mac mini in November 2026, then ported to Linux and packaged here.
 
-"Pit Stop" and "The Windstorm" are names of The Windstorm; the Apache License
+"Windstorm Pit Stop" and "The Windstorm" are names of The Windstorm; the Apache License
 2.0 does not grant permission to use them as trademarks (section 6).

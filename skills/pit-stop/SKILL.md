@@ -1,9 +1,9 @@
 ---
 name: pit-stop
-description: Pit Stop, a context optimizer for Claude Code. Use when the user says "pit stop", "/pit-stop report", "/pit-stop optimize", "/pit-stop reading" or "/pit-stop restart", or asks to tune when a session auto-compacts, pick a compaction point (300K/500K/700K), check why sessions are not on the newest Claude Code after compacting, check or trim MEMORY.md / CLAUDE.md so they load fully, or suggest a model and effort for a session's job.
+description: Windstorm Pit Stop, a context optimizer for Claude Code. Use when the user says "pit stop", "/pit-stop report", "/pit-stop optimize", "/pit-stop reading" or "/pit-stop restart", or asks to tune when a session auto-compacts, pick a compaction point (300K/500K/700K), check why sessions are not on the newest Claude Code after compacting, check or trim MEMORY.md / CLAUDE.md so they load fully, or suggest a model and effort for a session's job.
 ---
 
-# Pit Stop
+# Windstorm Pit Stop
 
 A race car stops at a pit stop, never mid-corner. A Claude Code session does the same: at a break between tasks it refuels (compacts), changes tyres (moves to the newest Claude Code), and gets a clean windshield (re-reads only short, relevant instructions).
 
