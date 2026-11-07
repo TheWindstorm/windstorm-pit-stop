@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/hooks/precompact_wait_for_break.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,119 @@
+import json
+import os
+import subprocess
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HOOK = os.path.join(ROOT, "hooks", "precompact_wait_for_break.py")
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
+
+
+def usage(n):
+    return {"input_tokens": 10, "cache_read_input_tokens": n, "output_tokens": 5}
+
+
+def transcript(tmp, name, entries):
+    p = tmp / f"{name}.jsonl"
+    p.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+    return str(p)
+
+
+def a(kind, n=200000):
+    return {"type": "assistant", "message": {"content": [{"type": kind}], "usage": usage(n)}}
+
+
+def run_hook(payload, tmp, env_extra=None):
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp / "cfg"))
+    env.pop("PIT_STOP_CEILING", None)
+    env.update(env_extra or {})
+    r = subprocess.run([sys.executable, "-I", HOOK], input=payload if isinstance(payload, str) else json.dumps(payload),
+                       capture_output=True, text=True, env=env)
+    return r.returncode, r.stdout
+
+
+def test_hook_decisions(tmp_path):
+    tr_result = {"type": "user", "message": {"content": [{"type": "tool_result"}]}}
+    prompt = {"type": "user", "message": {"content": "next task"}}
+    cases = [
+        ("mid_result", [a("tool_use"), tr_result], {}, 2),
+        ("tool_asked", [a("tool_use")], {}, 2),
+        ("new_prompt", [a("text"), prompt], {}, 0),
+        ("turn_ended", [a("text")], {}, 0),
+        ("env_ceiling", [a("tool_use", 800000)], {"PIT_STOP_CEILING": "700000"}, 0),
+        ("under_env_ceiling", [a("tool_use", 96000)], {"PIT_STOP_CEILING": "700000"}, 2),
+    ]
+    for name, entries, env, want in cases:
+        p = transcript(tmp_path, name, entries)
+        code, out = run_hook({"trigger": "auto", "transcript_path": p, "session_id": name}, tmp_path, env)
+        assert code == want, name
+        assert out == "", name
+
+
+def test_hook_always_allows_manual_bad_and_missing(tmp_path):
+    p = transcript(tmp_path, "m", [a("tool_use")])
+    assert run_hook({"trigger": "manual", "transcript_path": p}, tmp_path) == (0, "")
+    assert run_hook({"trigger": "auto", "transcript_path": str(tmp_path / "none.jsonl")}, tmp_path) == (0, "")
+    assert run_hook("not json", tmp_path) == (0, "")
+
+
+def test_hook_default_flex_ceiling(tmp_path):
+    # no configured ceiling: first hold at 160K -> ceiling 176K; 170K holds, 180K allows
+    p1 = transcript(tmp_path, "f1", [a("tool_use", 160000)])
+    assert run_hook({"trigger": "auto", "transcript_path": p1, "session_id": "flex"}, tmp_path)[0] == 2
+    p2 = transcript(tmp_path, "f2", [a("tool_use", 170000)])
+    assert run_hook({"trigger": "auto", "transcript_path": p2, "session_id": "flex"}, tmp_path)[0] == 2
+    p3 = transcript(tmp_path, "f3", [a("tool_use", 180000)])
+    assert run_hook({"trigger": "auto", "transcript_path": p3, "session_id": "flex"}, tmp_path)[0] == 0
+
+
+def test_hook_profile_ceiling(tmp_path):
+    proj = tmp_path / "proj"
+    (proj / ".claude").mkdir(parents=True)
+    (proj / ".claude" / "pit-stop.json").write_text(json.dumps({"ceiling": 300000}))
+    p = transcript(tmp_path, "pc", [a("tool_use", 310000)])
+    assert run_hook({"trigger": "auto", "transcript_path": p, "session_id": "pc", "cwd": str(proj)}, tmp_path)[0] == 0
+
+
+def test_reading_trim_keeps_every_link():
+    import reading_check as rc
+    lines = ["- READ FIRST: free text that must stay exactly as it is."]
+    for i in range(120):
+        lines.append(f"- [Mind rule {i}](feedback_mind_rule{i}.md) — hook text number {i} " + "x" * 150)
+    for i in range(90):
+        lines.append(f"- [Misc {i}](reference_item{i}_x.md) — a reference")
+    lines.append("- [Mind rule 3](feedback_mind_rule3.md) — duplicate")
+    text = "\n".join(lines) + "\n"
+    new = rc.trim(text)
+    before = {m[1] for m in rc.LINK.findall(text)}
+    after = {m[1] for m in rc.LINK.findall(new)}
+    assert before == after
+    assert lines[0] in new
+    assert new.count("\n") < text.count("\n")
+
+
+def test_optimizer_recommends_within_bounds(tmp_path, monkeypatch):
+    import pitstop_common as pc
+    import optimize as op
+    monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
+    proj = tmp_path / "work"
+    proj.mkdir()
+    d = tmp_path / "projects" / pc.project_key(str(proj))
+    d.mkdir(parents=True)
+    ents = []
+    t = 0
+    for cycle in range(3):
+        for i in range(20):
+            t += 60
+            ts = f"2026-11-0{1 + cycle}T10:{i:02d}:00Z"
+            ents.append({"type": "user", "message": {"content": "do it"}, "timestamp": ts})
+            ents.append({"type": "assistant", "timestamp": ts, "message": {
+                "content": [{"type": "tool_use", "name": "Read", "input": {"file_path": f"/f{i % 5}.py"}}],
+                "usage": usage(300000 + i * 10000)}})
+        ents.append({"type": "system", "subtype": "compact_boundary", "timestamp": ts})
+    (d / "s1.jsonl").write_text("\n".join(json.dumps(e) for e in ents) + "\n")
+    m = op.analyze(str(proj), None)
+    assert m["compactions"] == 3
+    rec = op.recommend(m)
+    assert 300000 <= rec["window"] <= 700000
+    assert rec["window"] < rec["ceiling"] <= 850000
+    assert rec["model_effort_suggestions"]

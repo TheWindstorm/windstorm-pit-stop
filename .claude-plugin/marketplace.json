@@ -1,0 +1,14 @@
+{
+  "name": "thewindstorm",
+  "owner": {
+    "name": "The Windstorm",
+    "url": "https://github.com/TheWindstorm"
+  },
+  "plugins": [
+    {
+      "name": "pit-stop",
+      "source": "./",
+      "description": "A context optimizer for Claude Code: compact at a break, restart at a break, clean reload, per-folder tuning."
+    }
+  ]
+}
