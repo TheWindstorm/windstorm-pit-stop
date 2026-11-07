@@ -15,7 +15,7 @@ A race car never stops mid-corner. It waits for the pit stop, then refuels, chan
 /plugin install pit-stop@thewindstorm
 ```
 
-Requirements: Claude Code, plus `python3` (3.8+, standard library only). Fleet mode also needs tmux on Linux or macOS.
+Requirements: Claude Code, plus `python3` (3.10+, standard library only). Fleet mode also needs tmux on Linux or macOS.
 
 ## What you get
 
