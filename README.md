@@ -4,10 +4,10 @@
 
 <img src=".claude-plugin/icon.png" width="120" alt="The Windstorm">
 
-A race car never stops mid-corner. It waits for the pit stop, then refuels, changes tyres and goes back out. Pit Stop gives Claude Code sessions the same rhythm (the command is `/pit-stop`). At a break between tasks, and never in the middle of one, a session:
+A race car never stops mid-corner. It waits for the pit stop, then refuels, changes tires and goes back out. Pit Stop gives Claude Code sessions the same rhythm (the command is `/pit-stop`). At a break between tasks, and never in the middle of one, a session:
 
 1. **Refuels.** It compacts its context at a break, at a compaction point tuned to that folder's work.
-2. **Changes tyres.** It moves onto the newest installed Claude Code. *(Optional fleet mode.)*
+2. **Changes tires.** It moves onto the newest installed Claude Code. *(Optional fleet mode.)*
 3. **Gets a clean windshield.** After every compaction it re-reads only short, relevant instructions and memory that load in full.
 
 ## Install

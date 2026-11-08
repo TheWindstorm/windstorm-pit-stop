@@ -5,7 +5,7 @@ description: Windstorm Pit Stop, a context optimizer for Claude Code. Use when t
 
 # Windstorm Pit Stop
 
-A race car stops at a pit stop, never mid-corner. A Claude Code session does the same: at a break between tasks it refuels (compacts), changes tyres (moves to the newest Claude Code), and gets a clean windshield (re-reads only short, relevant instructions).
+A race car stops at a pit stop, never mid-corner. A Claude Code session does the same: at a break between tasks it refuels (compacts), changes tires (moves to the newest Claude Code), and gets a clean windshield (re-reads only short, relevant instructions).
 
 The scripts live in this plugin's `scripts/` folder, two levels above this skill's base directory (`<base>/../../scripts/`). They use only the Python standard library, read local files only, and print counts, never message text. Run them with `python3 -I`.
 
