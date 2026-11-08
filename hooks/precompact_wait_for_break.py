@@ -18,8 +18,13 @@ Rules:
     in order: env PIT_STOP_CEILING; "ceiling" in <project>/.claude/pit-stop.json
     (written by /pit-stop optimize); else 110% of the context size at the
     first hold of this compaction (a safe default for any model size).
+    Any configured ceiling is CLAMPED to at most 1.5x the first hold and 95% of
+    the model's context size (1M if the first hold is over 200K, else 200K), so
+    a project file shipped in a cloned repo can never hold compaction until the
+    context overflows.
   - anything unexpected (no transcript, bad JSON, any error) -> go ahead
 One log line per decision, counts only: ~/.claude/pit-stop/precompact.log
+(rotated to precompact.log.1 at 5 MB).
 """
 import datetime as dt
 import json
@@ -31,11 +36,16 @@ CLAUDE_DIR = os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude")
 STATE = os.path.join(CLAUDE_DIR, "pit-stop")
 LOG = os.path.join(STATE, "precompact.log")
 DEFAULT_FLEX = float(os.environ.get("PIT_STOP_DEFAULT_FLEX", "1.10"))
+MAX_FLEX = 1.5          # a configured ceiling is at most 1.5x the first hold
+MAX_SHARE = 0.95        # ... and at most 95% of the model's context size
+LOG_MAX_BYTES = 5_000_000
 
 
 def log(session, trigger, tokens, decision, why):
     try:
         os.makedirs(STATE, exist_ok=True)
+        if os.path.exists(LOG) and os.path.getsize(LOG) > LOG_MAX_BYTES:
+            os.replace(LOG, LOG + ".1")
         t = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         with open(LOG, "a") as f:
             f.write(f"{t} session={str(session)[:8]} trigger={trigger} tokens={tokens} {decision} {why}\n")
@@ -87,7 +97,26 @@ def hold_state_path(session):
     return os.path.join(STATE, "holds", safe)
 
 
-def ceiling_for(payload, tokens):
+def first_hold(payload, tokens):
+    """Context size at this compaction's first hold, kept per session until the
+    next ALLOW. A stale file left by a crash can only LOWER the next ceiling
+    (it holds a smaller, older size), which is the safe direction."""
+    p = hold_state_path(payload.get("session_id"))
+    try:
+        with open(p) as f:
+            return int(f.read().strip())
+    except Exception:
+        pass
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w") as f:
+            f.write(str(tokens))
+        return tokens
+    except Exception:
+        return None
+
+
+def configured_ceiling(payload):
     env = os.environ.get("PIT_STOP_CEILING")
     if env and env.isdigit():
         return int(env), "env"
@@ -95,25 +124,27 @@ def ceiling_for(payload, tokens):
     prof = os.path.join(cwd, ".claude", "pit-stop.json") if cwd else ""
     if prof and os.path.exists(prof):
         try:
-            c = int(json.load(open(prof)).get("ceiling") or 0)
+            with open(prof) as f:
+                c = int(json.load(f).get("ceiling") or 0)
             if c > 0:
                 return c, "profile"
         except Exception:
             pass
-    # default: 110% of the context size at this compaction's first hold
-    p = hold_state_path(payload.get("session_id"))
-    first = None
-    try:
-        first = int(open(p).read().strip())
-    except Exception:
-        try:
-            os.makedirs(os.path.dirname(p), exist_ok=True)
-            with open(p, "w") as f:
-                f.write(str(tokens))
-            first = tokens
-        except Exception:
-            return tokens, "default-unwritable"  # cannot track: never hold
-    return int(first * DEFAULT_FLEX), "default"
+    return None, None
+
+
+def ceiling_for(payload, tokens):
+    first = first_hold(payload, tokens)
+    if first is None:
+        return tokens, "unwritable"  # cannot track holds: never hold
+    limit = 1_000_000 if first > 200_000 else 200_000
+    cap = int(min(first * MAX_FLEX, limit * MAX_SHARE))
+    c, src = configured_ceiling(payload)
+    if c is None:
+        return min(int(first * DEFAULT_FLEX), cap), "default"
+    if c > cap:
+        return cap, f"{src}-clamped"
+    return c, src
 
 
 def clear_hold(session):

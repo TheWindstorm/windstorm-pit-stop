@@ -49,8 +49,10 @@ These are heuristics, not guarantees. Model and effort changes affect quality an
 
 - **Fails safe.** The hook allows compaction on any error. The restart helper treats anything it cannot read as busy and skips it.
 - **Never mid-task.** It never restarts a session with text in its input box, a dialog open, work running, a large context, or background jobs it hasn't agreed to stop. Claude Code itself refuses `/restart` while background work runs.
+- **Checks before Enter.** After typing, the restart helper presses Enter only if the input box holds exactly what it typed; otherwise it clears the line and skips.
+- **Capped ceilings.** A ceiling from a project file or the environment is clamped to 1.5x the first hold and 95% of the model's context size, so a cloned repo cannot hold compaction until the context overflows.
 - **Backups first.** Every file is backed up before it is written. Only the keys Pit Stop owns are changed.
-- **Local only.** No network calls. Logs hold counts only.
+- **Local only.** No network calls. Logs hold counts only and rotate at 5 MB.
 
 Fleet mode relies on Claude Code's local session registry (`~/.claude/sessions/`), which is not a public interface. If it changes, sessions read as busy and nothing restarts.
 

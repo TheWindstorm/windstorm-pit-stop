@@ -66,6 +66,8 @@ def ts():
 
 
 def log(msg):
+    if os.path.exists(LOG) and os.path.getsize(LOG) > 5_000_000:
+        os.replace(LOG, LOG + ".1")  # keep one old log; never grow without bound
     with open(LOG, "a") as f:
         f.write(f"{ts()} {msg}\n")
     print(f"{ts()} {msg}")
@@ -107,12 +109,28 @@ def screen(target, escapes=False):
     return rows[-40:]
 
 
+def input_box_text(rows):
+    """The text in the input box: from the last prompt row down to the box's
+    bottom border, dimmed suggestion text removed, as one string."""
+    rows = [ANSI.sub("", DIM_SEG.sub("", l.replace("\u00a0", " ").replace("\u202f", " "))) for l in rows]
+    starts = [i for i, l in enumerate(rows) if l.startswith(PROMPT)]
+    if not starts:
+        return None
+    out = []
+    for l in rows[starts[-1]:]:
+        if out and re.fullmatch(r"\s*[\u2500\u2501-]{10,}.*", l):
+            break
+        out.append(l)
+    return " ".join(out)[len(PROMPT):].strip()
+
+
+def same_text(a, b):
+    """Equal once wrapping and spacing are ignored (the pane wraps long lines)."""
+    return a is not None and "".join(a.split()) == "".join(b.split())
+
+
 def input_empty(target):
-    rows = [l.replace(" ", " ").replace(" ", " ") for l in screen(target, escapes=True)]
-    prompts = [l for l in rows if ANSI.sub("", l).startswith(PROMPT)]
-    if not prompts:
-        return False
-    return bool(re.fullmatch(PROMPT + r"\s*", ANSI.sub("", DIM_SEG.sub("", prompts[-1]))))
+    return input_box_text(screen(target, escapes=True)) == ""
 
 
 def screen_busy(target):
@@ -129,6 +147,12 @@ def type_line(target, text):
         return True
     tmux("send-keys", "-t", target, "-l", text)
     time.sleep(1)
+    # Someone may have typed in that second: press Enter only if the box holds
+    # EXACTLY our text; otherwise clear the line and skip.
+    if not same_text(input_box_text(screen(target, escapes=True)), text):
+        tmux("send-keys", "-t", target, "C-u")
+        log(f"{target}: input box did not match the typed text; cleared it, skipped, no Enter")
+        return False
     tmux("send-keys", "-t", target, "Enter")
     return True
 

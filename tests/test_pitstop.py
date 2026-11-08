@@ -117,3 +117,46 @@ def test_optimizer_recommends_within_bounds(tmp_path, monkeypatch):
     assert 300000 <= rec["window"] <= 700000
     assert rec["window"] < rec["ceiling"] <= 850000
     assert rec["model_effort_suggestions"]
+
+
+def test_hook_clamps_a_huge_project_ceiling(tmp_path):
+    # a cloned repo ships ceiling 10M: clamped to 1.5x the first hold (and 95% of the window)
+    proj = tmp_path / "proj"
+    (proj / ".claude").mkdir(parents=True)
+    (proj / ".claude" / "pit-stop.json").write_text(json.dumps({"ceiling": 10_000_000}))
+    pay = {"trigger": "auto", "session_id": "clamp", "cwd": str(proj)}
+    p1 = transcript(tmp_path, "c1", [a("tool_use", 160000)])
+    assert run_hook(dict(pay, transcript_path=p1), tmp_path)[0] == 2      # first hold at 160K
+    p2 = transcript(tmp_path, "c2", [a("tool_use", 189000)])
+    assert run_hook(dict(pay, transcript_path=p2), tmp_path)[0] == 2      # cap = min(240K, 190K)
+    p3 = transcript(tmp_path, "c3", [a("tool_use", 190000)])
+    assert run_hook(dict(pay, transcript_path=p3), tmp_path)[0] == 0      # never past 190K
+    log = (tmp_path / "cfg" / "pit-stop" / "precompact.log").read_text()
+    assert "profile-clamped" in log
+
+
+def test_hook_log_rotates(tmp_path):
+    state = tmp_path / "cfg" / "pit-stop"
+    state.mkdir(parents=True)
+    (state / "precompact.log").write_text("x" * 5_000_001)
+    run_hook({"trigger": "manual"}, tmp_path)
+    assert (state / "precompact.log.1").stat().st_size == 5_000_001
+    assert (state / "precompact.log").stat().st_size < 1000
+
+
+def test_restart_helper_reads_the_input_box(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    import importlib
+    import pitstop_common
+    importlib.reload(pitstop_common)
+    import restart_at_break as rab
+    importlib.reload(rab)
+    border = "─" * 40
+    dim = "\x1b[2mTry \"fix the tests\"\x1b[0m"
+    assert rab.input_box_text([border, "❯ " + dim, border, "  status line"]) == ""
+    text = "[AUTOMATED note] " + "word " * 30
+    wrapped = [border, "❯ " + text[:60], "  " + text[60:120], "  " + text[120:], border, "  status"]
+    assert rab.same_text(rab.input_box_text(wrapped), text)
+    mixed = [border, "❯ " + text[:60] + "hello", "  " + text[60:], border]
+    assert not rab.same_text(rab.input_box_text(mixed), text)
+    assert rab.input_box_text(["no prompt here"]) is None
