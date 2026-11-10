@@ -31,6 +31,10 @@ A session is restarted only when ALL hold:
   - this helper has not restarted it in the last 20 h.
 Every skipped session gets one log line saying WHY (skip: <reason>), so a
 session stuck on an old version is visible in restart.log.
+If the input box does not hold exactly the typed text, the helper clears it,
+presses no Enter and backs off that session: 30 min, then doubling per miss in
+a row, at most 12 h (mismatch_backoff, mismatch_backoff_max). A success clears
+the count. The log gives the lengths read and typed (never the text read).
 At most max_per_run restarts per run (default 1). After /restart it confirms
 the SAME session id on the newest version, then types one note telling the
 session to re-arm its jobs. Same conversation, model and effort; scheduled
@@ -44,6 +48,7 @@ Config (optional) ~/.claude/pit-stop/restart.json:
    "deny_names": [], "deny_paths": [],
    "ctx_max": 100000, "min_idle": 300, "max_per_run": 1,
    "compact_window": 1800, "min_idle_after_compact": 60, "cold_idle": 3600,
+   "mismatch_backoff": 1800, "mismatch_backoff_max": 43200,
    "notify_command": null}         # e.g. ["notify-send", "pit-stop"]; gets the message as last arg
 Relies on Claude Code's local session registry (~/.claude/sessions/*.json),
 which is not a public interface: if it changes, sessions read as busy and
@@ -64,7 +69,8 @@ import pitstop_common as pc  # noqa: E402
 LIVE = "--live" in sys.argv
 CFG = {"tmux_socket": None, "allow_names": [], "deny_names": [], "deny_paths": [],
        "ctx_max": 100000, "min_idle": 300, "max_per_run": 1, "notify_command": None,
-       "compact_window": 1800, "min_idle_after_compact": 60, "cold_idle": 3600}
+       "compact_window": 1800, "min_idle_after_compact": 60, "cold_idle": 3600,
+       "mismatch_backoff": 1800, "mismatch_backoff_max": 43200}
 CFG.update(pc.read_json(os.path.join(pc.STATE_DIR, "restart.json"), {}) or {})
 BASE = os.path.join(pc.STATE_DIR, "restart")
 for d in ("state", "ok"):
@@ -153,22 +159,46 @@ def screen_busy(target):
 
 
 def type_line(target, text):
+    """Type TEXT and press Enter. Returns (sent, why): why is "busy" when the box
+    was not empty or a dialog showed, "mismatch" when the box did not hold
+    exactly our text after typing (then it is cleared and no Enter is pressed)."""
     if not input_empty(target) or screen_busy(target):
         log(f"{target}: input not empty or busy at send time; skipped")
-        return False
+        return False, "busy"
     if not LIVE:
         log(f"DRY would type into {target}: {text[:90]}")
-        return True
+        return True, ""
     tmux("send-keys", "-t", target, "-l", text)
     time.sleep(1)
     # Someone may have typed in that second: press Enter only if the box holds
     # EXACTLY our text; otherwise clear the line and skip.
-    if not same_text(input_box_text(screen(target, escapes=True)), text):
+    got = input_box_text(screen(target, escapes=True))
+    if not same_text(got, text):
         tmux("send-keys", "-t", target, "C-u")
-        log(f"{target}: input box did not match the typed text; cleared it, skipped, no Enter")
-        return False
+        read = "no input box found" if got is None else f"read {len(''.join(got.split()))} chars"
+        log(f"{target}: input box did not match the typed text ({read}, typed {len(''.join(text.split()))}); "
+            f"cleared it, skipped, no Enter")
+        return False, "mismatch"
     tmux("send-keys", "-t", target, "Enter")
-    return True
+    return True, ""
+
+
+def mismatch_wait(n, cfg):
+    """Seconds to leave a session alone after N typing mismatches in a row."""
+    return min(cfg["mismatch_backoff"] * 2 ** max(n - 1, 0), cfg["mismatch_backoff_max"])
+
+
+def note_typing(mmf, sent, why, now):
+    """Keep the mismatch count for one session: +1 on a mismatch, cleared on a send."""
+    if not LIVE:
+        return
+    if sent:
+        if os.path.exists(mmf):
+            os.remove(mmf)
+    elif why == "mismatch":
+        n = (pc.read_json(mmf, {}) or {}).get("n", 0) + 1
+        with open(mmf, "w") as f:
+            json.dump({"n": n, "at": now}, f)
 
 
 def notify(msg):
@@ -279,6 +309,15 @@ def main():
         if os.path.exists(lastf) and now - float(open(lastf).read()) < 72000:
             log(f"{name}: {ver}->{newest} skip: restarted by this helper < 20 h ago")
             continue
+        mmf = os.path.join(BASE, "state", key + ".mismatch")
+        mm = pc.read_json(mmf, {}) or {}
+        if mm.get("n"):
+            wait = mismatch_wait(mm["n"], CFG)
+            left = wait - (now - float(mm.get("at", 0)))
+            if left > 0:
+                log(f"{name}: {ver}->{newest} skip: typed text did not match {mm['n']} time(s) in a row; "
+                    f"backing off, next try in {int(left)}s")
+                continue
         status = s.get("status")
         st_age = now - (s.get("statusUpdatedAt") or now * 1000) / 1000
         ctx, idle = ctx_and_idle(s)
@@ -301,12 +340,14 @@ def main():
             if os.path.exists(okf):
                 log(f"{name}: re-arm list written; waiting for it to stop its background jobs")
             elif not os.path.exists(askf) or now - float(open(askf).read()) >= 43200:
-                if type_line(target, f"[AUTOMATED pit-stop restart, not your user] Claude Code {newest} is installed; you run {ver}. "
+                sent, how = type_line(target, f"[AUTOMATED pit-stop restart, not your user] Claude Code {newest} is installed; you run {ver}. "
                              f"You are at a break, so a restart now is cheap, but Claude Code will not /restart while "
                              f"background jobs run. When nothing important is in progress: (1) write one line per job you "
                              f"will re-arm into {okf} (an empty file if none); (2) stop your background jobs yourself. "
                              f"The helper restarts you within 10 minutes once you are idle with no jobs and tells you to "
-                             f"re-arm. If now is a bad time, do nothing: it asks again in 12 hours. No reply needed.") and LIVE:
+                             f"re-arm. If now is a bad time, do nothing: it asks again in 12 hours. No reply needed.")
+                note_typing(mmf, sent, how, now)
+                if sent and LIVE:
                     open(askf, "w").write(str(now))
             continue
         if done >= CFG["max_per_run"]:
@@ -315,7 +356,9 @@ def main():
         if not LIVE:
             log(f"DRY would /restart {name} ({ver} -> {newest}, ctx {ctx})")
             continue
-        if not type_line(target, "/restart"):
+        sent, how = type_line(target, "/restart")
+        note_typing(mmf, sent, how, now)
+        if not sent:
             continue
         done += 1
         time.sleep(6)
