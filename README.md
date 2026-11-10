@@ -114,7 +114,8 @@ Settings live in `~/.claude/pit-stop/restart.json` (see the top of `scripts/rest
 - The restart plan as a pure function, and the helper in live mode against a faked pane: compact first then restart, cold restart with nothing typed, the ask left for the Stop hook, a late restart still getting its start-your-jobs note, stale lists put away, nothing typed during a typing backoff.
 - The helper's dry run against a live fleet of 94 sessions (it types and writes nothing).
 - `/restart` on Claude Code 2.1.318 → 2.1.319 keeps the same session id, conversation, model and effort. Scheduled session crons survive. In that test the first turn after the restart read about 47K tokens from cache; do not count on that, since a new version normally rebuilds the cache from the top.
-- Not yet proven on a real machine: the 0.2.0 `/compact`-then-`/restart` sequence live in a pane, the keep-list's effect on summaries, and the launchd timer written by `/pit-stop setup`.
+- Live on one real session (Claude Code 2.1.319 → 2.1.322, 111K context, cache warm): `/compact` typed, compacted 39 s later; on the next run `/restart` typed, same session id on the newest version 12 s later, nothing typed after.
+- Not yet proven on a real machine: the keep-list's effect on summaries, the Stop-hook ask followed by a restart in a session with real background jobs, and the launchd timer written by `/pit-stop setup`.
 
 Run the tests: `python3 -m pytest tests/`. On any machine, `sh tests/smoke_hooks.sh` runs each hook's real command line in a throwaway folder and says PASS or FAIL per check (it starts no session and installs nothing).
 

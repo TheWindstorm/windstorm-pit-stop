@@ -41,6 +41,8 @@ Hardening, from an independent review of this change before it was pushed:
 - A dry run creates no folders. The systemd unit allows 10 minutes.
 - `tests/smoke_hooks.sh`: runs each hook's real command line on any machine, PASS or FAIL per check.
 
+Proved live before release on one session of a 94-session fleet: `/compact`, then `/restart` 110 s later, same session id on the newest version, nothing typed after.
+
 Docs: `/restart` needs the native macOS or Linux install and a paid plan; a new version normally rebuilds the prompt cache, so the "47K from cache" line is now marked as one test, not a promise.
 
 ## 0.1.4 (2026-11-10)
