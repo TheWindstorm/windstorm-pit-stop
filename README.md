@@ -54,7 +54,7 @@ These are heuristics, not guarantees. Model and effort changes affect quality an
 - **Backups first.** Every file is backed up before it is written. Only the keys Pit Stop owns are changed.
 - **Local only.** No network calls. Logs hold counts only and rotate at 5 MB.
 
-Schedule fleet mode every 2 to 10 minutes; the shorter the interval, the sooner it catches the break after a compaction. Fleet mode relies on Claude Code's local session registry (`~/.claude/sessions/`), which is not a public interface. If it changes, sessions read as busy and nothing restarts.
+Schedule fleet mode every 2 to 10 minutes; the shorter the interval, the sooner it catches the break after a compaction. Timers start with a bare PATH: under launchd or cron, set PATH so `tmux` is found (on macOS with Homebrew, include `/opt/homebrew/bin`), and set `tmux_socket` in `restart.json` if your sessions run on a named tmux server. Fleet mode relies on Claude Code's local session registry (`~/.claude/sessions/`), which is not a public interface. If it changes, sessions read as busy and nothing restarts.
 
 ## Tested
 
