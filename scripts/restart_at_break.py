@@ -12,31 +12,44 @@ at a break, usually right after their own compaction.
 
 A session is restarted only when ALL hold:
   - it runs an older version than the newest installed one;
-  - its context is small (< ctx_max, default 100K): it just compacted, so the
-    one re-read after /restart costs little (often nothing: the prompt cache
-    is still warm when the restart follows the last turn within the hour);
-  - Claude Code reports it idle for >= min_idle seconds, its transcript has
-    not moved for as long, the input box is empty (a dimmed suggestion counts
-    as empty), and no dialog or work is on screen;
+  - it is at a cheap, safe break, which is ONE of these (checked in order):
+      (a) it COMPACTED in the last compact_window seconds (default 1800) and has
+          been idle >= min_idle_after_compact seconds (default 60). A compaction
+          happens only at a break, and the context is as small as it will get,
+          so this is the best moment even when the context is still large;
+      (b) its context is small (< ctx_max, default 100K) and it has been idle
+          >= min_idle seconds (default 300);
+      (c) it has been idle >= cold_idle seconds (default 3600): the prompt cache
+          is cold anyway, so its next turn re-reads everything with or without
+          a restart, and the restart costs almost nothing extra;
+  - Claude Code reports it idle, its transcript has not moved for that long,
+    the input box is empty (a dimmed suggestion counts as empty), and no dialog
+    or work is on screen;
   - it has no background jobs. Claude Code refuses /restart while background
     work runs, so the helper types ONE note asking the session to write the
     jobs it will re-arm into a file and stop them itself; it asks again in 12 h;
   - this helper has not restarted it in the last 20 h.
+Every skipped session gets one log line saying WHY (skip: <reason>), so a
+session stuck on an old version is visible in restart.log.
 At most max_per_run restarts per run (default 1). After /restart it confirms
 the SAME session id on the newest version, then types one note telling the
 session to re-arm its jobs. Same conversation, model and effort; scheduled
 session crons survive /restart (tested on Claude Code 2.1.318 -> 2.1.319).
+Compaction itself never changes the version: only a restart does. Run this
+every 2-10 minutes; the shorter the interval, the sooner (a) catches a break.
 
 Config (optional) ~/.claude/pit-stop/restart.json:
   {"tmux_socket": null,            # tmux -L name; null = default server
    "allow_names": [],              # if set, ONLY these session names
    "deny_names": [], "deny_paths": [],
    "ctx_max": 100000, "min_idle": 300, "max_per_run": 1,
+   "compact_window": 1800, "min_idle_after_compact": 60, "cold_idle": 3600,
    "notify_command": null}         # e.g. ["notify-send", "pit-stop"]; gets the message as last arg
 Relies on Claude Code's local session registry (~/.claude/sessions/*.json),
 which is not a public interface: if it changes, sessions read as busy and
 nothing restarts (fail closed).
 """
+import calendar
 import glob
 import json
 import os
@@ -50,7 +63,8 @@ import pitstop_common as pc  # noqa: E402
 
 LIVE = "--live" in sys.argv
 CFG = {"tmux_socket": None, "allow_names": [], "deny_names": [], "deny_paths": [],
-       "ctx_max": 100000, "min_idle": 300, "max_per_run": 1, "notify_command": None}
+       "ctx_max": 100000, "min_idle": 300, "max_per_run": 1, "notify_command": None,
+       "compact_window": 1800, "min_idle_after_compact": 60, "cold_idle": 3600}
 CFG.update(pc.read_json(os.path.join(pc.STATE_DIR, "restart.json"), {}) or {})
 BASE = os.path.join(pc.STATE_DIR, "restart")
 for d in ("state", "ok"):
@@ -162,8 +176,12 @@ def notify(msg):
         subprocess.run(list(CFG["notify_command"]) + [msg], timeout=30)
 
 
+def transcript_path(s):
+    return os.path.join(pc.project_dir(s.get("cwd") or ""), (s.get("sessionId") or "") + ".jsonl")
+
+
 def ctx_and_idle(s):
-    p = os.path.join(pc.project_dir(s.get("cwd") or ""), (s.get("sessionId") or "") + ".jsonl")
+    p = transcript_path(s)
     if not os.path.exists(p):
         return None, -1
     idle = time.time() - os.path.getmtime(p)
@@ -174,6 +192,61 @@ def ctx_and_idle(s):
         elif e.get("type") == "assistant" and not e.get("isSidechain") and pc.usage_total(e):
             ctx = pc.usage_total(e)
     return ctx, idle
+
+
+def utc_ts(s):
+    """'2026-11-10T12:38:07.398Z' -> epoch seconds, as UTC (no local-time or DST guess)."""
+    try:
+        return calendar.timegm(time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S"))
+    except Exception:
+        return None
+
+
+def last_compact_age(path, tail_bytes=64_000_000, now=None):
+    """Seconds since the transcript's last compaction, or None. Scans the raw
+    bytes for the marker first (big transcripts), so only a few lines are parsed."""
+    if not path or not os.path.exists(path):
+        return None
+    size = os.path.getsize(path)
+    with open(path, "rb") as f:
+        if size > tail_bytes:
+            f.seek(size - tail_bytes)
+            f.readline()
+        last = None
+        for raw in f:
+            if b"compact_boundary" not in raw:
+                continue
+            try:
+                e = json.loads(raw)
+            except Exception:
+                continue
+            if pc.is_compact_boundary(e):
+                t = utc_ts(e.get("timestamp"))
+                if t:
+                    last = t
+    return None if last is None else (now or time.time()) - last
+
+
+def at_a_break(status, idle, ctx, compact_age, cfg):
+    """(True, why) when a restart is cheap and safe by the rules in the docstring,
+    else (False, the reason it is not). Pure: no reads, so it is easy to test."""
+    if status not in ("idle", "shell"):
+        return False, f"status={status} (working)"
+    if idle < 0:
+        return False, "no transcript found"
+    if compact_age is not None and compact_age <= cfg["compact_window"]:
+        if idle >= cfg["min_idle_after_compact"]:
+            return True, f"compacted {int(compact_age)}s ago, idle {int(idle)}s"
+        return False, f"compacted {int(compact_age)}s ago; idle {int(idle)}s < {cfg['min_idle_after_compact']}s"
+    if ctx is not None and ctx < cfg["ctx_max"] and idle >= cfg["min_idle"]:
+        return True, f"small context {ctx}, idle {int(idle)}s"
+    if idle >= cfg["cold_idle"]:
+        return True, f"idle {int(idle)}s >= cold_idle (cache cold anyway)"
+    if ctx is None:
+        return False, "context unreadable"
+    return False, (f"idle {int(idle)}s, context {ctx}"
+                   f" (needs: a compaction in the last {cfg['compact_window']}s, or context < {cfg['ctx_max']}"
+                   f" and idle >= {cfg['min_idle']}s, or idle >= {cfg['cold_idle']}s)")
 
 
 def main():
@@ -204,23 +277,32 @@ def main():
         key = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
         lastf = os.path.join(BASE, "state", key + ".last")
         if os.path.exists(lastf) and now - float(open(lastf).read()) < 72000:
+            log(f"{name}: {ver}->{newest} skip: restarted by this helper < 20 h ago")
             continue
         status = s.get("status")
         st_age = now - (s.get("statusUpdatedAt") or now * 1000) / 1000
         ctx, idle = ctx_and_idle(s)
+        idle = min(st_age, idle) if idle >= 0 else idle
+        cage = last_compact_age(transcript_path(s), now=now)
         okf = os.path.join(BASE, "ok", key)
-        log(f"{name}: {ver}->{newest} status={status} idle={int(min(st_age, idle))}s ctx={ctx}")
-        if status not in ("idle", "shell") or min(st_age, idle) < CFG["min_idle"]:
+        ok_break, why = at_a_break(status, idle, ctx, cage, CFG)
+        if not ok_break:
+            log(f"{name}: {ver}->{newest} skip: {why}")
             continue
-        if ctx is None or ctx >= CFG["ctx_max"] or not input_empty(target) or screen_busy(target):
+        if not input_empty(target):
+            log(f"{name}: {ver}->{newest} skip: text in the input box")
             continue
+        if screen_busy(target):
+            log(f"{name}: {ver}->{newest} skip: a dialog or work on screen")
+            continue
+        log(f"{name}: {ver}->{newest} at a break: {why}")
         if status == "shell":
             askf = os.path.join(BASE, "state", key + ".asked")
             if os.path.exists(okf):
                 log(f"{name}: re-arm list written; waiting for it to stop its background jobs")
             elif not os.path.exists(askf) or now - float(open(askf).read()) >= 43200:
                 if type_line(target, f"[AUTOMATED pit-stop restart, not your user] Claude Code {newest} is installed; you run {ver}. "
-                             f"Your context is small, so a restart now is cheap, but Claude Code will not /restart while "
+                             f"You are at a break, so a restart now is cheap, but Claude Code will not /restart while "
                              f"background jobs run. When nothing important is in progress: (1) write one line per job you "
                              f"will re-arm into {okf} (an empty file if none); (2) stop your background jobs yourself. "
                              f"The helper restarts you within 10 minutes once you are idle with no jobs and tells you to "
