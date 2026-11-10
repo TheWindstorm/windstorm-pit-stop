@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.4 (2026-11-10)
+- Windows: the compact hook now runs `python` when `python3` is not a real interpreter (on Windows `python3` can be the Microsoft Store stub, which only prints a message). The hook's own exit code still passes through unchanged (2 = hold the compaction). Tested with a stub `python3` on a POSIX shell; a run on a real Windows machine is still to be recorded.
+- `/pit-stop reading` knows the second limit: Claude Code stops reading `MEMORY.md` at about 24 KB as well as at 200 lines. The report says CUT OFF or "near the limit" for either, and `--trim` refuses a result over 24 KB.
+- `--trim` groups memories named with hyphens (`feedback-<topic>-...`) the same way as the underscore style (`feedback_<topic>_...`).
+
 ## 0.1.3 (2026-11-10)
 Restart helper: back off after a typing mismatch (found on Veron by its HERDR Boss: one pane got /restart typed and cleared 5 runs in a row, every 2 minutes, and each typing reset the session's idle clock):
 - After the input box fails to match the typed text, that session is left alone for 30 minutes, then 1 h, 2 h... at most 12 h per miss in a row (`mismatch_backoff` 1800, `mismatch_backoff_max` 43200). A successful send clears the count; a busy screen does not count as a miss.

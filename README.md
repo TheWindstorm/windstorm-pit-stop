@@ -17,7 +17,7 @@ A race car never stops mid-corner. It waits for the pit stop, then refuels, chan
 /plugin install windstorm-pit-stop@thewindstorm
 ```
 
-Requirements: Claude Code, plus `python3` (3.10+, standard library only). Fleet mode also needs tmux on Linux or macOS.
+Requirements: Claude Code, plus Python 3.10+ (standard library only) as `python3`, or as `python` where `python3` is not a real interpreter (Windows, where `python3` can be the Microsoft Store stub: the hook then runs `python`). The hook command needs a POSIX shell, which Claude Code uses on macOS, Linux and Windows with Git Bash. Fleet mode also needs tmux on Linux or macOS.
 
 ## What you get
 
@@ -25,7 +25,7 @@ Requirements: Claude Code, plus `python3` (3.10+, standard library only). Fleet 
 |---|---|---|
 | **Compact at a break** (hook) | Holds *automatic* compaction while a tool call is in flight, and lets it run at the next break. It always allows a manual `/compact`, anything at or above a hard ceiling, and any error case. | Yes, when the plugin is enabled |
 | **`/pit-stop optimize`** | Reads a folder's own session history and recommends a compaction point, for example 300K, 500K or 700K, plus a hard ceiling. It also suggests (never applies) a model and effort level. You apply it with your OK. | You run it |
-| **`/pit-stop reading`** | Checks the instruction files and memory index a folder's sessions re-read. Claude Code loads only the first **200 lines** of `MEMORY.md`, so an index that grows past that silently drops its newest entries. It trims without deleting anything. | You run it |
+| **`/pit-stop reading`** | Checks the instruction files and memory index a folder's sessions re-read. Claude Code loads only the first **200 lines or about 24 KB** of `MEMORY.md`, whichever comes first, so an index that grows past that silently drops its newest entries. It trims without deleting anything. | You run it |
 | **`/pit-stop report`** | One read-only line per running session: version vs newest, state, compaction point, memory size. | You run it |
 | **Restart at the break** (fleet mode) | For tmux users with many sessions. Moves sessions onto the newest Claude Code at a break, one at a time: right after a compaction (any size, once idle 60 s), or with a small context, or after an hour idle (the prompt cache is cold anyway). Sessions with background jobs are asked first. Every skip is logged with its reason. | Off; dry run unless `--live` |
 

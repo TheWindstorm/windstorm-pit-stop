@@ -3,8 +3,8 @@
 
 After every compaction a session re-reads its instruction files (CLAUDE.md)
 and its memory index (MEMORY.md). Claude Code loads only the first 200 lines
-of MEMORY.md, so an index that grows past that silently drops its NEWEST
-entries. This tool checks what a folder's sessions re-read and can trim the
+or about 24 KB of MEMORY.md, whichever comes first, so an index that grows
+past either silently drops its NEWEST entries. This tool checks what a folder's sessions re-read and can trim the
 memory index without deleting any memory file.
 
   reading_check.py [--project DIR]            report (read-only)
@@ -12,9 +12,10 @@ memory index without deleting any memory file.
   reading_check.py [--project DIR] --trim --write   write it (backup first)
 
 Trim rules: one line per memory; duplicate links dropped; memories whose file
-names share a topic (feedback_<topic>_..., project_<topic>_...) and have 3+
+names share a topic (feedback_<topic>_... or feedback-<topic>-...) and have 3+
 members are grouped on shared lines; free-text lines are kept exactly; every
-link is kept; the result must stay under 180 lines or nothing is written.
+link is kept; the result must stay under 180 lines and 24 KB or nothing is
+written.
 """
 import argparse
 import collections
@@ -77,7 +78,10 @@ def short(t, n):
 
 
 def topic(fname):
-    parts = os.path.splitext(fname)[0].split("_")
+    """The second word of a memory's file name: feedback_<topic>_x.md or feedback-<topic>-x.md.
+    Names with an underscore split on underscores (the older style); others split on hyphens."""
+    stem = os.path.splitext(os.path.basename(fname))[0]
+    parts = [p for p in stem.split("_" if "_" in stem else "-") if p]
     return parts[1] if len(parts) > 2 else None
 
 
@@ -130,8 +134,10 @@ def main():
     lines = text.count("\n")
     missing = sorted(f for f in {m[1] for m in LINK.findall(text)} if not os.path.exists(os.path.join(os.path.dirname(mi), f)))
     long_lines = sum(1 for l in text.splitlines() if len(l) > 200)
+    size = len(text.encode("utf-8"))
     state = ("CUT OFF: entries past line 200 never load" if lines > pc.MEMORY_LOAD_LINES
-             else "near the limit" if lines > pc.MEMORY_WARN_LINES else "ok")
+             else f"CUT OFF: only the first {pc.MEMORY_LOAD_BYTES / 1024:.1f} KB loads" if size > pc.MEMORY_LOAD_BYTES
+             else "near the limit" if lines > pc.MEMORY_WARN_LINES or size > pc.MEMORY_WARN_BYTES else "ok")
     all_links = {m[1] for m in LINK.findall(text)}
     print(f"Memory index: {lines} lines, {len(text)/1024:.1f} KB, {len(all_links)} memories linked, "
           f"{dupes} duplicate links, {len(missing)} links to missing files, {long_lines} lines over 200 chars -> {state}")
@@ -149,6 +155,9 @@ def main():
         return 1
     if n_new > pc.MEMORY_WARN_LINES:
         print("REFUSING: still over 180 lines after trimming; move memories that belong to other projects to those projects first.")
+        return 1
+    if len(new.encode("utf-8")) > pc.MEMORY_LOAD_BYTES:
+        print(f"REFUSING: still over {pc.MEMORY_LOAD_BYTES / 1024:.1f} KB after trimming; shorten the titles or move memories to another project first.")
         return 1
     if not a.write:
         print("(dry run; add --write to save it, a backup is made first)\n")
