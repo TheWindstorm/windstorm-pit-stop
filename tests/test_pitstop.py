@@ -211,3 +211,26 @@ def test_restart_reads_the_last_compaction_time(tmp_path, monkeypatch):
     assert rab.last_compact_age(transcript(tmp_path, "s2", [a("text")]), now=now) is None
     assert rab.last_compact_age(str(tmp_path / "missing.jsonl")) is None
     assert rab.utc_ts("2026-07-01T00:00:00Z") == 1782864000  # summer: no DST shift
+
+
+def test_restart_backs_off_after_a_typing_mismatch(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    cfg = dict(rab.CFG)
+    # 30 min, doubling per miss in a row, never more than 12 h
+    assert [rab.mismatch_wait(n, cfg) for n in (1, 2, 3)] == [1800, 3600, 7200]
+    assert rab.mismatch_wait(10, cfg) == 43200
+    monkeypatch.setattr(rab, "LIVE", True)
+    mmf = str(tmp_path / "s.mismatch")
+    rab.note_typing(mmf, False, "mismatch", 100.0)
+    rab.note_typing(mmf, False, "mismatch", 200.0)
+    assert json.load(open(mmf)) == {"n": 2, "at": 200.0}
+    # a busy screen is not a mismatch: the count stays
+    rab.note_typing(mmf, False, "busy", 300.0)
+    assert json.load(open(mmf))["n"] == 2
+    # a send clears it
+    rab.note_typing(mmf, True, "", 400.0)
+    assert not os.path.exists(mmf)
+    # dry runs never write state
+    monkeypatch.setattr(rab, "LIVE", False)
+    rab.note_typing(mmf, False, "mismatch", 500.0)
+    assert not os.path.exists(mmf)
