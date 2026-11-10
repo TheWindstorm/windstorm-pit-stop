@@ -115,7 +115,7 @@ def analyze(project, days, only=None):
             if t == "user" and not e.get("isSidechain"):
                 kinds = pc.content_kinds(e)
                 if "tool_result" in kinds:
-                    for x in (e.get("message") or {}).get("content") or []:
+                    for x in pc.message(e).get("content") or []:
                         if isinstance(x, dict) and x.get("type") == "tool_result":
                             tool_results += 1
                             errors += 1 if x.get("is_error") else 0
@@ -128,18 +128,18 @@ def analyze(project, days, only=None):
                     prompts.append(ts)
                 last_kind, last_ts = ("tool" if "tool_result" in kinds else "prompt"), ts or last_ts
             if t == "assistant" and not e.get("isSidechain"):
-                u = (e.get("message") or {}).get("usage") or {}
+                u = pc.usage(e)
                 total = pc.usage_total(e)
                 if total:
                     cur["peak"] = max(cur["peak"], total)
                     max_ctx = max(max_ctx, total)
                     cur["turns"] += 1
-                    cache_read += int(u.get("cache_read_input_tokens") or 0)
-                    cache_new += int(u.get("cache_creation_input_tokens") or 0)
-                    fresh_in += int(u.get("input_tokens") or 0)
-                    outs.append(int(u.get("output_tokens") or 0))
+                    cache_read += pc.num(u.get("cache_read_input_tokens"))
+                    cache_new += pc.num(u.get("cache_creation_input_tokens"))
+                    fresh_in += pc.num(u.get("input_tokens"))
+                    outs.append(pc.num(u.get("output_tokens")))
                     if cold_pending:  # the first answer after a cold wake-up pays for the context again
-                        cold_tokens += int(u.get("cache_creation_input_tokens") or 0) + int(u.get("input_tokens") or 0)
+                        cold_tokens += pc.num(u.get("cache_creation_input_tokens")) + pc.num(u.get("input_tokens"))
                         cold_pending = False
                 last_kind = "tool" if pc.tool_uses(e) else "reply" if "text" in pc.content_kinds(e) else last_kind
                 last_ts = ts or last_ts
@@ -147,7 +147,7 @@ def analyze(project, days, only=None):
                 cur["end"] = ts or cur["end"]
                 for tu in pc.tool_uses(e):
                     n = tu.get("name") or ""
-                    inp = tu.get("input") or {}
+                    inp = tu.get("input") if isinstance(tu.get("input"), dict) else {}
                     k = ("edit" if n in EDIT else "shell" if n in SHELL else "read" if n in READ
                          else "msg" if n in MSG else "web" if n in WEB else "other")
                     paths = []
@@ -176,6 +176,7 @@ def analyze(project, days, only=None):
             cycles.append(cur)
         drifts.extend(drift_of(touched))
     compacted = [c for c in cycles if c.get("compacted")]
+    hours = [(c["end"] - c["start"]) / 3600 for c in compacted if c["start"] and c["end"]]
     span_days = max((t_last - t_first) / 86400, 1 / 24) if t_first and t_last else None
     total_in = cache_read + cache_new + fresh_in
     ntools = sum(tools.values()) or 1
@@ -184,8 +185,7 @@ def analyze(project, days, only=None):
         "transcripts": len(files), "compactions": boundaries,
         "max_context": max_ctx,
         "median_peak_before_compaction": int(statistics.median([c["peak"] for c in compacted])) if compacted else None,
-        "median_hours_per_cycle": round(statistics.median(
-            [(c["end"] - c["start"]) / 3600 for c in compacted if c["start"] and c["end"]]), 1) if compacted else None,
+        "median_hours_per_cycle": round(statistics.median(hours), 1) if hours else None,
         "reread_after_compaction": round(rereads / reread_checks, 2) if reread_checks else None,
         "cache_reuse": round(cache_read / total_in, 2) if total_in else None,
         "median_gap_minutes": round(statistics.median(gaps) / 60, 1) if gaps else None,
@@ -244,9 +244,16 @@ def recommend(m, context_limit=None, max_steps=None):
                    f"old context is mostly noise")
     window = max(lo, min(hi, window))
     if not enough:
-        keep = m["current_window"] or window
-        why = [f"only {m['compactions']} compaction(s) in this history: not enough to tune the window; keep {pc.fmt_k(keep)}"]
-        window = keep
+        # Not enough to judge: the window stays exactly where the user has it; with none set, the
+        # neutral start (no adjustment from thin evidence).
+        if m["current_window"]:
+            window = m["current_window"]
+            why = [f"only {m['compactions']} compaction(s) in this history: not enough to tune the window; "
+                   f"keep {pc.fmt_k(window)}"]
+        else:
+            window = 500_000 if big else 150_000
+            why = [f"only {m['compactions']} compaction(s) in this history: not enough to tune the window; "
+                   f"start at the neutral {pc.fmt_k(window)}"]
     else:
         window = max(lo, min(hi, toward(m["current_window"], window, step, max_steps)))
 
@@ -276,7 +283,9 @@ def recommend(m, context_limit=None, max_steps=None):
             iwhy.append("long, connected work on the same files: keep more before the idle pit stop")
         idle = max(ilo, min(ihi, idle))
         idle = max(ilo, min(ihi, toward(m.get("current_idle_point") or pc.IDLE_DEFAULT, idle, istep, max_steps)))
-    idle = max(ilo, min(idle, window - step)) if window - step >= ilo else ilo
+    # Keep a step between the idle point and the window. Claude Code never goes under its floor,
+    # so with a window the user set very low the floor wins.
+    idle = max(ilo, min(idle, window - step))
     why += iwhy
     ceiling = max(min(window + 2 * step, int(limit * (0.85 if big else 0.90))), window)
     base = {"context_limit": limit, "idle_point": idle, "window": window, "ceiling": ceiling, "why": why}
@@ -317,8 +326,10 @@ def lane_recs(project, days, context_limit=None, max_steps=None, newer_than_days
 
 def apply(project, rec, metrics, lanes=None):
     s = os.path.join(project, ".claude", "settings.local.json")
-    data = pc.read_json(s, {}) if os.path.exists(s) else {}
-    if os.path.exists(s) and not isinstance(data, dict):
+    data, err = pc.read_json_strict(s)
+    if err:  # never rewrite a file we could not read: that would drop everything else in it
+        raise SystemExit(f"refusing: {s} does not read as JSON ({err}); fix it or apply by hand")
+    if not isinstance(data, dict):
         raise SystemExit(f"refusing: {s} is not a JSON object")
     if not isinstance(data.get("env", {}), dict):
         raise SystemExit(f"refusing: \"env\" in {s} is not a JSON object")

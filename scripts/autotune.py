@@ -60,13 +60,17 @@ def main():
         os.nice(19)
     except Exception:
         pass
-    m = op.analyze(project, a.days)
-    if not m["transcripts"]:
-        pc.append_log(LOG, f"{project}: no history in {a.days} days; nothing to tune")
+    try:
+        m = op.analyze(project, a.days)
+        if not m["transcripts"]:
+            pc.append_log(LOG, f"{project}: no history in {a.days} days; nothing to tune")
+            return 0
+        rec = op.recommend(m, max_steps=1)
+        several = len(pc.transcripts(project, 3)) > 1
+        lanes = op.lane_recs(project, a.days, max_steps=1) if several else {}
+    except Exception as e:
+        pc.append_log(LOG, f"{project}: could not read its history ({type(e).__name__}: {str(e)[:100]}); left as it is")
         return 0
-    rec = op.recommend(m, max_steps=1)
-    several = len([p for p in pc.transcripts(project, 3)]) > 1
-    lanes = op.lane_recs(project, a.days, max_steps=1) if several else {}
     was_i, was_w = m["current_idle_point"], m["current_window"]
     line = (f"{project}: idle point {pc.fmt_k(was_i)} -> {pc.fmt_k(rec['idle_point'])}, "
             f"window {pc.fmt_k(was_w)} -> {pc.fmt_k(rec['window'])}, {len(lanes)} lane profile(s); "
@@ -76,7 +80,12 @@ def main():
         for w in rec["why"]:
             print("  - " + w)
         return 0
-    s, _, _ = op.apply(project, rec, m, lanes)
+    try:
+        s, _, _ = op.apply(project, rec, m, lanes)
+    except SystemExit as e:
+        pc.append_log(LOG, f"{project}: not written: {e}")
+        print(e)
+        return 1
     pc.prune_backups(s)
     pc.append_log(LOG, line)
     print(line)

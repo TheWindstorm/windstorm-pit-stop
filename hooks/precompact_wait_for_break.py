@@ -45,7 +45,10 @@ TAIL_BYTES = 4_000_000
 CLAUDE_DIR = os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude"))
 STATE = os.path.join(CLAUDE_DIR, "pit-stop")
 LOG = os.path.join(STATE, "precompact.log")
-DEFAULT_FLEX = float(os.environ.get("PIT_STOP_DEFAULT_FLEX", "1.10"))
+try:
+    DEFAULT_FLEX = float(os.environ.get("PIT_STOP_DEFAULT_FLEX", "1.10"))
+except ValueError:
+    DEFAULT_FLEX = 1.10
 MAX_FLEX = 1.5          # a configured ceiling is at most 1.5x the first hold
 MAX_SHARE = 0.95        # ... and at most 95% of the model's context size
 LOG_MAX_BYTES = 5_000_000
@@ -102,13 +105,14 @@ def tail_messages(path):
             o = json.loads(line)
         except Exception:
             continue
-        if o.get("type") in ("user", "assistant") and not o.get("isSidechain"):
+        if isinstance(o, dict) and o.get("type") in ("user", "assistant") and not o.get("isSidechain"):
             out.append(o)
     return out
 
 
 def kinds(entry):
-    c = (entry.get("message") or {}).get("content")
+    m = entry.get("message")
+    c = m.get("content") if isinstance(m, dict) else None
     if isinstance(c, str):
         return ["text"]
     if isinstance(c, list):
@@ -119,7 +123,9 @@ def kinds(entry):
 def context_tokens(msgs):
     for o in reversed(msgs):
         if o.get("type") == "assistant":
-            u = (o.get("message") or {}).get("usage") or {}
+            m = o.get("message")
+            u = m.get("usage") if isinstance(m, dict) else None
+            u = u if isinstance(u, dict) else {}
             t = sum(int(u.get(k) or 0) for k in (
                 "input_tokens", "cache_read_input_tokens",
                 "cache_creation_input_tokens", "output_tokens"))
@@ -228,6 +234,8 @@ def decide(payload):
 def main():
     try:
         payload = json.loads(sys.stdin.read() or "{}")
+        if not isinstance(payload, dict):
+            raise ValueError("not an object")
     except Exception:
         log("?", "?", None, "ALLOW", "bad-input")
         return 0
@@ -247,4 +255,7 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception:  # whatever went wrong here must never block or fail a compaction
+        sys.exit(0)

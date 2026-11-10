@@ -111,7 +111,7 @@ Settings live in `~/.claude/pit-stop/restart.json` (see the top of `scripts/rest
 
 - Hook decisions: mid-action holds, a break allows, the ceiling allows, a manual `/compact` allows, bad input allows. A hold prints nothing; an allowed automatic compaction prints only the keep-list.
 - The Stop hook hands the background-jobs ask to Claude once, in a real session on Claude Code 2.1.322 (exit 2 passes through the `python3`/`python` probe line).
-- The restart plan as a pure function: compact first then restart, cold restart with nothing typed, background jobs, a session that stopped its jobs, opt-in idle compaction.
+- The restart plan as a pure function, and the helper in live mode against a faked pane: compact first then restart, cold restart with nothing typed, the ask left for the Stop hook, a late restart still getting its start-your-jobs note, stale lists put away, nothing typed during a typing backoff.
 - The helper's dry run against a live fleet of 94 sessions (it types and writes nothing).
 - `/restart` on Claude Code 2.1.318 → 2.1.319 keeps the same session id, conversation, model and effort. Scheduled session crons survive. In that test the first turn after the restart read about 47K tokens from cache; do not count on that, since a new version normally rebuilds the cache from the top.
 - Not yet proven on a real machine: the 0.2.0 `/compact`-then-`/restart` sequence live in a pane, the keep-list's effect on summaries, and the launchd timer written by `/pit-stop setup`.

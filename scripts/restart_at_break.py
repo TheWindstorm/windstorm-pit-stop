@@ -90,7 +90,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pitstop_common as pc  # noqa: E402
 
 LIVE = "--live" in sys.argv
-ONLY = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv[:-1] else None
+ONLY = None
+if "--only" in sys.argv:
+    _i = sys.argv.index("--only")
+    ONLY = sys.argv[_i + 1].strip() if _i + 1 < len(sys.argv) else ""
+    if not ONLY or ONLY.startswith("--"):
+        sys.exit("--only needs a session name (nothing was done)")  # never fall back to the whole fleet
 CFG = {"tmux_socket": None, "allow_names": [], "deny_names": [], "deny_name_globs": [], "deny_paths": [],
        "ctx_max": 100000, "min_idle": 300, "max_per_run": 1, "notify_command": None,
        "compact_window": 1800, "min_idle_after_compact": 60, "cold_idle": 3600,
@@ -100,14 +105,14 @@ CFG = {"tmux_socket": None, "allow_names": [], "deny_names": [], "deny_name_glob
        "mismatch_backoff": 1800, "mismatch_backoff_max": 43200}
 CFG.update(pc.read_json(os.path.join(pc.STATE_DIR, "restart.json"), {}) or {})
 BASE = os.path.join(pc.STATE_DIR, "restart")
-for d in ("state", "ok"):
-    os.makedirs(os.path.join(BASE, d), exist_ok=True)
 LOG = os.path.join(BASE, "restart.log")
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 DIM_SEG = re.compile(r"\x1b\[2m.*?(?=\x1b\[(?:0|22)?m|$)")
 PROMPT = "❯"
 WARM_SHARE = 0.8        # the cache counts as warm for this share of cache_ttl
 COMPACT_WAIT = 600      # after typing /compact, give the summary this long before doing anything else
+REARM_MAX_AGE = 7200    # a re-arm list older than this is history, not a session waiting to be told
+DIALOG = re.compile(r"Do you want|" + PROMPT + r" \d+\.|Enter to confirm|\(y/n\)")
 
 
 def ts():
@@ -119,6 +124,7 @@ def log(msg):
     print(f"{ts()} {msg}")
     if not LIVE:
         return
+    os.makedirs(BASE, exist_ok=True)
     if os.path.exists(LOG) and os.path.getsize(LOG) > 5_000_000:
         os.replace(LOG, LOG + ".1")  # keep one old log; never grow without bound
     with open(LOG, "a") as f:
@@ -174,9 +180,26 @@ def input_empty(target):
     return input_box_text(screen(target, escapes=True)) == ""
 
 
+def rows_busy(rows):
+    """True when the bottom of the screen shows work in progress or a dialog.
+    Only the rows around the input box count: a question in Claude's last reply
+    ("Do you want me to...?") further up is not a dialog. Pure, for tests."""
+    rows = [ANSI.sub("", l.replace("\u00a0", " ").replace("\u202f", " ")) for l in rows]
+    starts = [i for i, l in enumerate(rows) if l.startswith(PROMPT)]
+    if not starts:  # no input box at all: something else owns the screen
+        tail = "\n".join(rows[-15:])
+        return "esc to interrupt" in tail or bool(DIALOG.search(tail))
+    i = starts[-1]
+    return "esc to interrupt" in "\n".join(rows[max(0, i - 4):]) or bool(DIALOG.search("\n".join(rows[i:])))
+
+
+def pane_in_mode(target):
+    """True when the pane is in tmux copy mode: the screen reads as usual but keys would go to tmux."""
+    return tmux("display-message", "-p", "-t", target, "#{pane_in_mode}").stdout.strip() not in ("", "0")
+
+
 def screen_busy(target):
-    txt = "\n".join(screen(target))
-    return bool(re.search(r"esc to interrupt|Do you want|" + PROMPT + r" \d+\.|Enter to confirm|\(y/n\)", txt))
+    return pane_in_mode(target) or rows_busy(screen(target))
 
 
 def type_line(target, text):
@@ -312,15 +335,15 @@ def plan(l, cfg):
     """What to do with one session. Pure, so it is easy to test.
 
     l: status, idle, ctx, compact_age, behind, consented (its re-arm list
-    exists), consent_age, compact_ask_age (seconds since /compact was typed,
-    or None), idle_point, blocked (why the helper may not restart it for now:
-    a restart was tried lately, or typing keeps failing; None otherwise).
+    exists and answers an ask), consent_age, compact_ask_age (seconds since
+    /compact was typed, or None), idle_point, blocked (why the helper may not
+    restart it for now: a restart was tried lately; None otherwise).
     Returns (action, why); action is one of
       restart   type /restart
       compact   type /compact (a restart or nothing follows on a later run)
       ask       it has background jobs: leave the ask (the caller picks the channel)
       wait      a step is in progress; do nothing this run
-      rearm     it stopped its jobs for a restart that never came: tell it to start them again
+      rearm     it stopped jobs for a restart that is not coming: tell it to start them again
       skip      not now (why says what is missing)
       none      up to date and nothing to do
     """
@@ -338,15 +361,20 @@ def plan(l, cfg):
         if after and point and compact_ok and ctx >= point and idle >= after:
             return "compact", f"quiet {int(idle)}s with context {ctx} over its idle point {point}"
         return "none", ""
+    given_up = l["consented"] and l.get("consent_age", 0) >= cfg["consent_timeout"]
+    if l.get("blocked"):
+        # No restart for now (one was tried lately). Never ask it to stop its jobs for a restart
+        # that cannot come; and if it already stopped them, do not leave it waiting.
+        if given_up:
+            return "rearm", f"it listed its jobs {int(l['consent_age'])}s ago and no restart is coming ({l['blocked']})"
+        return "skip", l["blocked"]
     if st == "shell":
+        if given_up:
+            return "rearm", (f"it listed its jobs {int(l['consent_age'])}s ago but background work still runs, "
+                             f"so it cannot be restarted")
         if l["consented"]:
             return "wait", "re-arm list written; waiting for it to stop its background jobs"
         return "ask", "background jobs running"
-    if l.get("blocked"):
-        # The helper cannot restart it for now (a restart was just tried, or typing keeps failing).
-        if l["consented"] and l.get("consent_age", 0) >= cfg["consent_timeout"]:
-            return "rearm", f"it stopped its jobs {int(l['consent_age'])}s ago and no restart came ({l['blocked']})"
-        return "skip", l["blocked"]
     if asked is not None and asked < COMPACT_WAIT and not recent:
         return "wait", f"/compact typed {int(asked)}s ago; waiting for the summary"
     ok, why = at_a_break(st, idle, ctx, cage, cfg, l["consented"])
@@ -368,6 +396,14 @@ def allowed(name, cwd, cfg):
     return not any(cwd.startswith(os.path.expanduser(p)) for p in cfg["deny_paths"])
 
 
+def lane_key(name, session_id):
+    """A file-safe key for one session's state: its name plus the start of its
+    session id, so two names that reduce to the same letters (or to none) never
+    share state. The session id stays the same across /restart."""
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "session"
+    return f"{slug}-{pc.safe_id(session_id)[:8]}"
+
+
 def age_of(path, now):
     """Seconds since the time written in a state file, or None."""
     try:
@@ -378,8 +414,39 @@ def age_of(path, now):
 
 
 def stamp(path, now):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         f.write(str(now))
+
+
+def ask_time(sid, typedf, now):
+    """When this session was last asked to sort its background jobs (epoch seconds), or None."""
+    times = []
+    a = pc.read_json(os.path.join(pc.ASKS, sid + ".json"), None)
+    if isinstance(a, dict) and a.get("at"):
+        try:
+            times.append(float(a["at"]))
+        except Exception:
+            pass
+    typed_age = age_of(typedf, now)
+    if typed_age is not None:
+        times.append(now - typed_age)
+    return max(times) if times else None
+
+
+def consent_state(okf, asked_at, now):
+    """(consented, age, stale) for a session's re-arm list. The list counts only
+    if it was written AFTER the session was asked; one with no ask on record, or
+    older than the ask, is left over from another time (stale). Pure but for the stat."""
+    try:
+        mtime = os.path.getmtime(okf)
+    except OSError:
+        return False, 0, False
+    if os.path.isdir(okf):
+        return False, 0, False
+    if asked_at is None or mtime < asked_at - 5:
+        return False, now - mtime, True
+    return True, now - mtime, False
 
 
 def ask_note(newest, ver, okf):
@@ -392,7 +459,7 @@ def ask_note(newest, ver, okf):
             f"No reply needed.")
 
 
-def handle_ask(s, key, target, ver, newest, okf, l, now, can_type=True):
+def handle_ask(s, key, target, ver, newest, okf, l, now):
     """Background jobs: leave the ask for the session's Stop hook; type it only
     for a session that has not loaded the hook, and only when that is cheap."""
     sid = pc.safe_id(s.get("sessionId"))
@@ -415,8 +482,8 @@ def handle_ask(s, key, target, ver, newest, okf, l, now, can_type=True):
     if os.path.exists(os.path.join(pc.SEEN, sid)):
         log(f"{name}: {ver}->{newest} skip: ask waits for the end of its next turn (its Stop hook is loaded)")
         return
-    if not can_type:
-        log(f"{name}: {ver}->{newest} skip: ask left; not typing it now ({l.get('blocked')})")
+    if l.get("typing_blocked"):
+        log(f"{name}: {ver}->{newest} skip: ask left; not typing it now ({l['typing_blocked']})")
         return
     typed_age = age_of(typedf, now)
     if typed_age is not None and typed_age < CFG["ask_again"]:
@@ -440,14 +507,15 @@ def handle_ask(s, key, target, ver, newest, okf, l, now, can_type=True):
         stamp(typedf, now)
 
 
-def confirm_restart(s, newest):
-    """True once the SAME session id runs the newest version (waits up to 2 minutes)."""
-    for _ in range(24):
+def confirm_restart(s, newest, wait=150):
+    """True once the SAME session id runs the newest version (waits up to WAIT seconds)."""
+    deadline = time.time() + wait
+    while time.time() < deadline:
         time.sleep(5)
         d = pc.registry_sessions().get(s.get("sessionId")) or {}
         if d.get("pid") and (pc.pid_version(d["pid"]) or d.get("version")) == newest:
             return True
-        for x in (pc.cli_sessions(timeout=20) or []) if not d else []:
+        for x in (pc.cli_sessions(timeout=10) or []) if not d else []:
             if x.get("sessionId") == s.get("sessionId") and pc.pid_version(x.get("pid")) == newest:
                 return True
     return False
@@ -462,135 +530,205 @@ def rearm_list(okf):
         return []
 
 
+def archive(okf, word, now):
+    """Move a re-arm list out of the way (a dry run moves nothing)."""
+    if LIVE and os.path.isfile(okf):
+        os.replace(okf, f"{okf}.{word}-{int(now)}")
+
+
+def tell_rearm(target, okf, mmf, text, now):
+    """Type the "start your jobs again" note. The list is put away ONLY once the
+    note was sent; otherwise it stays and the next run tries again."""
+    if not input_empty(target) or screen_busy(target):
+        return False
+    sent, how = type_line(target, text)
+    note_typing(mmf, sent, how, now)
+    if sent:
+        archive(okf, "done", now)
+    return sent
+
+
+def handle(s, newest, target, now, counts):
+    """Everything for one session. Raises nothing the caller must understand:
+    main() catches and logs, so one odd session never stops the run."""
+    name, cwd, ver = s["name"], s.get("cwd") or "", s.get("version")
+    sid = pc.safe_id(s.get("sessionId"))
+    behind = pc.vkey(ver) < pc.vkey(newest)
+    tag = f"{name}: {ver}->{newest}" if behind else f"{name}:"
+    key = lane_key(name, sid)
+    st_dir = os.path.join(BASE, "state")
+    lastf, mmf = os.path.join(st_dir, key + ".last"), os.path.join(st_dir, key + ".mismatch")
+    compf, okf = os.path.join(st_dir, key + ".compact"), os.path.join(BASE, "ok", key)
+    typedf = os.path.join(st_dir, key + ".asked")
+    status = s.get("status")
+    typing_blocked = None
+    mm = pc.read_json(mmf, {}) or {}
+    if mm.get("n"):
+        left = mismatch_wait(mm["n"], CFG) - (now - float(mm.get("at", 0)))
+        if left > 0:
+            typing_blocked = (f"typed text did not match {mm['n']} time(s) in a row; backing off, "
+                              f"next try in {int(left)}s")
+    consented, consent_age, stale = consent_state(okf, ask_time(sid, typedf, now), now)
+
+    last_age = age_of(lastf, now)
+    if not behind:
+        # Up to date. A re-arm list still here means it was restarted (late, or by hand) and never told.
+        if os.path.isfile(okf):
+            mtime = os.path.getmtime(okf)
+            started = (s.get("startedAt") or 0) / 1000   # Claude Code sets this again at every /restart
+            restarted_after = started >= mtime or (last_age is not None and now - last_age >= mtime)
+            jobs = rearm_list(okf)
+            if not restarted_after or not jobs or now - mtime > REARM_MAX_AGE:
+                log(f"{tag} re-arm list put away (old, empty, or not followed by a restart); nothing typed")
+                archive(okf, "stale", now)
+            elif typing_blocked:
+                log(f"{tag} skip: it is on {ver} with {len(jobs)} job(s) to start again; not typing now ({typing_blocked})")
+                return
+            elif status not in ("idle", "shell"):
+                log(f"{tag} skip: it is on {ver} with {len(jobs)} job(s) to start again; it is working, next run")
+                return
+            else:
+                sent = tell_rearm(target, okf, mmf, (
+                    f"[AUTOMATED pit-stop restart, not your user] You are now on Claude Code {ver}; same conversation. "
+                    f"The background jobs you stopped for the restart are down: start them again now (your list: "
+                    f"{'; '.join(jobs)[:600]}). Scheduled session crons survive a restart. No reply needed."), now)
+                log(f"{tag} told to start its {len(jobs)} job(s) again" if sent else
+                    f"{tag} skip: {len(jobs)} job(s) to start again, but its input box is not free; next run")
+                if not sent:
+                    return
+            if LIVE:  # the restart is over: its ask and stamps are history
+                for f in (compf, typedf, os.path.join(pc.ASKS, sid + ".json")):
+                    if os.path.exists(f):
+                        os.remove(f)
+            return
+        if not CFG.get("idle_compact_after") or typing_blocked:
+            return
+    elif stale:
+        log(f"{tag} re-arm list put away: it does not answer an ask on record (left over from another time)")
+        archive(okf, "stale", now)
+
+    blocked = None
+    if behind and last_age is not None and last_age < CFG["restart_cooldown"]:
+        blocked = f"a restart was tried by this helper {int(last_age)}s ago (waits {CFG['restart_cooldown']}s)"
+    ctx, idle = ctx_and_idle(s)
+    if s.get("statusUpdatedAt") and idle >= 0:
+        idle = min(now - s["statusUpdatedAt"] / 1000, idle)
+    l = {"status": status, "idle": idle, "ctx": ctx, "behind": behind,
+         "compact_age": last_compact_age(transcript_path(s), now=now),
+         "consented": consented, "consent_age": consent_age, "compact_ask_age": age_of(compf, now),
+         "idle_point": pc.points(cwd, s.get("sessionId"))["idle_point"],
+         "blocked": blocked, "typing_blocked": typing_blocked}
+    action, why = plan(l, CFG)
+    if action == "none":
+        return
+    if action in ("skip", "wait"):
+        log(f"{tag} {action}: {why}")
+        return
+    if action == "ask":
+        handle_ask(s, key, target, ver, newest, okf, l, now)
+        return
+    if typing_blocked:  # everything below types
+        log(f"{tag} skip: {typing_blocked}")
+        if action == "rearm":
+            notef = os.path.join(st_dir, key + ".notified")
+            told = age_of(notef, now)
+            if LIVE and (told is None or told >= CFG["restart_cooldown"]):  # once, not every run
+                notify(f"pit-stop: {name} stopped its jobs for a restart that did not come, and its pane cannot be "
+                       f"typed into; check it")
+                stamp(notef, now)
+        return
+    if not input_empty(target):
+        log(f"{tag} skip: text in the input box")
+        return
+    if screen_busy(target):
+        log(f"{tag} skip: a dialog or work on screen, or the pane is in tmux copy mode")
+        return
+    if action == "rearm":
+        jobs = rearm_list(okf)
+        log(f"{tag} {why}: telling it to start its jobs again")
+        tell_rearm(target, okf, mmf, (
+            "[AUTOMATED pit-stop restart, not your user] The restart you listed your background jobs for is not "
+            "happening for now. Start again any you stopped"
+            + (f" (your list: {'; '.join(jobs)[:600]})" if jobs else "") + ". No reply needed."), now)
+        return
+    if action == "compact":
+        if counts["compact"] >= CFG["max_per_run"]:
+            log(f"{tag} run limit reached for /compact; next run")
+            return
+        log(f"{tag} /compact: {why}" + ("" if LIVE else " (DRY)"))
+        sent, how = type_line(target, "/compact")
+        note_typing(mmf, sent, how, now)
+        if sent:
+            counts["compact"] += 1
+            if LIVE:
+                stamp(compf, now)
+        return
+    # action == "restart"
+    log(f"{tag} at a break: {why}")
+    if counts["restart"] >= CFG["max_per_run"]:
+        log(f"{name}: run limit reached; next run")
+        return
+    if not LIVE:
+        log(f"DRY would /restart {name} ({ver} -> {newest}, ctx {ctx})")
+        counts["restart"] += 1
+        return
+    sent, how = type_line(target, "/restart")
+    note_typing(mmf, sent, how, now)
+    if not sent:
+        return
+    counts["restart"] += 1
+    stamp(lastf, now)  # tried: whatever happens next, leave it alone for restart_cooldown
+    time.sleep(6)
+    if any("Can't restart" in r for r in screen(target)):
+        log(f"{name}: /restart refused by Claude Code (see its pane); next try after {CFG['restart_cooldown']}s")
+        notify(f"pit-stop: {name} refused /restart; see its pane")
+        return
+    if not confirm_restart(s, newest):
+        log(f"{name}: RESTART NOT CONFIRMED on {newest} yet; if it lands, the next run tells it to start its jobs again")
+        notify(f"pit-stop: {name} /restart not confirmed; check its pane")
+        return
+    jobs = rearm_list(okf)
+    log(f"{name}: RESTARTED {ver} -> {newest}, same session"
+        + (f"; {len(jobs)} job(s) to start again" if jobs else "; nothing typed after (no re-arm list)"))
+    if jobs:  # only now is a note worth a turn: its watchers are down until it starts them
+        time.sleep(10)
+        if not tell_rearm(target, okf, mmf, (
+                f"[AUTOMATED pit-stop restart, not your user] You were restarted at {ts()} onto Claude Code {newest} "
+                f"(was {ver}); same conversation. The background jobs you stopped for it are down: start them again "
+                f"now (your list: {'; '.join(jobs)[:600]}). Scheduled session crons survive a restart. "
+                f"No reply needed."), time.time()):
+            log(f"{name}: its prompt was not ready for the start-your-jobs note; the next run sends it")
+    else:
+        archive(okf, "done", now)
+    for f in (compf, typedf, os.path.join(pc.ASKS, sid + ".json")):
+        if os.path.exists(f):
+            os.remove(f)
+
+
 def main():
     newest = pc.newest_installed_version()
     if not newest:
         log("no installed versions found; exit")
         return
-    sessions, source = pc.live_sessions()
+    sessions, _ = pc.live_sessions()
     if not sessions:
         log("no running sessions found (registry and `claude agents --json` both empty); exit")
         return
+    if LIVE:
+        for d in ("state", "ok"):
+            os.makedirs(os.path.join(BASE, d), exist_ok=True)
     tty_map, now = panes(), time.time()
-    restarts = compacts = 0
+    counts = {"restart": 0, "compact": 0}
     for s in sorted(sessions, key=lambda x: x["name"]):
-        pid, name, cwd = s.get("pid"), s["name"], s.get("cwd") or ""
-        target = tty_map.get(pid_tty(pid) or "")
-        if not target or not name or not allowed(name, cwd, CFG):
-            continue
-        ver = s.get("version")
-        if not ver:
-            continue
-        behind = pc.vkey(ver) < pc.vkey(newest)
-        if not behind and not CFG.get("idle_compact_after"):
-            continue
-        tag = f"{name}: {ver}->{newest}" if behind else f"{name}:"
-        key = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-        st_dir = os.path.join(BASE, "state")
-        lastf, mmf = os.path.join(st_dir, key + ".last"), os.path.join(st_dir, key + ".mismatch")
-        compf, okf = os.path.join(st_dir, key + ".compact"), os.path.join(BASE, "ok", key)
-        last_age = age_of(lastf, now)
-        blocked = None
-        if behind and last_age is not None and last_age < CFG["restart_cooldown"]:
-            blocked = f"a restart was tried by this helper {int(last_age)}s ago (waits {CFG['restart_cooldown']}s)"
-        mm = pc.read_json(mmf, {}) or {}
-        if not blocked and mm.get("n"):
-            left = mismatch_wait(mm["n"], CFG) - (now - float(mm.get("at", 0)))
-            if left > 0:
-                blocked = (f"typed text did not match {mm['n']} time(s) in a row; backing off, "
-                           f"next try in {int(left)}s")
-        status = s.get("status")
-        ctx, idle = ctx_and_idle(s)
-        if s.get("statusUpdatedAt") and idle >= 0:
-            idle = min(now - s["statusUpdatedAt"] / 1000, idle)
-        consented = os.path.exists(okf)
-        consent_age = now - os.path.getmtime(okf) if consented else 0
-        if consented and status == "shell" and consent_age >= CFG["ask_again"]:
-            if LIVE:
-                os.replace(okf, os.path.join(st_dir, f"{key}.stale-{int(now)}"))
-            consented = False  # it never stopped its jobs: the list is stale, ask again
-        l = {"status": status, "idle": idle, "ctx": ctx, "behind": behind,
-             "compact_age": last_compact_age(transcript_path(s), now=now),
-             "consented": consented, "consent_age": consent_age, "compact_ask_age": age_of(compf, now),
-             "idle_point": pc.points(cwd, s.get("sessionId"))["idle_point"], "blocked": blocked}
-        if blocked and not behind:
-            continue  # a typing backoff also covers the optional idle compaction
-        action, why = plan(l, CFG)
-        if action == "none":
-            continue
-        if action in ("skip", "wait"):
-            log(f"{tag} {action}: {why}")
-            continue
-        if action == "ask":
-            handle_ask(s, key, target, ver, newest, okf, l, now, can_type=not blocked)
-            continue
-        if not input_empty(target):
-            log(f"{tag} skip: text in the input box")
-            continue
-        if screen_busy(target):
-            log(f"{tag} skip: a dialog or work on screen")
-            continue
-        if action == "rearm":
-            log(f"{tag} {why}: telling it to start its jobs again")
-            jobs = rearm_list(okf)
-            sent, how = type_line(target, "[AUTOMATED pit-stop restart, not your user] The restart you stopped your "
-                                  "background jobs for did not happen. Start them again now"
-                                  + (f" (your list: {'; '.join(jobs)[:600]})" if jobs else "") + ". No reply needed.")
-            note_typing(mmf, sent, how, now)
-            if sent and LIVE:
-                os.replace(okf, os.path.join(st_dir, f"{key}.gave-up-{int(now)}"))
-            continue
-        if action == "compact":
-            if compacts >= CFG["max_per_run"]:
-                log(f"{tag} run limit reached for /compact; next run")
+        try:
+            target = tty_map.get(pid_tty(s.get("pid")) or "")
+            if not target or not s["name"] or not s.get("version") or not s.get("sessionId"):
                 continue
-            log(f"{tag} /compact: {why}" + ("" if LIVE else " (DRY)"))
-            sent, how = type_line(target, "/compact")
-            note_typing(mmf, sent, how, now)
-            if sent:
-                compacts += 1
-                if LIVE:
-                    stamp(compf, now)
-            continue
-        # action == "restart"
-        log(f"{tag} at a break: {why}")
-        if restarts >= CFG["max_per_run"]:
-            log(f"{name}: run limit reached; next run")
-            continue
-        if not LIVE:
-            log(f"DRY would /restart {name} ({ver} -> {newest}, ctx {ctx})")
-            restarts += 1
-            continue
-        sent, how = type_line(target, "/restart")
-        note_typing(mmf, sent, how, now)
-        if not sent:
-            continue
-        restarts += 1
-        time.sleep(6)
-        stamp(lastf, now)  # tried: whatever happens next, leave it alone for restart_cooldown
-        if any("Can't restart" in r for r in screen(target)):
-            log(f"{name}: /restart refused by Claude Code (see its pane); next try after {CFG['restart_cooldown']}s")
-            notify(f"pit-stop: {name} refused /restart; see its pane")
-            continue
-        if not confirm_restart(s, newest):
-            log(f"{name}: RESTART NOT CONFIRMED on {newest} within 2 minutes")
-            notify(f"pit-stop: {name} /restart not confirmed; check its pane")
-            continue
-        jobs = rearm_list(okf)
-        log(f"{name}: RESTARTED {ver} -> {newest}, same session"
-            + (f"; {len(jobs)} job(s) to start again" if jobs else "; nothing typed after (no re-arm list)"))
-        if os.path.exists(okf):
-            os.replace(okf, okf + ".done")
-        if jobs:  # only now is a note worth a turn: its watchers are down until it starts them
-            time.sleep(10)
-            type_line(target, f"[AUTOMATED pit-stop restart, not your user] You were restarted at {ts()} onto Claude "
-                              f"Code {newest} (was {ver}); same conversation. The background jobs you stopped for it "
-                              f"are down: start them again now (your list is in {okf}.done). Scheduled session crons "
-                              f"survive a restart. No reply needed.")
-        for f in (compf, os.path.join(pc.ASKS, pc.safe_id(s.get("sessionId")) + ".json"),
-                  os.path.join(st_dir, key + ".asked")):
-            if os.path.exists(f):
-                os.remove(f)
+            if not allowed(s["name"], s.get("cwd") or "", CFG):
+                continue
+            handle(s, newest, target, now, counts)
+        except Exception as e:  # one odd session (an unreadable transcript, a vanished pane) never stops the run
+            log(f"{s.get('name') or '?'}: skip: error {type(e).__name__}: {str(e)[:120]}")
 
 
 if __name__ == "__main__":

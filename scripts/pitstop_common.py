@@ -89,14 +89,34 @@ def iter_entries(path, tail_bytes=None):
             f.readline()
         for raw in f:
             try:
-                yield json.loads(raw)
+                e = json.loads(raw)
             except Exception:
                 continue
+            if isinstance(e, dict):  # a transcript line is an object; anything else is skipped
+                yield e
+
+
+def message(entry):
+    """An entry's message as a dict ({} when it is missing or not an object)."""
+    m = entry.get("message")
+    return m if isinstance(m, dict) else {}
+
+
+def usage(entry):
+    u = message(entry).get("usage")
+    return u if isinstance(u, dict) else {}
+
+
+def num(v):
+    try:
+        return int(v or 0)
+    except Exception:
+        return 0
 
 
 def usage_total(entry):
-    u = (entry.get("message") or {}).get("usage") or {}
-    return sum(int(u.get(k) or 0) for k in (
+    u = usage(entry)
+    return sum(num(u.get(k)) for k in (
         "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens"))
 
 
@@ -105,7 +125,7 @@ def is_compact_boundary(entry):
 
 
 def content_kinds(entry):
-    c = (entry.get("message") or {}).get("content")
+    c = message(entry).get("content")
     if isinstance(c, str):
         return ["text"]
     if isinstance(c, list):
@@ -114,10 +134,23 @@ def content_kinds(entry):
 
 
 def tool_uses(entry):
-    c = (entry.get("message") or {}).get("content")
+    c = message(entry).get("content")
     if not isinstance(c, list):
         return []
     return [x for x in c if isinstance(x, dict) and x.get("type") == "tool_use"]
+
+
+def read_json_strict(path):
+    """(data, None) for a file that parses, ({}, None) when it does not exist,
+    (None, reason) when it exists but cannot be read as JSON: callers that are
+    about to REWRITE the file must refuse then, or they would drop its contents."""
+    if not os.path.exists(path):
+        return {}, None
+    try:
+        with open(path) as f:
+            return json.load(f), None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {str(e)[:80]}"
 
 
 def parse_ts(s):

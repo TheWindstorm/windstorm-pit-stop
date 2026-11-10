@@ -29,6 +29,18 @@ Hooks:
 - Stop: the ask above, and for people without fleet mode one line, once per version, that an update is waiting (`nudge: false` switches it off).
 - All three run through the 0.1.4 `python3`/`python` probe line; exit 2 passes through.
 
+Hardening, from an independent review of this change before it was pushed:
+- A restart that lands after the 2-minute confirm no longer loses the "start your jobs again" note: the list stays until the note is sent, and the next run sends it. A list is put away only after its note went out.
+- A re-arm list counts as consent only if it was written after an ask on record; older ones are put away without typing. State files are now named by session name plus session id, so two names that reduce to the same letters (or to none) never share state. State files from 0.1.x (named by name only) are not read.
+- No ask while a restart cannot follow (the cooldown), and no typed note of any kind while the typing backoff runs.
+- A refused or unconfirmed `/restart` starts the cooldown (0.1.x typed it again every run).
+- `--only` with no name exits instead of handling every session. One unreadable session no longer stops the run.
+- A pane in tmux copy mode is skipped. A question in Claude's last reply ("Do you want me to...?") no longer reads as a dialog: only the rows around the input box count.
+- `--apply` refuses a settings file it cannot read as JSON instead of rewriting it; setup does the same for `config.json`.
+- With fewer than 2 compactions the window stays exactly where the user has it. Odd transcript lines (not an object, a string message) are skipped by every reader. The PreCompact hook allows on any stdin.
+- A dry run creates no folders. The systemd unit allows 10 minutes.
+- `tests/smoke_hooks.sh`: runs each hook's real command line on any machine, PASS or FAIL per check.
+
 Docs: `/restart` needs the native macOS or Linux install and a paid plan; a new version normally rebuilds the prompt cache, so the "47K from cache" line is now marked as one test, not a promise.
 
 ## 0.1.4 (2026-11-10)

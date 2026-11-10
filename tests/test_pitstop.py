@@ -211,7 +211,7 @@ def test_restart_reads_the_last_compaction_time(tmp_path, monkeypatch):
     p = transcript(tmp_path, "s1", entries)
     now = rab.utc_ts("2026-11-10T13:08:07Z")
     assert int(rab.last_compact_age(p, now=now)) == 1800
-    # the marker found past a tail cut, and no compaction at all
+    # no compaction at all, and a missing file
     assert rab.last_compact_age(transcript(tmp_path, "s2", [a("text")]), now=now) is None
     assert rab.last_compact_age(str(tmp_path / "missing.jsonl")) is None
     assert rab.utc_ts("2026-07-01T00:00:00Z") == 1782864000  # summer: no DST shift
@@ -316,7 +316,8 @@ def test_hook_reads_the_user_level_folder_profile(tmp_path):
 def _run(script, payload, tmp, extra_env=None):
     env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp / "cfg"), HOME=str(tmp / "home"))
     env.update(extra_env or {})
-    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "hooks", script)], input=json.dumps(payload),
+    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "hooks", script)],
+                       input=payload if isinstance(payload, str) else json.dumps(payload),   # a str goes in raw
                        capture_output=True, text=True, env=env)
     return r.returncode, r.stdout, r.stderr
 
@@ -465,16 +466,17 @@ def test_allow_and_deny_lists(tmp_path, monkeypatch):
     assert rab.rearm_list(str(f)) == ["inbox watcher: ./watch.sh", "heartbeat loop"]
 
 
-def _history(tmp_path, monkeypatch, cycles=4, per=30, gap_min=1, start=300000):
+def _history(tmp_path, monkeypatch, cycles=4, per=30, gap_min=1, start=300000, projects=None):
     import pitstop_common as pc
     import optimize as op
-    monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
+    projects = projects or tmp_path / "projects"
+    monkeypatch.setattr(pc, "PROJECTS", str(projects))
     monkeypatch.setattr(pc, "STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(pc, "FOLDERS", str(tmp_path / "state" / "folders"))
     monkeypatch.setattr(pc, "LANES", str(tmp_path / "state" / "lanes"))
     proj = tmp_path / "work"
     proj.mkdir(exist_ok=True)
-    d = tmp_path / "projects" / pc.project_key(str(proj))
+    d = projects / pc.project_key(str(proj))
     d.mkdir(parents=True, exist_ok=True)
     ents, minute = [], 0
     for cycle in range(cycles):
@@ -593,12 +595,25 @@ def test_launcher_finds_the_installed_plugin(tmp_path):
 
 
 def test_weekly_tune_is_off_until_switched_on(tmp_path, monkeypatch):
-    pc, op, proj = _history(tmp_path, monkeypatch)
+    pc, op, proj = _history(tmp_path, monkeypatch, projects=tmp_path / "cfg" / "projects")
     env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp_path / "cfg"))
-    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "autotune.py"), "--project", proj],
-                       capture_output=True, text=True, env=env)
-    assert r.returncode == 0 and r.stdout == ""
-    assert not os.path.exists(os.path.join(proj, ".claude", "settings.local.json"))
+    settings = os.path.join(proj, ".claude", "settings.local.json")
+
+    def tune(*extra):
+        return subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "autotune.py"), "--project", proj, *extra],
+                              capture_output=True, text=True, env=env)
+    r = tune()                                          # the switch is off: nothing at all
+    assert r.returncode == 0 and r.stdout == "" and not os.path.exists(settings)
+    r = tune("--dry")                                   # a dry run reads the history and says so, writes nothing
+    assert "4 compactions" in r.stdout and not os.path.exists(settings)
+    state = tmp_path / "cfg" / "pit-stop"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "config.json").write_text(json.dumps({"auto_tune": True}))
+    r = tune()                                          # switched on: the same history is now applied
+    assert r.returncode == 0 and "idle point" in r.stdout
+    env_keys = json.load(open(settings))["env"]
+    assert "CLAUDE_CODE_AUTO_COMPACT_WINDOW" in env_keys and "CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS" in env_keys
+    assert tune().stdout == ""                          # tuned a moment ago: not again for a week
     import autotune
     assert autotune.due(str(tmp_path / "no-stamp"), 1000.0, False) is True
     st = tmp_path / "stamp"
@@ -631,3 +646,260 @@ def test_every_hook_command_uses_the_python_probe_and_passes_exit_2(tmp_path):
     r = subprocess.run(["sh", "-c", hooks["Stop"][0]["hooks"][0]["command"]], input=json.dumps({"session_id": "s"}),
                        capture_output=True, text=True, env=env)
     assert r.returncode == 2 and r.stdout == "" and "background jobs" in r.stderr
+
+
+# ---------------------------------------------------------------- 0.2.0, from the review
+
+def test_plan_never_asks_for_a_restart_it_cannot_do(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    cfg = dict(rab.CFG)
+    cool = "a restart was tried 100s ago"
+    # a restart was tried lately: a session with background jobs is NOT asked to stop them
+    assert rab.plan(_lane(status="shell", blocked=cool), cfg) == ("skip", cool)
+    # it listed its jobs but they still run after 30 min: tell it to start again whatever it stopped
+    assert rab.plan(_lane(status="shell", consented=True, consent_age=1900), cfg)[0] == "rearm"
+    assert rab.plan(_lane(status="shell", consented=True, consent_age=300), cfg)[0] == "wait"
+    # a session that is working is never told anything
+    assert rab.plan(_lane(status="busy", consented=True, consent_age=9999, blocked=cool), cfg)[0] == "skip"
+
+
+def test_only_the_rows_around_the_input_box_count_as_busy(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    border = "─" * 40
+    reply = ["● I can do that. Do you want me to proceed with the plan (y/n)?", "  1. first step"]
+    idle = reply + [border, "❯ ", border, "  status line"]
+    assert rab.rows_busy(idle) is False                       # a question in Claude's reply is not a dialog
+    working = reply + ["✻ Thinking… (12s · esc to interrupt)", border, "❯ ", border, "  status"]
+    assert rab.rows_busy(working) is True
+    dialog = reply + [border, " Do you want to proceed?", "❯ 1. Yes", "  2. No", border]
+    assert rab.rows_busy(dialog) is True
+    assert rab.rows_busy(["Bash command", " Do you want to proceed?", " Enter to confirm"]) is True   # no input box
+    assert rab.rows_busy(["some other program owns this pane"]) is False
+    assert rab.input_box_text(["some other program owns this pane"]) is None   # ... and nothing is typed there
+
+
+def test_state_keys_and_stale_lists(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    # names with no ASCII letters, and names that reduce to the same letters, never share state
+    assert rab.lane_key("日本語", "abcd1234-xyz") == "session-abcd1234"
+    assert rab.lane_key("Windy Hub", "11111111-a") != rab.lane_key("windy-hub", "22222222-b")
+    assert rab.lane_key("Windy Hub", "11111111-a") == "windy-hub-11111111"
+    okf = tmp_path / "list"
+    assert rab.consent_state(str(okf), 100.0, 200.0) == (False, 0, False)      # no list
+    okf.write_text("watcher\n")
+    m = os.path.getmtime(okf)
+    assert rab.consent_state(str(okf), m - 60, m + 30)[::2] == (True, False)   # written after the ask: it counts
+    assert rab.consent_state(str(okf), m + 600, m + 900)[::2] == (False, True)  # older than the ask: stale
+    assert rab.consent_state(str(okf), None, m + 30)[::2] == (False, True)     # no ask on record: stale
+    assert rab.consent_state(str(tmp_path), m - 60, m)[0] is False             # a folder is never a list
+    # the ask time comes from the Stop-hook ask file or the typed stamp, whichever is later
+    import pitstop_common as pc
+    os.makedirs(pc.ASKS)
+    with open(os.path.join(pc.ASKS, "sid.json"), "w") as f:
+        json.dump({"at": 500.0}, f)
+    typed = tmp_path / "typed"
+    assert rab.ask_time("sid", str(typed), 1000.0) == 500.0
+    typed.write_text("800")
+    assert rab.ask_time("sid", str(typed), 1000.0) == 800.0
+    assert rab.ask_time("nobody", str(tmp_path / "none"), 1000.0) is None
+
+
+def test_only_without_a_name_does_nothing_and_a_dry_run_writes_nothing(tmp_path):
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp_path / "cfg"), HOME=str(tmp_path / "home"))
+    script = os.path.join(ROOT, "scripts", "restart_at_break.py")
+    for argv in (["--live", "--only"], ["--only", "", "--live"], ["--only", "--live"]):
+        r = subprocess.run([sys.executable, "-I", script, *argv], capture_output=True, text=True, env=env)
+        assert r.returncode != 0 and "--only needs a session name" in r.stderr, argv
+    r = subprocess.run([sys.executable, "-I", script], capture_output=True, text=True, env=env)   # a dry run
+    assert r.returncode == 0
+    assert not (tmp_path / "cfg" / "pit-stop").exists()      # no folders, no log
+
+
+def test_apply_refuses_a_settings_file_it_cannot_read(tmp_path, monkeypatch):
+    import pytest
+    pc, op, proj = _history(tmp_path, monkeypatch)
+    os.makedirs(os.path.join(proj, ".claude"))
+    s = os.path.join(proj, ".claude", "settings.local.json")
+    text = '{"permissions": {"allow": ["Bash(ls:*)"]},  // my note\n}'
+    open(s, "w").write(text)
+    m = op.analyze(proj, None)
+    with pytest.raises(SystemExit):
+        op.apply(proj, op.recommend(m), m)
+    assert open(s).read() == text                            # untouched, nothing dropped
+    assert pc.read_json_strict(str(tmp_path / "missing.json")) == ({}, None)
+
+
+def test_odd_transcript_lines_do_not_break_the_readers(tmp_path, monkeypatch):
+    import pitstop_common as pc
+    import optimize as op
+    monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
+    proj = tmp_path / "work"
+    proj.mkdir()
+    d = tmp_path / "projects" / pc.project_key(str(proj))
+    d.mkdir(parents=True)
+    lines = ['[1, 2]', '"text"', '7', 'null', 'not json at all',
+             json.dumps({"type": "assistant", "message": "a plain string"}),
+             json.dumps({"type": "assistant", "message": {"content": [{"type": "tool_use", "name": "Read", "input": "a string"}],
+                                                          "usage": {"input_tokens": "many"}}}),
+             json.dumps({"type": "user", "message": {"content": [{"type": "tool_result"}]}}),
+             json.dumps({"type": "system", "subtype": "compact_boundary"}),
+             json.dumps({"type": "assistant", "message": {"content": [{"type": "text"}], "usage": usage(1000)}}),
+             json.dumps({"type": "system", "subtype": "compact_boundary"})]
+    (d / "odd.jsonl").write_text("\n".join(lines) + "\n")
+    m = op.analyze(str(proj), None)                          # no crash; compactions without times are counted
+    assert m["compactions"] == 2 and m["median_hours_per_cycle"] is None
+    assert op.recommend(m)["window"] > 0
+    # the hook reads the same file without failing, and allows
+    code, _ = run_hook({"trigger": "auto", "transcript_path": str(d / "odd.jsonl"), "session_id": "odd"}, tmp_path)
+    assert code == 0
+    for bad in ("[]", "null", '"x"', "7"):                   # stdin that is JSON but not an object
+        assert run_hook(bad, tmp_path) == (0, "")
+    assert run_hook({"trigger": "auto"}, tmp_path, {"PIT_STOP_DEFAULT_FLEX": "lots"}) == (0, "")
+
+
+def test_thin_history_leaves_the_window_where_it_is(tmp_path, monkeypatch):
+    pc, op, proj = _history(tmp_path, monkeypatch, cycles=1)
+    m = op.analyze(proj, None)
+    assert m["compactions"] == 1
+    assert op.recommend(dict(m, current_window=950_000))["window"] == 950_000    # the user's own number stays
+    assert op.recommend(dict(m, current_window=None))["window"] == 500_000       # none set: the neutral start
+    low = op.recommend(dict(m, current_window=150_000))
+    assert low["window"] == 150_000 and low["idle_point"] == pc.IDLE_FLOOR and low["ceiling"] >= low["window"]
+
+
+def _live(tmp_path, monkeypatch, ctx=300_000, idle=600, compact_age=None, confirm=True):
+    """The restart helper in live mode with the pane, the clock and the transcript faked.
+    Returns (rab, typed): typed collects every line it would send with Enter."""
+    rab = _rab(tmp_path, monkeypatch)
+    typed = []
+    monkeypatch.setattr(rab, "LIVE", True)
+    for d in ("state", "ok"):
+        os.makedirs(os.path.join(rab.BASE, d), exist_ok=True)
+    monkeypatch.setattr(rab, "input_empty", lambda t: True)
+    monkeypatch.setattr(rab, "screen_busy", lambda t: False)
+    monkeypatch.setattr(rab, "screen", lambda t, escapes=False: [])
+    monkeypatch.setattr(rab, "type_line", lambda t, text: (typed.append(text), (True, ""))[1])
+    monkeypatch.setattr(rab, "ctx_and_idle", lambda s: (ctx, idle))
+    monkeypatch.setattr(rab, "last_compact_age", lambda p, now=None: compact_age)
+    monkeypatch.setattr(rab, "confirm_restart", lambda s, newest, wait=150: confirm)
+    monkeypatch.setattr(rab.time, "sleep", lambda n: None)
+    return rab, typed
+
+
+def _sess(status="idle", version="2.1.319", started=0, name="Lane One"):
+    return {"name": name, "cwd": "/work", "version": version, "sessionId": "abcd1234-0000", "status": status,
+            "startedAt": started, "pid": os.getpid()}
+
+
+def test_live_compact_first_then_restart_and_nothing_typed_after(tmp_path, monkeypatch):
+    import time
+    rab, typed = _live(tmp_path, monkeypatch)
+    now, counts = time.time(), {"restart": 0, "compact": 0}
+    rab.handle(_sess(), "2.1.322", "pane", now, counts)
+    assert typed == ["/compact"] and counts == {"restart": 0, "compact": 1}
+    rab.handle(_sess(), "2.1.322", "pane", now + 120, counts)          # two minutes on: wait, type nothing
+    assert typed == ["/compact"]
+    monkeypatch.setattr(rab, "last_compact_age", lambda p, now=None: 200)   # the summary landed
+    monkeypatch.setattr(rab, "ctx_and_idle", lambda s: (20_000, 90))
+    rab.handle(_sess(), "2.1.322", "pane", now + 300, counts)
+    assert typed == ["/compact", "/restart"]                            # and no note after: there is no re-arm list
+    key = rab.lane_key("Lane One", "abcd1234-0000")
+    assert os.path.exists(os.path.join(rab.BASE, "state", key + ".last"))
+    assert not os.path.exists(os.path.join(rab.BASE, "state", key + ".compact"))   # cleaned up after the restart
+    # still on the old version an hour later (the restart did not take): left alone for the cooldown
+    rab.handle(_sess(), "2.1.322", "pane", now + 3600, counts)
+    assert typed == ["/compact", "/restart"]
+
+
+def test_live_run_limit_and_cold_restart(tmp_path, monkeypatch):
+    import time
+    rab, typed = _live(tmp_path, monkeypatch, idle=4000)                # idle over an hour: the cache is cold
+    now, counts = time.time(), {"restart": 0, "compact": 0}
+    rab.handle(_sess(), "2.1.322", "pane", now, counts)
+    assert typed == ["/restart"]                                        # no /compact on a cold cache, no note after
+    rab.handle(_sess(name="Lane Two"), "2.1.322", "pane", now, counts)  # one restart per run
+    assert typed == ["/restart"]
+
+
+def test_live_background_jobs_ask_then_restart_then_rearm_note(tmp_path, monkeypatch):
+    import time
+    import pitstop_common as pc
+    rab, typed = _live(tmp_path, monkeypatch, ctx=60_000, idle=30)
+    now, counts = time.time() - 4000, {"restart": 0, "compact": 0}
+    rab.handle(_sess(status="shell"), "2.1.322", "pane", now, counts)
+    askf = os.path.join(pc.ASKS, "abcd1234-0000.json")
+    ask = json.load(open(askf))
+    assert typed == [] and ask["delivered"] is None and ask["newest"] == "2.1.322"   # left for the Stop hook, not typed
+    # the session's Stop hook ran (it is loaded there): the helper never types the ask, however long it waits
+    os.makedirs(pc.SEEN)
+    open(os.path.join(pc.SEEN, "abcd1234-0000"), "w").write("1")
+    rab.handle(_sess(status="shell"), "2.1.322", "pane", now + 3000, counts)
+    assert typed == []
+    # Claude writes its list (after the ask) and stops its jobs
+    with open(ask["okf"], "w") as f:
+        f.write("inbox watcher: ./watch.sh\n")
+    monkeypatch.setattr(rab, "ctx_and_idle", lambda s: (60_000, 90))
+    rab.handle(_sess(status="idle"), "2.1.322", "pane", time.time(), counts)
+    assert typed[0] == "/restart" and len(typed) == 2
+    assert "start them again" in typed[1] and "inbox watcher" in typed[1]
+    assert not os.path.exists(ask["okf"]) and not os.path.exists(askf)   # list put away only after the note went
+
+
+def test_live_late_restart_still_gets_the_rearm_note(tmp_path, monkeypatch):
+    import time
+    import pitstop_common as pc
+    rab, typed = _live(tmp_path, monkeypatch, ctx=60_000, idle=90, confirm=False)
+    now, counts = time.time(), {"restart": 0, "compact": 0}
+    key = rab.lane_key("Lane One", "abcd1234-0000")
+    okf = os.path.join(rab.BASE, "ok", key)
+    os.makedirs(pc.ASKS)
+    json.dump({"newest": "2.1.322", "ver": "2.1.319", "okf": okf, "at": now - 600, "delivered": now - 500},
+              open(os.path.join(pc.ASKS, "abcd1234-0000.json"), "w"))
+    open(okf, "w").write("heartbeat loop\n")
+    rab.handle(_sess(), "2.1.322", "pane", now, counts)                 # /restart typed, not confirmed in time
+    assert typed == ["/restart"] and os.path.exists(okf)                # the list stays: nothing is lost
+    # next run: it IS on the newest version now (the restart landed late)
+    rab.handle(_sess(version="2.1.322", started=(now + 60) * 1000), "2.1.322", "pane", now + 300, counts)
+    assert len(typed) == 2 and "heartbeat loop" in typed[1] and not os.path.exists(okf)
+    rab.handle(_sess(version="2.1.322", started=(now + 60) * 1000), "2.1.322", "pane", now + 600, counts)
+    assert len(typed) == 2                                              # told once
+
+
+def test_live_stale_lists_are_put_away_without_typing(tmp_path, monkeypatch):
+    import time
+    rab, typed = _live(tmp_path, monkeypatch, ctx=300_000, idle=200)
+    now, counts = time.time(), {"restart": 0, "compact": 0}
+    key = rab.lane_key("Lane One", "abcd1234-0000")
+    okf = os.path.join(rab.BASE, "ok", key)
+    # up to date, a list that no restart followed (the session started long before it): put away, nothing typed
+    open(okf, "w").write("old watcher\n")
+    rab.handle(_sess(version="2.1.322", started=1000), "2.1.322", "pane", now, counts)
+    assert typed == [] and not os.path.exists(okf)
+    # behind, a list with no ask on record: it is NOT consent; the session is treated like any other (idle 200 s: skip)
+    open(okf, "w").write("old watcher\n")
+    rab.handle(_sess(), "2.1.322", "pane", now, counts)
+    assert typed == [] and not os.path.exists(okf)
+
+
+def test_live_typing_backoff_stops_every_typed_action(tmp_path, monkeypatch):
+    import time
+    import pitstop_common as pc
+    rab, typed = _live(tmp_path, monkeypatch, ctx=60_000, idle=900)
+    now, counts = time.time(), {"restart": 0, "compact": 0}
+    key = rab.lane_key("Lane One", "abcd1234-0000")
+    json.dump({"n": 1, "at": now - 60}, open(os.path.join(rab.BASE, "state", key + ".mismatch"), "w"))
+    rab.handle(_sess(), "2.1.322", "pane", now, counts)                 # would restart, but typing is backing off
+    assert typed == []
+    okf = os.path.join(rab.BASE, "ok", key)                             # ... and no "start your jobs" note either
+    os.makedirs(pc.ASKS)
+    json.dump({"at": now - 4000, "newest": "2.1.322"}, open(os.path.join(pc.ASKS, "abcd1234-0000.json"), "w"))
+    open(okf, "w").write("watcher\n")
+    os.utime(okf, (now - 3000, now - 3000))
+    rab.stamp(os.path.join(rab.BASE, "state", key + ".last"), now - 100)   # a restart was tried: blocked
+    for i in range(3):
+        rab.handle(_sess(), "2.1.322", "pane", now + i, counts)
+    assert typed == [] and os.path.exists(okf)
+    os.remove(os.path.join(rab.BASE, "state", key + ".mismatch"))       # backoff over: now it is told, once
+    rab.handle(_sess(), "2.1.322", "pane", now + 10, counts)
+    rab.handle(_sess(), "2.1.322", "pane", now + 20, counts)
+    assert len(typed) == 1 and "not happening" in typed[0] and not os.path.exists(okf)

@@ -138,7 +138,7 @@ def install_timer(interval, apply):
     os.makedirs(UNIT_DIR, exist_ok=True)
     with open(svc, "w") as f:
         f.write(f"[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
-                f"Environment=PATH={timer_path()}\nExecStart={py} -I {BIN} --live\nTimeoutStartSec=300\nNice=10\n")
+                f"Environment=PATH={timer_path()}\nExecStart={py} -I {BIN} --live\nTimeoutStartSec=600\nNice=10\n")
     with open(tmr, "w") as f:
         f.write(f"[Unit]\nDescription=Windstorm Pit Stop every {interval} minutes\n\n[Timer]\nOnBootSec=3min\n"
                 f"OnUnitActiveSec={interval}min\nAccuracySec=20s\n\n[Install]\nWantedBy=timers.target\n")
@@ -172,9 +172,12 @@ def main():
 
     print("1. Weekly tuning: " + ("left off (--no-auto-tune)" if a.no_auto_tune else "ON (auto_tune: true)"))
     if a.apply and not a.no_auto_tune:
-        cfg = pc.config()
-        cfg["auto_tune"] = True
-        pc.write_json_atomic(pc.CONFIG, cfg)
+        cfg, err = pc.read_json_strict(pc.CONFIG)
+        if err or not isinstance(cfg, dict):
+            print(f"   NOT switched on: {pc.CONFIG} does not read as a JSON object ({err or 'not an object'}); fix it and run again")
+        else:
+            cfg["auto_tune"] = True
+            pc.write_json_atomic(pc.CONFIG, cfg)
 
     folders = sorted({s.get("cwd") for s in sessions if s.get("cwd")} | {os.getcwd()})
     if a.no_tune_now:
@@ -184,7 +187,11 @@ def main():
         for d in folders:
             if not os.path.isdir(d):
                 continue
-            m = op.analyze(d, a.days)
+            try:
+                m = op.analyze(d, a.days)
+            except Exception as e:
+                print(f"   {d.replace(pc.HOME, '~')}: could not read its history ({type(e).__name__}); left as it is")
+                continue
             if not m["transcripts"]:
                 print(f"   {d.replace(pc.HOME, '~')}: no history in {a.days} days; left as it is")
                 continue
@@ -193,8 +200,11 @@ def main():
                   f"{pc.fmt_k(rec['idle_point'])}, window {pc.fmt_k(m['current_window'])} -> {pc.fmt_k(rec['window'])}"
                   f"  ({m['compactions']} compactions, {m['compactions_when']['mid_task']} mid-task)")
             if a.apply:
-                s, _, _ = op.apply(d, rec, m)
-                pc.prune_backups(s)
+                try:
+                    s, _, _ = op.apply(d, rec, m)
+                    pc.prune_backups(s)
+                except SystemExit as e:
+                    print(f"     {e}")
         print("   New points take effect at each session's next start (a pit-stop restart counts).")
 
     if not a.fleet:
