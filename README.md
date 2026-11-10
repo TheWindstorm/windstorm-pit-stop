@@ -7,7 +7,7 @@
 A race car never stops mid-corner. It waits for the pit stop, then refuels, changes tires and goes back out. Pit Stop gives Claude Code sessions the same rhythm (the command is `/pit-stop`). At a break between tasks, and never in the middle of one, a session:
 
 1. **Refuels.** It compacts its context at a break, at a compaction point tuned to that folder's work.
-2. **Changes tires.** It moves onto the newest installed Claude Code. *(Optional fleet mode.)*
+2. **Changes tires.** It moves onto the newest installed Claude Code. *(Optional fleet mode.)* Compaction alone never does this: a running session keeps its version until it restarts.
 3. **Gets a clean windshield.** After every compaction it re-reads only short, relevant instructions and memory that load in full.
 
 ## Install
@@ -27,7 +27,7 @@ Requirements: Claude Code, plus `python3` (3.10+, standard library only). Fleet 
 | **`/pit-stop optimize`** | Reads a folder's own session history and recommends a compaction point, for example 300K, 500K or 700K, plus a hard ceiling. It also suggests (never applies) a model and effort level. You apply it with your OK. | You run it |
 | **`/pit-stop reading`** | Checks the instruction files and memory index a folder's sessions re-read. Claude Code loads only the first **200 lines** of `MEMORY.md`, so an index that grows past that silently drops its newest entries. It trims without deleting anything. | You run it |
 | **`/pit-stop report`** | One read-only line per running session: version vs newest, state, compaction point, memory size. | You run it |
-| **Restart at the break** (fleet mode) | For tmux users with many sessions. Moves idle sessions with a small context onto the newest Claude Code, one at a time. Sessions with background jobs are asked first. | Off; dry run unless `--live` |
+| **Restart at the break** (fleet mode) | For tmux users with many sessions. Moves sessions onto the newest Claude Code at a break, one at a time: right after a compaction (any size, once idle 60 s), or with a small context, or after an hour idle (the prompt cache is cold anyway). Sessions with background jobs are asked first. Every skip is logged with its reason. | Off; dry run unless `--live` |
 
 ## How the optimizer decides
 
@@ -48,13 +48,13 @@ These are heuristics, not guarantees. Model and effort changes affect quality an
 ## Safety
 
 - **Fails safe.** The hook allows compaction on any error. The restart helper treats anything it cannot read as busy and skips it.
-- **Never mid-task.** It never restarts a session with text in its input box, a dialog open, work running, a large context, or background jobs it hasn't agreed to stop. Claude Code itself refuses `/restart` while background work runs.
+- **Never mid-task.** It never restarts a session with text in its input box, a dialog open, work running, or background jobs it hasn't agreed to stop. A large context waits for its next compaction or a long idle. Claude Code itself refuses `/restart` while background work runs.
 - **Checks before Enter.** After typing, the restart helper presses Enter only if the input box holds exactly what it typed; otherwise it clears the line and skips.
 - **Capped ceilings.** A ceiling from a project file or the environment is clamped to 1.5x the first hold and 95% of the model's context size, so a cloned repo cannot hold compaction until the context overflows.
 - **Backups first.** Every file is backed up before it is written. Only the keys Pit Stop owns are changed.
 - **Local only.** No network calls. Logs hold counts only and rotate at 5 MB.
 
-Fleet mode relies on Claude Code's local session registry (`~/.claude/sessions/`), which is not a public interface. If it changes, sessions read as busy and nothing restarts.
+Schedule fleet mode every 2 to 10 minutes; the shorter the interval, the sooner it catches the break after a compaction. Fleet mode relies on Claude Code's local session registry (`~/.claude/sessions/`), which is not a public interface. If it changes, sessions read as busy and nothing restarts.
 
 ## Tested
 

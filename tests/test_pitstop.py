@@ -160,3 +160,54 @@ def test_restart_helper_reads_the_input_box(tmp_path, monkeypatch):
     mixed = [border, "❯ " + text[:60] + "hello", "  " + text[60:], border]
     assert not rab.same_text(rab.input_box_text(mixed), text)
     assert rab.input_box_text(["no prompt here"]) is None
+
+
+def _rab(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
+    import importlib
+    import pitstop_common
+    importlib.reload(pitstop_common)
+    import restart_at_break as rab
+    importlib.reload(rab)
+    return rab
+
+
+def test_restart_rules_at_a_break(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    cfg = dict(rab.CFG)
+    # working sessions are never restarted
+    assert rab.at_a_break("busy", 9999, 50_000, 10, cfg)[0] is False
+    # (a) just compacted: a big context is fine once idle >= 60 s
+    assert rab.at_a_break("idle", 61, 250_000, 600, cfg)[0] is True
+    ok, why = rab.at_a_break("idle", 30, 250_000, 600, cfg)
+    assert ok is False and "compacted" in why
+    # a compaction older than the window does not count
+    assert rab.at_a_break("idle", 120, 250_000, 1801, cfg)[0] is False
+    # (b) small context still needs the long idle
+    assert rab.at_a_break("idle", 301, 90_000, None, cfg)[0] is True
+    assert rab.at_a_break("idle", 120, 90_000, None, cfg)[0] is False
+    # (c) cold cache: a long idle allows any size
+    assert rab.at_a_break("idle", 3600, 400_000, None, cfg)[0] is True
+    # every refusal says why
+    ok, why = rab.at_a_break("idle", 120, 250_000, None, cfg)
+    assert ok is False and "needs:" in why
+    assert rab.at_a_break("idle", -1, None, None, cfg) == (False, "no transcript found")
+    # shell sessions pass the break test; the background-jobs note handles them after
+    assert rab.at_a_break("shell", 61, 250_000, 600, cfg)[0] is True
+
+
+def test_restart_reads_the_last_compaction_time(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    entries = [a("text"),
+               {"type": "system", "subtype": "compact_boundary", "timestamp": "2026-11-10T12:00:00.000Z"},
+               a("text"),
+               {"type": "system", "subtype": "compact_boundary", "timestamp": "2026-11-10T12:38:07.398Z"},
+               {"type": "user", "message": {"content": "compact_boundary mentioned in text only"}},
+               a("text")]
+    p = transcript(tmp_path, "s1", entries)
+    now = rab.utc_ts("2026-11-10T13:08:07Z")
+    assert int(rab.last_compact_age(p, now=now)) == 1800
+    # the marker found past a tail cut, and no compaction at all
+    assert rab.last_compact_age(transcript(tmp_path, "s2", [a("text")]), now=now) is None
+    assert rab.last_compact_age(str(tmp_path / "missing.jsonl")) is None
+    assert rab.utc_ts("2026-07-01T00:00:00Z") == 1782864000  # summer: no DST shift
