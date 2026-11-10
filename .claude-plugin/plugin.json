@@ -1,8 +1,8 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "windstorm-pit-stop",
-  "version": "0.1.4",
-  "description": "Windstorm Pit Stop, a context optimizer for Claude Code: compact at a break, restart onto the newest version at a break, keep each session's re-read files under the load limits, and tune each folder's compaction point from its own history.",
+  "version": "0.2.0",
+  "description": "Windstorm Pit Stop, a context optimizer for Claude Code: each folder's idle point and window fitted to its own history, compaction held until a break, a keep-list for every summary, and (fleet mode) every session moved onto the newest Claude Code at a break.",
   "author": {
     "name": "The Windstorm",
     "url": "https://github.com/TheWindstorm"

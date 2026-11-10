@@ -46,7 +46,11 @@ def test_hook_decisions(tmp_path):
         p = transcript(tmp_path, name, entries)
         code, out = run_hook({"trigger": "auto", "transcript_path": p, "session_id": name}, tmp_path, env)
         assert code == want, name
-        assert out == "", name
+        if want == 2:
+            assert out == "", name                      # a hold never prints
+        else:
+            assert out.startswith("Pit Stop notes"), name   # an allowed auto compaction gets the keep-list
+            assert ("middle of a task" in out) == (name == "env_ceiling"), name
 
 
 def test_hook_always_allows_manual_bad_and_missing(tmp_path):
@@ -273,4 +277,357 @@ def test_hook_command_falls_back_to_python_when_python3_is_a_stub(tmp_path):
             r = subprocess.run(["sh", "-c", command], input=json.dumps({"trigger": "auto", "transcript_path": tr, "session_id": "t"}),
                                capture_output=True, text=True, env=env)
             assert r.returncode == want, (path_first, want, r.stderr)
-            assert r.stdout == ""
+            # a hold prints nothing; an allowed compaction prints only the keep-list, never the stub's message
+            assert r.stdout == "" if want == 2 else r.stdout.startswith("Pit Stop notes")
+            assert "Python was not found" not in r.stdout
+
+
+# ---------------------------------------------------------------- 0.2.0
+
+def test_hook_instructions_can_be_switched_off_or_extended(tmp_path):
+    p = transcript(tmp_path, "i", [a("text")])
+    pay = {"trigger": "auto", "transcript_path": p, "session_id": "i"}
+    state = tmp_path / "cfg" / "pit-stop"
+    state.mkdir(parents=True)
+    (state / "config.json").write_text(json.dumps({"compact_instructions": False}))
+    assert run_hook(pay, tmp_path) == (0, "")
+    (state / "config.json").write_text(json.dumps({"compact_instructions": "keep the customer list"}))
+    code, out = run_hook(pay, tmp_path)
+    assert code == 0 and out.endswith("Also: keep the customer list") and len(out) < 10000
+    (state / "config.json").write_text("not json")          # a broken file means the default text
+    assert run_hook(pay, tmp_path)[1].startswith("Pit Stop notes")
+    # a manual /compact never gets instructions from the hook
+    assert run_hook(dict(pay, trigger="manual"), tmp_path) == (0, "")
+
+
+def test_hook_reads_the_user_level_folder_profile(tmp_path):
+    import re
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    folders = tmp_path / "cfg" / "pit-stop" / "folders"
+    folders.mkdir(parents=True)
+    key = re.sub(r"[^A-Za-z0-9]", "-", str(proj))
+    (folders / f"{key}.json").write_text(json.dumps({"ceiling": 300000}))
+    p = transcript(tmp_path, "up", [a("tool_use", 310000)])
+    code, out = run_hook({"trigger": "auto", "transcript_path": p, "session_id": "up", "cwd": str(proj)}, tmp_path)
+    assert code == 0 and "middle of a task" in out
+
+
+def _run(script, payload, tmp, extra_env=None):
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp / "cfg"), HOME=str(tmp / "home"))
+    env.update(extra_env or {})
+    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "hooks", script)], input=json.dumps(payload),
+                       capture_output=True, text=True, env=env)
+    return r.returncode, r.stdout, r.stderr
+
+
+def test_stop_hook_hands_over_the_ask_once(tmp_path):
+    asks = tmp_path / "cfg" / "pit-stop" / "asks"
+    asks.mkdir(parents=True)
+    okf = str(tmp_path / "ok" / "lane")
+    (asks / "sess-1.json").write_text(json.dumps({"newest": "2.1.322", "ver": "2.1.319", "okf": okf, "at": 1, "delivered": None}))
+    # never twice in a row
+    assert _run("stop_pit_stop.py", {"session_id": "sess-1", "stop_hook_active": True}, tmp_path)[0] == 0
+    code, out, err = _run("stop_pit_stop.py", {"session_id": "sess-1"}, tmp_path)
+    assert code == 2 and out == "" and okf in err and "2.1.322" in err and "Do not type /restart" in err
+    assert json.loads((asks / "sess-1.json").read_text())["delivered"]
+    assert _run("stop_pit_stop.py", {"session_id": "sess-1"}, tmp_path)[:2] == (0, "")
+    # the stamp tells the restart helper this session has the plugin's hooks
+    assert (tmp_path / "cfg" / "pit-stop" / "seen" / "sess-1").exists()
+    # bad input and a missing session id allow the stop
+    assert _run("stop_pit_stop.py", {}, tmp_path)[0] == 0
+
+
+def test_stop_hook_update_line_once_per_version(tmp_path):
+    versions = tmp_path / "home" / ".local" / "share" / "claude" / "versions"
+    versions.mkdir(parents=True)
+    (versions / "2.1.322").write_text("")
+    sessions = tmp_path / "cfg" / "sessions"
+    sessions.mkdir(parents=True)
+    (sessions / "1.json").write_text(json.dumps({"sessionId": "sess-2", "pid": os.getpid(), "version": "2.1.319"}))
+    code, out, _ = _run("stop_pit_stop.py", {"session_id": "sess-2"}, tmp_path)
+    msg = json.loads(out)["systemMessage"]
+    assert code == 0 and "2.1.322" in msg and "2.1.319" in msg and "/restart" in msg
+    assert _run("stop_pit_stop.py", {"session_id": "sess-2"}, tmp_path)[:2] == (0, "")   # once per version
+    # a session already on the newest version, and "nudge": false, print nothing
+    (sessions / "1.json").write_text(json.dumps({"sessionId": "sess-3", "pid": os.getpid(), "version": "2.1.322"}))
+    assert _run("stop_pit_stop.py", {"session_id": "sess-3"}, tmp_path)[:2] == (0, "")
+    (sessions / "1.json").write_text(json.dumps({"sessionId": "sess-4", "pid": os.getpid(), "version": "2.1.319"}))
+    (tmp_path / "cfg" / "pit-stop" / "config.json").write_text(json.dumps({"nudge": False}))
+    assert _run("stop_pit_stop.py", {"session_id": "sess-4"}, tmp_path)[:2] == (0, "")
+    # fleet mode on (the helper ran in the last hour): the helper handles it, no line
+    (tmp_path / "cfg" / "pit-stop" / "config.json").write_text("{}")
+    (tmp_path / "cfg" / "pit-stop" / "restart").mkdir()
+    (tmp_path / "cfg" / "pit-stop" / "restart" / "restart.log").write_text("x")
+    assert _run("stop_pit_stop.py", {"session_id": "sess-4"}, tmp_path)[:2] == (0, "")
+
+
+def test_session_start_checklist_only_after_a_compaction(tmp_path):
+    code, out, _ = _run("session_start.py", {"source": "compact", "cwd": str(tmp_path)}, tmp_path)
+    assert code == 0 and out.startswith("Pit Stop:") and "background jobs" in out
+    for source in ("startup", "resume", "clear"):
+        assert _run("session_start.py", {"source": source, "cwd": str(tmp_path)}, tmp_path)[:2] == (0, "")
+    state = tmp_path / "cfg" / "pit-stop"
+    state.mkdir(parents=True)
+    (state / "config.json").write_text(json.dumps({"after_compact_note": False}))
+    assert _run("session_start.py", {"source": "compact"}, tmp_path)[:2] == (0, "")
+    assert _run("session_start.py", "not json", tmp_path)[0] == 0
+
+
+def _lane(**kw):
+    base = {"status": "idle", "idle": 600, "ctx": 300_000, "compact_age": None, "behind": True,
+            "consented": False, "consent_age": 0, "compact_ask_age": None, "idle_point": None, "blocked": None}
+    base.update(kw)
+    return base
+
+
+def test_plan_compact_first_then_restart(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    cfg = dict(rab.CFG)
+    # big, warm, quiet 10 min: compact first
+    assert rab.plan(_lane(), cfg)[0] == "compact"
+    # /compact typed 2 min ago: wait for the summary, type nothing more
+    assert rab.plan(_lane(compact_ask_age=120), cfg)[0] == "wait"
+    # the summary landed: break (a), restart
+    assert rab.plan(_lane(compact_age=200, ctx=20_000, idle=90, compact_ask_age=300), cfg)[0] == "restart"
+    # /compact was typed an hour ago and nothing happened: do not type it again before compact_retry
+    act, why = rab.plan(_lane(compact_ask_age=3600), cfg)
+    assert act == "skip" and "needs:" in why
+    # not quiet long enough yet
+    assert rab.plan(_lane(idle=120), cfg)[0] == "skip"
+    # cache no longer warm: never start a turn on a big cold context; wait for cold_idle, then restart for free
+    assert rab.plan(_lane(idle=3000), cfg)[0] == "skip"
+    assert rab.plan(_lane(idle=3700), cfg)[0] == "restart"
+    # switched off: big sessions wait for their own compaction
+    assert rab.plan(_lane(), dict(cfg, compact_before_restart=False))[0] == "skip"
+    # small context: straight to restart, no compaction
+    assert rab.plan(_lane(ctx=60_000), cfg)[0] == "restart"
+    # working sessions are never touched
+    assert rab.plan(_lane(status="busy"), cfg)[0] == "skip"
+    assert rab.plan(_lane(status="waiting"), cfg)[0] == "skip"
+
+
+def test_plan_background_jobs_and_consent(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    cfg = dict(rab.CFG)
+    # background jobs: ask, whatever the context or idle time
+    assert rab.plan(_lane(status="shell", idle=5), cfg)[0] == "ask"
+    # it wrote its list but its jobs still run
+    assert rab.plan(_lane(status="shell", consented=True), cfg)[0] == "wait"
+    # it wrote its list and stopped its jobs: big + warm -> compact first (after 60 s, not 300)
+    assert rab.plan(_lane(consented=True, idle=90), cfg)[0] == "compact"
+    # ... the compaction never came: restart anyway, it is waiting with its watchers down
+    assert rab.plan(_lane(consented=True, idle=900, compact_ask_age=700), cfg)[0] == "restart"
+    # ... or with compaction switched off: restart whatever its size (0.1.x skipped it)
+    assert rab.plan(_lane(consented=True, idle=90), dict(cfg, compact_before_restart=False))[0] == "restart"
+    assert rab.at_a_break("idle", 90, 400_000, None, cfg, consented=True)[0] is True
+    assert rab.at_a_break("idle", 90, 400_000, None, cfg)[0] is False
+    # small consenting session: restart
+    assert rab.plan(_lane(consented=True, idle=90, ctx=50_000), cfg)[0] == "restart"
+    # it just stopped its jobs (idle 30 s): not yet, the next run restarts it; never "start your jobs again"
+    assert rab.plan(_lane(consented=True, idle=30, consent_age=2000, compact_ask_age=900), cfg)[0] == "skip"
+    # the helper cannot restart it (a refused restart, or typing keeps failing) and 30 min have passed:
+    # tell it to start its jobs again rather than leave it with its watchers down
+    act, why = rab.plan(_lane(consented=True, consent_age=2000, blocked="typing keeps failing"), cfg)
+    assert act == "rearm" and "typing keeps failing" in why
+    assert rab.plan(_lane(consented=True, consent_age=600, blocked="typing keeps failing"), cfg)[0] == "skip"
+    # blocked and it never agreed to anything: just skip, with the reason
+    assert rab.plan(_lane(blocked="a restart was tried 100s ago"), cfg) == ("skip", "a restart was tried 100s ago")
+
+
+def test_plan_idle_compact_is_opt_in(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    cfg = dict(rab.CFG)
+    up = _lane(behind=False, ctx=250_000, idle_point=200_000, idle=700)
+    assert rab.plan(up, cfg)[0] == "none"                               # off by default
+    on = dict(cfg, idle_compact_after=600)
+    assert rab.plan(up, on)[0] == "compact"
+    assert rab.plan(dict(up, ctx=150_000), on)[0] == "none"             # under its idle point
+    assert rab.plan(dict(up, idle_point=None), on)[0] == "none"         # no point set for it
+    assert rab.plan(dict(up, idle=3000), on)[0] == "none"               # cache cold: leave it
+    assert rab.plan(dict(up, status="shell"), on)[0] == "none"
+    assert rab.plan(dict(up, compact_age=300), on)[0] == "none"         # it just compacted
+    assert rab.plan(dict(up, compact_ask_age=900), on)[0] == "none"     # already asked
+
+
+def test_allow_and_deny_lists(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    cfg = dict(rab.CFG, deny_name_globs=["user1-*", "* Boss"], deny_names=["Ghost"], deny_paths=[str(tmp_path / "private")])
+    assert rab.allowed("Windy Hub", "/work", cfg)
+    assert not rab.allowed("user1-gpu-2f", "/work", cfg)
+    assert not rab.allowed("Veron HERDR Boss", "/work", cfg)
+    assert not rab.allowed("Ghost", "/work", cfg)
+    assert not rab.allowed("Windy Hub", str(tmp_path / "private" / "x"), cfg)
+    assert not rab.allowed("Windy Hub", "/work", dict(cfg, allow_names=["Windy Mail"]))
+    assert rab.rearm_list(str(tmp_path / "none")) == []
+    f = tmp_path / "jobs"
+    f.write_text("inbox watcher: ./watch.sh\n\n  \nheartbeat loop\n")
+    assert rab.rearm_list(str(f)) == ["inbox watcher: ./watch.sh", "heartbeat loop"]
+
+
+def _history(tmp_path, monkeypatch, cycles=4, per=30, gap_min=1, start=300000):
+    import pitstop_common as pc
+    import optimize as op
+    monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
+    monkeypatch.setattr(pc, "STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setattr(pc, "FOLDERS", str(tmp_path / "state" / "folders"))
+    monkeypatch.setattr(pc, "LANES", str(tmp_path / "state" / "lanes"))
+    proj = tmp_path / "work"
+    proj.mkdir(exist_ok=True)
+    d = tmp_path / "projects" / pc.project_key(str(proj))
+    d.mkdir(parents=True, exist_ok=True)
+    ents, minute = [], 0
+    for cycle in range(cycles):
+        for i in range(per):
+            minute += gap_min
+            ts = "2026-11-%02dT%02d:%02d:00Z" % (1 + minute // 1440, (minute // 60) % 24, minute % 60)
+            ents.append({"type": "user", "message": {"content": "do it"}, "timestamp": ts})
+            ents.append({"type": "assistant", "timestamp": ts, "message": {
+                "content": [{"type": "tool_use", "name": "Read", "input": {"file_path": f"/area{cycle}/sub{i % 3}/f{i}.py"}}],
+                "usage": usage(start + i * 5000)}})
+            ents.append({"type": "user", "timestamp": ts, "message": {"content": [{"type": "tool_result"}]}})
+        ents.append({"type": "system", "subtype": "compact_boundary", "timestamp": ts})
+    (d / "sess-a.jsonl").write_text("\n".join(json.dumps(e) for e in ents) + "\n")
+    return pc, op, str(proj)
+
+
+def test_optimizer_two_points_within_bounds(tmp_path, monkeypatch):
+    pc, op, proj = _history(tmp_path, monkeypatch)
+    m = op.analyze(proj, None)
+    assert m["compactions"] == 4 and m["compactions_when"]["mid_task"] == 4
+    assert m["topic_change"] is not None and 0 <= m["topic_change"] <= 1
+    rec = op.recommend(m)
+    assert pc.IDLE_FLOOR <= rec["idle_point"] <= 300_000
+    assert rec["idle_point"] <= rec["window"] - 100_000
+    assert 300_000 <= rec["window"] <= 700_000 and rec["window"] <= rec["ceiling"] <= 850_000
+    # the weekly tune moves each point at most one step from where it is now
+    m2 = dict(m, current_window=700_000, current_idle_point=300_000)
+    slow = op.recommend(m2, max_steps=1)
+    assert slow["window"] >= 600_000 and slow["idle_point"] >= 250_000
+    assert op.toward(500_000, 300_000, 100_000, 1) == 400_000
+    assert op.toward(None, 300_000, 100_000, 1) == 300_000
+    assert op.toward(500_000, 300_000, 100_000, None) == 300_000
+    # a 200K-context history: the idle point is Claude Code's floor
+    small = op.recommend(dict(m, max_context=180_000, current_window=None, current_idle_point=None))
+    assert small["idle_point"] == pc.IDLE_FLOOR and small["window"] <= 170_000
+
+
+def test_topic_change_measure():
+    import optimize as op
+    same = ["/a", "/b", "/c"] * 40
+    assert op.drift_of(same) and max(op.drift_of(same)) == 0
+    moving = [f"/area{i // 30}/x{i}" for i in range(120)]
+    assert min(op.drift_of(moving)) == 1
+    assert op.drift_of(["/a"] * 10) == []      # too little to say
+
+
+def test_cold_wake_ups_are_counted(tmp_path, monkeypatch):
+    pc, op, proj = _history(tmp_path, monkeypatch, cycles=2, per=12, gap_min=90)
+    m = op.analyze(proj, None)
+    assert m["cold_wakes_per_day"] and m["cold_wakes_per_day"] > 3
+    rec = op.recommend(m)
+    assert any("cold wake-ups" in w for w in rec["why"])
+
+
+def test_apply_writes_both_points_and_keeps_the_rest(tmp_path, monkeypatch):
+    pc, op, proj = _history(tmp_path, monkeypatch)
+    sdir = os.path.join(proj, ".claude")
+    os.makedirs(sdir)
+    with open(os.path.join(sdir, "settings.local.json"), "w") as f:
+        json.dump({"permissions": {"allow": ["Bash(ls:*)"]}, "env": {"KEEP_ME": "1"}}, f)
+    m = op.analyze(proj, None)
+    rec = op.recommend(m)
+    s, backup, prof = op.apply(proj, rec, m, {"sess-a": {"idle_point": 150_000, "window": 400_000, "ceiling": 600_000, "why": []}})
+    data = json.load(open(s))
+    assert data["permissions"] == {"allow": ["Bash(ls:*)"]} and data["env"]["KEEP_ME"] == "1"
+    assert data["env"][pc.WINDOW_ENV] == str(rec["window"]) and data["env"][pc.IDLE_ENV] == str(rec["idle_point"])
+    assert backup and os.path.exists(backup)
+    # the profile lives in the user's own folder, not in the project
+    assert prof.startswith(str(tmp_path / "state" / "folders")) and not os.path.exists(os.path.join(sdir, "pit-stop.json"))
+    assert pc.folder_profile(proj)["ceiling"] == rec["ceiling"]
+    # a lane's own profile wins over its folder's
+    assert pc.points(proj, "sess-a")["idle_point"] == 150_000 and pc.points(proj, "sess-a")["source"] == "lane"
+    assert pc.points(proj, "other")["idle_point"] == rec["idle_point"]
+    assert pc.env_int(proj, pc.IDLE_ENV) == rec["idle_point"]
+    for i in range(5):
+        open(f"{s}.bak-pitstop-2026010{i}T000000Z", "w").write("x")
+    pc.prune_backups(s, keep=3)
+    import glob
+    assert len(glob.glob(s + ".bak-pitstop-*")) == 3
+
+
+def test_session_list_falls_back_to_the_documented_listing(tmp_path, monkeypatch):
+    import pitstop_common as pc
+    monkeypatch.setattr(pc, "SESSIONS", str(tmp_path / "sessions"))
+    me = os.getpid()
+    monkeypatch.setattr(pc, "cli_sessions", lambda timeout=30: [
+        {"sessionId": "s1", "pid": me, "cwd": "/w", "name": " Lane One ", "status": "idle", "kind": "interactive"},
+        {"sessionId": "s2", "pid": me, "cwd": "/w", "name": "bg", "status": "idle", "kind": "background"}])
+    rows, source = pc.live_sessions()                    # no registry at all
+    assert source == "claude agents" and [r["name"] for r in rows] == ["Lane One"]
+    os.makedirs(tmp_path / "sessions")
+    (tmp_path / "sessions" / "1.json").write_text(json.dumps(
+        {"sessionId": "s9", "pid": me, "cwd": "/w", "name": "Reg", "status": "idle", "version": "2.1.300", "kind": "interactive"}))
+    rows, source = pc.live_sessions()                    # a usable registry is preferred: it has the version
+    assert source == "registry" and rows[0]["version"] == "2.1.300"
+    (tmp_path / "sessions" / "1.json").write_text(json.dumps({"sessionId": "s9", "pid": me, "cwd": "/w", "name": "Reg"}))
+    assert pc.live_sessions()[1] == "claude agents"      # the registry lost its status field: use the listing
+    assert pc.vkey("2.1.322") > pc.vkey("2.1.99") and pc.vkey("junk") == ()
+
+
+def test_launcher_finds_the_installed_plugin(tmp_path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("launcher", os.path.join(ROOT, "scripts", "launcher.py"))
+    launcher = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(launcher)
+    cache = tmp_path / "plugins" / "cache" / "thewindstorm" / "windstorm-pit-stop"
+    for v in ("0.1.4", "0.2.0", "0.10.0"):
+        (cache / v / "scripts").mkdir(parents=True)
+        (cache / v / "scripts" / "restart_at_break.py").write_text("")
+    assert launcher.plugin_root(str(tmp_path)).endswith("0.10.0")      # no record: the highest version, not the last by name
+    (tmp_path / "plugins" / "installed_plugins.json").write_text(json.dumps({"plugins": {
+        "windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": str(cache / "0.2.0")}],
+        "other@x": [{"scope": "user", "installPath": str(cache / "0.1.4")}]}}))
+    assert launcher.plugin_root(str(tmp_path)).endswith("0.2.0")       # what Claude Code says is installed
+    assert launcher.plugin_root(str(tmp_path / "nothing")) is None
+
+
+def test_weekly_tune_is_off_until_switched_on(tmp_path, monkeypatch):
+    pc, op, proj = _history(tmp_path, monkeypatch)
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp_path / "cfg"))
+    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "autotune.py"), "--project", proj],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0 and r.stdout == ""
+    assert not os.path.exists(os.path.join(proj, ".claude", "settings.local.json"))
+    import autotune
+    assert autotune.due(str(tmp_path / "no-stamp"), 1000.0, False) is True
+    st = tmp_path / "stamp"
+    st.write_text("1")
+    now = os.path.getmtime(st)
+    assert autotune.due(str(st), now + 3600, False) is False
+    assert autotune.due(str(st), now + 8 * 86400, False) is True
+    assert autotune.due(str(st), now + 3600, True) is True
+
+
+def test_every_hook_command_uses_the_python_probe_and_passes_exit_2(tmp_path):
+    """All three hooks run through the same python3/python probe line, and the
+    Stop hook's exit 2 (hand the ask to Claude) comes through it unchanged."""
+    import shutil
+    import pytest
+    if os.name == "nt" or not shutil.which("sh"):
+        pytest.skip("needs a POSIX sh")
+    hooks = json.load(open(os.path.join(ROOT, "hooks", "hooks.json")))["hooks"]
+    assert set(hooks) == {"PreCompact", "Stop", "SessionStart"}
+    for event, files in (("PreCompact", "precompact_wait_for_break.py"), ("Stop", "stop_pit_stop.py"),
+                         ("SessionStart", "session_start.py")):
+        command = hooks[event][0]["hooks"][0]["command"]
+        assert command.startswith("P=python3; python3 -I -c pass") and files in command
+        assert os.path.exists(os.path.join(ROOT, "hooks", files))
+    assert hooks["PreCompact"][0]["matcher"] == "auto"
+    asks = tmp_path / "cfg" / "pit-stop" / "asks"
+    asks.mkdir(parents=True)
+    (asks / "s.json").write_text(json.dumps({"newest": "2.1.322", "ver": "2.1.319", "okf": "/x", "at": 1, "delivered": None}))
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp_path / "cfg"), CLAUDE_PLUGIN_ROOT=ROOT, HOME=str(tmp_path / "home"))
+    r = subprocess.run(["sh", "-c", hooks["Stop"][0]["hooks"][0]["command"]], input=json.dumps({"session_id": "s"}),
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 2 and r.stdout == "" and "background jobs" in r.stderr

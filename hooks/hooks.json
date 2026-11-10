@@ -11,6 +11,28 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "P=python3; python3 -I -c pass </dev/null >/dev/null 2>&1 || P=python; exec \"$P\" -I \"${CLAUDE_PLUGIN_ROOT}/hooks/stop_pit_stop.py\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "P=python3; python3 -I -c pass </dev/null >/dev/null 2>&1 || P=python; exec \"$P\" -I \"${CLAUDE_PLUGIN_ROOT}/hooks/session_start.py\"",
+            "timeout": 10
+          }
+        ]
+      }
     ]
   }
 }
