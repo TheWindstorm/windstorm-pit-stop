@@ -234,3 +234,43 @@ def test_restart_backs_off_after_a_typing_mismatch(tmp_path, monkeypatch):
     monkeypatch.setattr(rab, "LIVE", False)
     rab.note_typing(mmf, False, "mismatch", 500.0)
     assert not os.path.exists(mmf)
+
+
+def test_reading_topic_reads_hyphen_and_underscore_names():
+    import reading_check as rc
+    assert rc.topic("feedback_mind_rule3.md") == "mind"            # the older underscore style
+    assert rc.topic("feedback-board-line-format-2026-11-10.md") == "board"
+    assert rc.topic("grant-decision-windy-only-scope-2026-11-09.md") == "decision"
+    assert rc.topic("notes.md") is None and rc.topic("user-role.md") is None
+    # hyphen names group like underscore names: 3+ with one topic share lines, and every link is kept
+    lines = [f"- [Board lesson {i}](feedback-board-lesson{i}-2026-11-10.md) — hook {i} " + "x" * 120 for i in range(30)]
+    text = "\n".join(lines) + "\n"
+    new = rc.trim(text)
+    assert {m[1] for m in rc.LINK.findall(new)} == {m[1] for m in rc.LINK.findall(text)}
+    assert "**board" in new and new.count("\n") < text.count("\n")
+
+
+def test_hook_command_falls_back_to_python_when_python3_is_a_stub(tmp_path):
+    """Windows can ship a `python3` that is only a Microsoft Store stub. The hook command must then run `python`,
+    and must pass the hook's own exit code through (2 = hold the compaction) on every system."""
+    import pytest
+    import shutil
+    if os.name == "nt" or not shutil.which("sh"):
+        pytest.skip("needs a POSIX sh")
+    command = json.load(open(os.path.join(ROOT, "hooks", "hooks.json")))["hooks"]["PreCompact"][0]["hooks"][0]["command"]
+    stub = tmp_path / "stubbin"
+    stub.mkdir()
+    (stub / "python3").write_text("#!/bin/sh\necho 'Python was not found; run without arguments to install from the Microsoft Store' >&2\nexit 9\n")
+    (stub / "python3").chmod(0o755)
+    os.symlink(sys.executable, stub / "python")
+    hold = transcript(tmp_path, "hold", [a("tool_use")])
+    done = transcript(tmp_path, "done", [a("text")])
+    for path_first in (str(stub), os.path.dirname(sys.executable)):   # a stub python3 first, then a real one
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp_path / "cfg"), CLAUDE_PLUGIN_ROOT=ROOT,
+                   PATH=path_first + os.pathsep + "/usr/bin:/bin")
+        env.pop("PIT_STOP_CEILING", None)
+        for tr, want in ((hold, 2), (done, 0)):
+            r = subprocess.run(["sh", "-c", command], input=json.dumps({"trigger": "auto", "transcript_path": tr, "session_id": "t"}),
+                               capture_output=True, text=True, env=env)
+            assert r.returncode == want, (path_first, want, r.stderr)
+            assert r.stdout == ""

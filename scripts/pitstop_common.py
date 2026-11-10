@@ -17,6 +17,9 @@ VERSIONS = os.path.join(HOME, ".local", "share", "claude", "versions")
 # Claude Code loads only the first 200 lines of a project's MEMORY.md index.
 MEMORY_LOAD_LINES = 200
 MEMORY_WARN_LINES = 180
+# Claude Code also stops reading MEMORY.md at about 24.4 KB (its own notice, 2.1.322), whichever limit comes first.
+MEMORY_LOAD_BYTES = 24_400
+MEMORY_WARN_BYTES = 20_000
 
 
 def project_key(path):

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/hooks/precompact_wait_for_break.py\"",
+            "command": "P=python3; python3 -I -c pass </dev/null >/dev/null 2>&1 || P=python; exec \"$P\" -I \"${CLAUDE_PLUGIN_ROOT}/hooks/precompact_wait_for_break.py\"",
             "timeout": 10
           }
         ]

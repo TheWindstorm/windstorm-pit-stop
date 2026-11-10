@@ -22,7 +22,7 @@ Run `scripts/report.py` (no arguments, or `--project DIR`). Show the table. Poin
 5. Suggest re-running weekly. The profile records the date and the reasons.
 
 ### `/pit-stop reading [DIR]` (the clean reload)
-1. Run `scripts/reading_check.py --project DIR`. It lists the instruction files the folder's sessions load, and the memory index size: Claude Code loads only the first 200 lines of `MEMORY.md`, so entries past that never load.
+1. Run `scripts/reading_check.py --project DIR`. It lists the instruction files the folder's sessions load, and the memory index size: Claude Code loads only the first 200 lines or about 24 KB (whichever comes first) of `MEMORY.md`, so entries past that never load.
 2. If the index is near or past the limit, first look for lines that belong to OTHER projects or folders (another product, another team's lane). Propose moving those memories to the folder that owns them, rather than squeezing them in. Every line a session re-reads should be about that session's own work.
 3. Then run `--trim` (dry run) and show the result. With the user's OK, run `--trim --write`. Nothing is deleted: duplicate links are dropped, related memories are grouped on shared lines, free-text lines stay exactly as they were, and a backup is written first. It refuses if any link would be lost or if the result is still over 180 lines.
 4. Instruction files over ~40 KB: suggest moving detail into separate files that are read on demand.
