@@ -116,7 +116,7 @@ Settings live in `~/.claude/pit-stop/restart.json` (see the top of `scripts/rest
 - `/restart` on Claude Code 2.1.318 → 2.1.319 keeps the same session id, conversation, model and effort. Scheduled session crons survive. In that test the first turn after the restart read about 47K tokens from cache; do not count on that, since a new version normally rebuilds the cache from the top.
 - Not yet proven on a real machine: the 0.2.0 `/compact`-then-`/restart` sequence live in a pane, the keep-list's effect on summaries, and the launchd timer written by `/pit-stop setup`.
 
-Run the tests: `python3 -m pytest tests/`
+Run the tests: `python3 -m pytest tests/`. On any machine, `sh tests/smoke_hooks.sh` runs each hook's real command line in a throwaway folder and says PASS or FAIL per check (it starts no session and installs nothing).
 
 ## Credits
 
