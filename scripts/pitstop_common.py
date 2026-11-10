@@ -3,9 +3,11 @@
 Nothing here sends data anywhere. Transcripts are read for COUNTS (token
 usage, tool names, timestamps, file paths); message text is never printed.
 """
+import glob
 import json
 import os
 import re
+import subprocess
 import time
 
 HOME = os.path.expanduser("~")
@@ -13,6 +15,21 @@ CLAUDE_DIR = os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(HOME, ".claude"))
 PROJECTS = os.path.join(CLAUDE_DIR, "projects")
 STATE_DIR = os.path.join(CLAUDE_DIR, "pit-stop")
 VERSIONS = os.path.join(HOME, ".local", "share", "claude", "versions")
+SESSIONS = os.path.join(CLAUDE_DIR, "sessions")
+CONFIG = os.path.join(STATE_DIR, "config.json")    # user-level switches, never read from a project folder
+LANES = os.path.join(STATE_DIR, "lanes")           # one profile per session id
+FOLDERS = os.path.join(STATE_DIR, "folders")       # one profile per folder (0.1.x kept it in <folder>/.claude/pit-stop.json)
+ASKS = os.path.join(STATE_DIR, "asks")             # background-jobs asks waiting for a session's Stop hook
+SEEN = os.path.join(STATE_DIR, "seen")             # sessions whose Stop hook has run (the plugin is loaded there)
+
+# Claude Code's own idle compaction (settings key idleCompaction, on by default)
+# compacts a session that has gone quiet, shortly before its prompt cache
+# expires, once its context is at least CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS
+# (default 200K; Claude Code never goes under 100K).
+IDLE_ENV = "CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS"
+WINDOW_ENV = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"
+IDLE_DEFAULT = 200_000
+IDLE_FLOOR = 100_000
 
 # Claude Code loads only the first 200 lines of a project's MEMORY.md index.
 MEMORY_LOAD_LINES = 200
@@ -30,6 +47,20 @@ def project_key(path):
 
 def project_dir(path):
     return os.path.join(PROJECTS, project_key(path))
+
+
+def folder_profile_path(path):
+    return os.path.join(FOLDERS, project_key(path) + ".json")
+
+
+def folder_profile(path):
+    """A folder's Pit Stop profile: the user-level file first, then the 0.1.x
+    file inside the folder. Returns {} when there is none."""
+    for f in (folder_profile_path(path), os.path.join(path, ".claude", "pit-stop.json")):
+        d = read_json(f, None)
+        if isinstance(d, dict):
+            return d
+    return {}
 
 
 def memory_index(path):
@@ -58,14 +89,34 @@ def iter_entries(path, tail_bytes=None):
             f.readline()
         for raw in f:
             try:
-                yield json.loads(raw)
+                e = json.loads(raw)
             except Exception:
                 continue
+            if isinstance(e, dict):  # a transcript line is an object; anything else is skipped
+                yield e
+
+
+def message(entry):
+    """An entry's message as a dict ({} when it is missing or not an object)."""
+    m = entry.get("message")
+    return m if isinstance(m, dict) else {}
+
+
+def usage(entry):
+    u = message(entry).get("usage")
+    return u if isinstance(u, dict) else {}
+
+
+def num(v):
+    try:
+        return int(v or 0)
+    except Exception:
+        return 0
 
 
 def usage_total(entry):
-    u = (entry.get("message") or {}).get("usage") or {}
-    return sum(int(u.get(k) or 0) for k in (
+    u = usage(entry)
+    return sum(num(u.get(k)) for k in (
         "input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens"))
 
 
@@ -74,7 +125,7 @@ def is_compact_boundary(entry):
 
 
 def content_kinds(entry):
-    c = (entry.get("message") or {}).get("content")
+    c = message(entry).get("content")
     if isinstance(c, str):
         return ["text"]
     if isinstance(c, list):
@@ -83,10 +134,23 @@ def content_kinds(entry):
 
 
 def tool_uses(entry):
-    c = (entry.get("message") or {}).get("content")
+    c = message(entry).get("content")
     if not isinstance(c, list):
         return []
     return [x for x in c if isinstance(x, dict) and x.get("type") == "tool_use"]
+
+
+def read_json_strict(path):
+    """(data, None) for a file that parses, ({}, None) when it does not exist,
+    (None, reason) when it exists but cannot be read as JSON: callers that are
+    about to REWRITE the file must refuse then, or they would drop its contents."""
+    if not os.path.exists(path):
+        return {}, None
+    try:
+        with open(path) as f:
+            return json.load(f), None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {str(e)[:80]}"
 
 
 def parse_ts(s):
@@ -140,3 +204,178 @@ def fmt_k(n):
     if n is None:
         return "-"
     return f"{n/1000:.0f}K" if n < 1_000_000 else f"{n/1_000_000:.2f}M"
+
+
+def config():
+    """User-level switches in ~/.claude/pit-stop/config.json (all optional):
+      auto_tune            true = re-tune each folder weekly in the background (set by /pit-stop setup)
+      compact_instructions true (default), false, or a string of extra notes for the summary
+      nudge                false = never show the "an update is waiting" line
+    """
+    d = read_json(CONFIG, {})
+    return d if isinstance(d, dict) else {}
+
+
+def vkey(v):
+    try:
+        return tuple(int(x) for x in str(v).split("."))
+    except Exception:
+        return ()
+
+
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except Exception:
+        return False
+
+
+def pid_version(pid):
+    """The Claude Code version a process runs, read from its program file
+    (.../claude/versions/2.1.322), or None."""
+    if not pid:
+        return None
+    exe = None
+    try:
+        exe = os.readlink(f"/proc/{pid}/exe")
+    except OSError:
+        try:  # macOS has no /proc
+            exe = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)], capture_output=True, text=True,
+                                 timeout=10).stdout.strip()
+        except Exception:
+            exe = None
+    base = os.path.basename((exe or "").replace(" (deleted)", ""))
+    return base if re.fullmatch(r"\d+\.\d+\.\d+", base) else None
+
+
+def registry_sessions():
+    """Rows from Claude Code's local session registry (~/.claude/sessions/*.json).
+    Not a public interface: it carries what the documented listing lacks
+    (version, the time of the last status change)."""
+    out = {}
+    for f in glob.glob(os.path.join(SESSIONS, "*.json")):
+        s = read_json(f, {})
+        if isinstance(s, dict) and s.get("sessionId") and s.get("pid"):
+            out[s["sessionId"]] = s
+    return out
+
+
+def cli_sessions(timeout=30):
+    """Rows from `claude agents --json`, the documented listing of running
+    sessions (cwd, kind, name, pid, sessionId, startedAt, status), or None."""
+    try:
+        r = subprocess.run(["claude", "agents", "--json"], capture_output=True, text=True, timeout=timeout,
+                           stdin=subprocess.DEVNULL)
+        rows = json.loads(r.stdout)
+    except Exception:
+        return None
+    if isinstance(rows, dict):
+        rows = rows.get("agents") or rows.get("sessions")
+    if not isinstance(rows, list):
+        return None
+    return [x for x in rows if isinstance(x, dict) and x.get("sessionId") and x.get("pid")]
+
+
+def live_sessions(use_cli=True):
+    """(rows, source) for every running interactive session.
+
+    The local registry is read first because it is cheap and has more fields.
+    If it gives nothing usable (the folder moved, or its rows no longer carry
+    a status), the documented `claude agents --json` listing is used instead,
+    so a change to the registry does not blind Pit Stop. Each row has: pid,
+    sessionId, cwd, name, status, version (from the process itself when it
+    can be read), statusUpdatedAt (registry only, else None)."""
+    reg = registry_sessions()
+    rows = [s for s in reg.values() if pid_alive(s.get("pid"))]
+    source = "registry"
+    if use_cli and not any(s.get("status") for s in rows):
+        cli = cli_sessions()
+        if cli is not None:
+            rows = [dict(reg.get(x["sessionId"], {}), **x) for x in cli if pid_alive(x.get("pid"))]
+            source = "claude agents"
+    out = []
+    for s in rows:
+        if s.get("kind") not in (None, "interactive"):
+            continue
+        s = dict(s)
+        s["version"] = pid_version(s.get("pid")) or s.get("version")
+        s["name"] = (s.get("name") or "").strip()
+        out.append(s)
+    return out, source
+
+
+def session_version(session_id):
+    """The version a session runs, from the registry row for that session id."""
+    s = registry_sessions().get(session_id) or {}
+    if s.get("pid") and pid_alive(s["pid"]):
+        return pid_version(s["pid"]) or s.get("version")
+    return None
+
+
+def safe_id(session_id):
+    return "".join(ch for ch in str(session_id) if ch.isalnum() or ch == "-")[:64] or "unknown"
+
+
+def env_int(folder, name):
+    """A whole-number env value set for a folder in its Claude Code settings, or None."""
+    for f in (os.path.join(folder, ".claude", "settings.local.json"), os.path.join(folder, ".claude", "settings.json")):
+        d = read_json(f, {})
+        v = (d.get("env") or {}).get(name) if isinstance(d, dict) and isinstance(d.get("env"), dict) else None
+        if v is not None and str(v).isdigit():
+            return int(v)
+    return None
+
+
+def points(folder, session_id=None):
+    """The compaction points in force for a session: its own lane profile
+    first, then the folder's settings and profile. Returns a dict with
+    idle_point, window, ceiling (any may be None) and source."""
+    out = {"idle_point": None, "window": None, "ceiling": None, "source": None}
+    lane = read_json(os.path.join(LANES, safe_id(session_id) + ".json"), {}) if session_id else {}
+    prof = folder_profile(folder) if folder else {}
+    lane = lane if isinstance(lane, dict) else {}
+    for k in ("idle_point", "window", "ceiling"):
+        for src, d in (("lane", lane), ("folder", prof)):
+            try:
+                v = int(d.get(k) or 0)
+            except Exception:
+                v = 0
+            if v > 0:
+                out[k] = v
+                out["source"] = out["source"] or src
+                break
+    if folder:
+        out["window"] = out["window"] or env_int(folder, WINDOW_ENV)
+        out["idle_point"] = out["idle_point"] or env_int(folder, IDLE_ENV)
+    return out
+
+
+def fleet_active(max_age=3600):
+    """True when the restart helper has run in the last hour (fleet mode is on)."""
+    try:
+        return time.time() - os.path.getmtime(os.path.join(STATE_DIR, "restart", "restart.log")) < max_age
+    except OSError:
+        return False
+
+
+def append_log(path, msg, max_bytes=5_000_000):
+    """One line with a UTC time; the file rotates to <name>.1 at 5 MB."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if os.path.exists(path) and os.path.getsize(path) > max_bytes:
+            os.replace(path, path + ".1")
+        with open(path, "a") as f:
+            f.write(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()) + " " + msg + "\n")
+    except Exception:
+        pass
+
+
+def prune_backups(path, keep=3):
+    """Keep only the newest KEEP <path>.bak-pitstop-* files (the weekly tune would pile them up)."""
+    old = sorted(glob.glob(glob.escape(path) + ".bak-pitstop-*"))[:-keep]
+    for f in old:
+        try:
+            os.remove(f)
+        except OSError:
+            pass

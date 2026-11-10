@@ -9,7 +9,7 @@
     {
       "name": "windstorm-pit-stop",
       "source": "./",
-      "description": "Windstorm Pit Stop, a context optimizer for Claude Code: compact at a break, restart at a break, clean reload, per-folder tuning."
+      "description": "Windstorm Pit Stop, a context optimizer for Claude Code: compact at a break, at points fitted to each folder; restart onto the newest version at a break; clean reload."
     }
   ]
 }
