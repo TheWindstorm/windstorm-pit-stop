@@ -116,7 +116,7 @@ def analyze(project, days, only=None):
                 # background, and swapped it in here in milliseconds with the
                 # newest messages kept word for word. Nobody waits and the work
                 # in hand is kept, so it is not counted as a mid-task compaction.
-                when["instant" if (e.get("compactMetadata") or {}).get("precomputed")
+                when["instant" if (e.get("compactMetadata") if isinstance(e.get("compactMetadata"), dict) else {}).get("precomputed")
                      else "mid_task" if last_kind == "tool" else "idle" if last_kind == "reply" and quiet >= 1800
                      else "prompt"] += 1
                 if cur["turns"]:
@@ -145,6 +145,7 @@ def analyze(project, days, only=None):
                 u = pc.usage(e)
                 total = pc.usage_total(e)
                 mid = pc.message(e).get("id")
+                mid = mid if isinstance(mid, str) else None      # an odd row never stops the read
                 if total and (mid is None or mid not in seen_ids):
                     seen_ids.add(mid)
                     calls += 1
@@ -265,8 +266,14 @@ def usage_cap(m, budget, big, rr):
     gets one step more: compacting it harder would cost reads of its own. A
     capped folder's window is also never raised above where it is now."""
     reads = m.get("busiest_session_read_per_day")
-    if not big or reads is None or budget == "roomy":
+    if not big or budget == "roomy":
         return None, None, None
+    if reads is None:
+        # No session here has a day of history, so there is no usage to judge. Balanced then has
+        # nothing to cap; economy caps every folder whatever it reads.
+        if budget != "economy":
+            return None, None, None
+        return 400_000, None, "usage: under the 'economy' budget every window is capped at 400K"
     cls = "very heavy" if reads >= VERY_HEAVY else "heavy" if reads >= HEAVY else "light"
     cap = {"balanced": {"very heavy": 400_000, "heavy": 500_000},
            "economy": {"very heavy": 300_000, "heavy": 300_000, "light": 400_000}}[budget].get(cls)
@@ -334,11 +341,15 @@ def recommend(m, context_limit=None, max_steps=None, budget=None):
     # Usage: a folder that reads a lot gets a lower window, whatever the memory signals say.
     cap, usage_class, cap_why = usage_cap(m, budget, big, rr)
     if cap is not None:
-        target = min(cap, m["current_window"] or cap)       # heavy: hold at the cap, and never above where it is now
+        cur = m["current_window"]
+        target = min(cap, cur or cap)                        # hold at the cap, and never above where it is now
         if window > target:
-            window = max(lo, toward(m["current_window"], target, step, max_steps) if m["current_window"] else target)
-            why.append(cap_why + (f"; moving one step at a time, {pc.fmt_k(window)} now" if window > cap else "")
-                       + ("" if window >= cap else f"; it stays at {pc.fmt_k(window)}, where it already is"))
+            # Same limits as every other move: one step at a time when asked, never above the range's
+            # top. The range's bottom does not lift a window the user already has lower than that.
+            floor = min(lo, cur) if cur else lo
+            window = max(floor, min(hi, toward(cur, target, step, max_steps) if cur else target))
+            why.append(cap_why + (f"; it stays at {pc.fmt_k(window)}, where it already is" if cur and window == cur
+                                  else f"; moving one step at a time, {pc.fmt_k(window)} now" if window > cap else ""))
     if (budget == "economy" and m["current_window"] and window > m["current_window"]
             and not (rr is not None and rr >= 0.30)):
         window = m["current_window"]
