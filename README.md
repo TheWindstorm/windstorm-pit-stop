@@ -84,11 +84,13 @@ These are heuristics, not guarantees. Model and effort changes affect quality an
 
 ## Fleet mode: what it types, and what it costs
 
-Claude Code accepts `/restart` only when it is typed at the prompt, so fleet mode types into tmux panes. It types three things, each only into an idle session with an empty input box and no dialog:
+Claude Code accepts `/restart` only when it is typed at the prompt, so fleet mode types into tmux panes. It types three things (and `/reload-plugins`, if you switch that on; see below), each only into an idle session with an empty input box and no dialog:
 
 - `/restart`: free by itself, since no turn starts. A new version does rebuild the prompt cache from the top at the session's next turn, so a restart costs more the bigger the context is. That is why it happens right after a compaction, on a small context, or when the cache has gone cold anyway.
 - `/compact`: only for a big session whose cache is still warm (quiet between 5 and 48 minutes with the 1-hour cache), so the summary is read from the cache. The restart follows on the next run. Switch off with `"compact_before_restart": false`.
 - One note, in two cases only: a session that stopped its background jobs for the restart is told to start them again; and a session that has not loaded the plugin's hooks yet gets the background-jobs ask typed, while its cache is warm or its context small. After a restart with no jobs to start again, nothing is typed. That includes the hour-idle restart (`cold_idle`): the session comes back on the new version and stays quiet until its next prompt, so no full-context turn is spent.
+
+**Sessions that have not loaded the hooks** (`"reload_plugins": true`, off by default). A session loads a plugin's hooks when its process starts, so one that started before Pit Stop was installed or last updated runs old hooks or none, and a session already on the newest Claude Code is never restarted. For those the helper types `/reload-plugins` at a break: a local command, no turn starts. It does so right after a compaction, on a small context, or once the cache is cold, because a reload can make the session's next turn write its context to the cache again; a big session with a warm cache waits (`"reload_warm": true` lifts that). `"reload_only_names"` limits it to named sessions for a staged roll-out.
 
 **Background jobs.** Claude Code refuses `/restart` while background work runs. The helper leaves an ask for that session; the plugin's own Stop hook hands it over at the end of the session's next turn. Claude sorts its jobs: watchers it can simply start again are listed and stopped, and the restart follows; if anything is real work in progress, it changes nothing and is asked again in 12 hours. If a session stopped its jobs and no restart came within 30 minutes, it is told to start them again.
 

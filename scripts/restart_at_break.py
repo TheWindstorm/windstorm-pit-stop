@@ -61,6 +61,19 @@ refused or not confirmed) a session is left alone for restart_cooldown
 seconds (6 h). A session that stopped its jobs for a restart the helper then
 could not do is told, after consent_timeout (30 min), to start them again.
 
+RELOAD (reload_plugins: true; off by default). A session loads a plugin's
+hooks when its process starts. One that started before Pit Stop was installed
+or last updated runs old hooks, or none, and a session already on the newest
+Claude Code is never restarted. For such a session the helper types
+/reload-plugins (a local command: no turn starts), at a break, when that is
+cheap: right after a compaction, on a small context, or when the cache has
+gone cold. A reload can make the session's next turn write its context to the
+prompt cache again, so a big session with a warm cache waits (reload_warm:
+true lifts that). reload_only_names, if set, limits it to those names (for a
+staged roll-out). It is confirmed by the "Reloaded:" line on screen; at most
+max_per_run per run; a try is not repeated for reload_retry seconds (6 h).
+A session the helper restarts in the same run is not also reloaded.
+
 Config (optional) ~/.claude/pit-stop/restart.json:
   {"tmux_socket": null,            # tmux -L name; null = default server
    "allow_names": [],              # if set, ONLY these session names
@@ -71,6 +84,8 @@ Config (optional) ~/.claude/pit-stop/restart.json:
    "cache_ttl": 3600, "compact_retry": 21600, "idle_compact_after": null,
    "ask_again": 43200, "ask_fallback_after": 1800, "consent_timeout": 1800,
    "restart_cooldown": 21600,
+   "reload_plugins": false, "reload_only_names": [], "reload_warm": false,
+   "reload_retry": 21600,
    "mismatch_backoff": 1800, "mismatch_backoff_max": 43200,
    "notify_command": null}         # e.g. ["notify-send", "pit-stop"]; gets the message as last arg
 Sessions come from Claude Code's local registry (~/.claude/sessions/*.json,
@@ -102,6 +117,7 @@ CFG = {"tmux_socket": None, "allow_names": [], "deny_names": [], "deny_name_glob
        "compact_before_restart": True, "min_idle_before_compact": 300, "cache_ttl": 3600,
        "compact_retry": 21600, "idle_compact_after": None,
        "ask_again": 43200, "ask_fallback_after": 1800, "consent_timeout": 1800, "restart_cooldown": 21600,
+       "reload_plugins": False, "reload_only_names": [], "reload_warm": False, "reload_retry": 21600,
        "mismatch_backoff": 1800, "mismatch_backoff_max": 43200}
 CFG.update(pc.read_json(os.path.join(pc.STATE_DIR, "restart.json"), {}) or {})
 BASE = os.path.join(pc.STATE_DIR, "restart")
@@ -136,6 +152,9 @@ def log(msg):
     # restarts scroll away with it. Everything that is not a skip is kept here too.
     if not any(q in msg for q in QUIET):
         pc.append_log(EVENTS, msg)
+
+
+TYPED = set()   # panes typed into during this run: never two commands into one session in one run
 
 
 def tmux(*args):
@@ -216,6 +235,7 @@ def type_line(target, text):
     if not input_empty(target) or screen_busy(target):
         log(f"{target}: input not empty or busy at send time; skipped")
         return False, "busy"
+    TYPED.add(target)   # typed into (or would be, in a dry run) during this run
     if not LIVE:
         log(f"DRY would type into {target}: {text[:90]}")
         return True, ""
@@ -563,6 +583,101 @@ def tell_rearm(target, okf, mmf, text, now):
     return sent
 
 
+def reload_due(l, cfg):
+    """(True, why) when this session should get /reload-plugins now, else
+    (False, why). Pure, for tests. l: name, status, idle, ctx, compact_age,
+    started (when its process last started, epoch), reloaded_at (the helper's
+    last confirmed reload, or None), tried_age (seconds since its last try, or
+    None), plugin_at (when the plugin was installed or last updated, or None)."""
+    if not cfg.get("reload_plugins"):
+        return False, "off"
+    if not l.get("plugin_at"):
+        return False, "the plugin's install time cannot be read"
+    only = cfg.get("reload_only_names") or []
+    if only and l["name"] not in only:
+        return False, "not in reload_only_names"
+    if max(l.get("started") or 0, l.get("reloaded_at") or 0) >= l["plugin_at"]:
+        return False, "loaded"
+    if l.get("tried_age") is not None and l["tried_age"] < cfg["reload_retry"]:
+        return False, f"a reload was tried {int(l['tried_age'])}s ago (waits {cfg['reload_retry']}s)"
+    if l["status"] not in ("idle", "shell"):
+        return False, f"status={l['status']} (working)"
+    idle, ctx, cage = l["idle"], l["ctx"], l.get("compact_age")
+    if idle < 0:
+        return False, "no transcript found"
+    if cage is not None and cage <= cfg["compact_window"] and idle >= cfg["min_idle_after_compact"]:
+        return True, f"compacted {int(cage)}s ago, idle {int(idle)}s"
+    if ctx is not None and ctx < cfg["ctx_max"] and idle >= cfg["min_idle"]:
+        return True, f"small context {ctx}, idle {int(idle)}s"
+    if idle >= cfg["cache_ttl"]:
+        return True, f"idle {int(idle)}s, cache cold"
+    if cfg.get("reload_warm") and idle >= cfg["min_idle"]:
+        return True, f"reload_warm is on, idle {int(idle)}s"
+    return False, (f"context {ctx}, idle {int(idle)}s: big and warm, so it waits for a compaction, "
+                   f"a context under {cfg['ctx_max']} or a cold cache")
+
+
+def confirm_reload(target, wait=12):
+    """The "Reloaded: ..." row Claude Code prints, or None if it does not show in WAIT seconds."""
+    for _ in range(wait):
+        time.sleep(1)
+        for r in screen(target):
+            r = ANSI.sub("", r).strip()
+            if "Reloaded:" in r:
+                return r[r.index("Reloaded:"):][:160]
+    return None
+
+
+def maybe_reload(s, target, now, counts, plugin_at):
+    """Type /reload-plugins into one session if reload_due says so. Called after
+    handle(), and only for a session nothing was typed into in this run."""
+    if not CFG.get("reload_plugins") or target in TYPED:
+        return
+    name, sid = s["name"], pc.safe_id(s.get("sessionId"))
+    key, st_dir = lane_key(name, sid), os.path.join(BASE, "state")
+    donef, tryf, mmf = (os.path.join(st_dir, key + x) for x in (".reloaded", ".reload_try", ".mismatch"))
+    try:
+        reloaded_at = os.path.getmtime(donef)
+    except OSError:
+        reloaded_at = None
+    ctx, idle = ctx_and_idle(s)
+    if s.get("statusUpdatedAt") and idle >= 0:
+        idle = min(now - s["statusUpdatedAt"] / 1000, idle)
+    l = {"name": name, "status": s.get("status"), "idle": idle, "ctx": ctx,
+         "compact_age": last_compact_age(transcript_path(s), now=now),
+         "started": (s.get("startedAt") or 0) / 1000, "reloaded_at": reloaded_at,
+         "tried_age": age_of(tryf, now), "plugin_at": plugin_at}
+    due, why = reload_due(l, CFG)
+    if not due:
+        if why not in ("off", "loaded", "not in reload_only_names") and not LIVE:
+            log(f"{name}: reload wait: {why}")
+        return
+    mm = pc.read_json(mmf, {}) or {}
+    if mm.get("n") and mismatch_wait(mm["n"], CFG) - (now - float(mm.get("at", 0))) > 0:
+        log(f"{name}: skip: reload due, but typed text did not match {mm['n']} time(s) in a row; backing off")
+        return
+    if counts["reload"] >= CFG["max_per_run"]:
+        if not LIVE:   # a live run stays quiet here: many sessions can be due at once, one line each per run adds up
+            log(f"{name}: run limit reached for /reload-plugins; next run")
+        return
+    log(f"{name}: plugin hooks not loaded (its process started before the plugin's install or update); "
+        f"/reload-plugins: {why}" + ("" if LIVE else " (DRY)"))
+    sent, how = type_line(target, "/reload-plugins")
+    note_typing(mmf, sent, how, now)
+    if not sent:
+        return
+    counts["reload"] += 1
+    if not LIVE:
+        return
+    stamp(tryf, now)   # tried: whatever happens next, leave it alone for reload_retry
+    row = confirm_reload(target)
+    if row:
+        stamp(donef, time.time())
+        log(f"{name}: RELOADED plugins, no turn started ({row})")
+    else:
+        log(f"{name}: RELOAD NOT CONFIRMED (no 'Reloaded:' line on screen); next try after {CFG['reload_retry']}s")
+
+
 def handle(s, newest, target, now, counts):
     """Everything for one session. Raises nothing the caller must understand:
     main() catches and logs, so one odd session never stops the run."""
@@ -755,7 +870,8 @@ def main():
         for d in ("state", "ok"):
             os.makedirs(os.path.join(BASE, d), exist_ok=True)
     tty_map, now = panes(), time.time()
-    counts = {"restart": 0, "compact": 0}
+    counts = {"restart": 0, "compact": 0, "reload": 0}
+    plugin_at = pc.plugin_installed()[1] if CFG.get("reload_plugins") else None
     for s in sorted(sessions, key=lambda x: x["name"]):
         try:
             target = tty_map.get(pid_tty(s.get("pid")) or "")
@@ -764,6 +880,7 @@ def main():
             if not allowed(s["name"], s.get("cwd") or "", CFG):
                 continue
             handle(s, newest, target, now, counts)
+            maybe_reload(s, target, now, counts, plugin_at)
         except Exception as e:  # one odd session (an unreadable transcript, a vanished pane) never stops the run
             log(f"{s.get('name') or '?'}: skip: error {type(e).__name__}: {str(e)[:120]}")
 

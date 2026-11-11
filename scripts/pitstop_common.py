@@ -351,6 +351,29 @@ def points(folder, session_id=None):
     return out
 
 
+def plugin_installed(claude_dir=None):
+    """(version, epoch seconds) of the Pit Stop plugin as Claude Code records it
+    in installed_plugins.json: the time it was last installed or updated. A
+    session whose process started before that time still runs the hooks it
+    loaded at its start (or none). (None, None) when it cannot be read."""
+    import calendar
+    try:
+        with open(os.path.join(claude_dir or CLAUDE_DIR, "plugins", "installed_plugins.json")) as f:
+            plugins = json.load(f).get("plugins") or {}
+    except Exception:
+        return None, None
+    rows = [r for k, v in plugins.items() if k.split("@")[0] == "windstorm-pit-stop" and isinstance(v, list)
+            for r in v if isinstance(r, dict)]
+    rows.sort(key=lambda r: r.get("scope") != "user")
+    for r in rows:
+        when = r.get("lastUpdated") or r.get("installedAt")
+        try:
+            return r.get("version"), calendar.timegm(time.strptime(str(when)[:19], "%Y-%m-%dT%H:%M:%S"))
+        except Exception:
+            continue
+    return None, None
+
+
 def fleet_active(max_age=3600):
     """True when the restart helper has run in the last hour (fleet mode is on)."""
     try:

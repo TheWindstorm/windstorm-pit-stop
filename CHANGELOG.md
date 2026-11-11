@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2 (2026-11-11)
+**Sessions that never loaded the hooks.** A session loads a plugin's hooks when its process starts. On the machine 0.2.1 was measured on, 28 of 95 sessions had started before Pit Stop was installed and so had no hook at all (one compacted mid-task 16 times in 31 hours), and a session already on the newest Claude Code is never restarted, so it would never get one. The same holds after every plugin update: running sessions keep the old hooks.
+
+- New fleet-mode rule, **off by default** (`"reload_plugins": true` in `restart.json` switches it on): for a session whose process started before the plugin was installed or last updated (Claude Code's own record, `installed_plugins.json`), the helper types `/reload-plugins`. That is a local command, so no turn starts. It is typed only at a break (at the prompt, input box empty, no dialog), and only when it is cheap: right after a compaction, on a context under `ctx_max`, or when the cache has gone cold. A reload can make the next turn write the context to the prompt cache again, so a big session with a warm cache waits; `"reload_warm": true` lifts that.
+- `"reload_only_names": [...]` limits it to those sessions, for a staged roll-out.
+- Confirmed by the `Reloaded:` line on screen; one per run (`max_per_run`); a try is not repeated for `reload_retry` (6 h). A session restarted in the same run is not also reloaded (the restart loads the plugin).
+- Proven on one real session (Claude Code 2.1.322, started before the install): `/reload-plugins` answered "Reloaded: 1 plugin · 1 skill · 7 agents · 1 hook" and `/hooks` then listed the plugin's PreCompact hook. Not yet measured: what a reload costs a big session with a warm cache on its next turn.
+
 ## 0.2.1 (2026-11-11)
 From a read of the first 31 hours of 0.1.4 on a 95-session machine (its hook log, its restart log, and 7 days of session history), and from the reviewer's notes on 0.2.0.
 
