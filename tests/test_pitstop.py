@@ -1644,3 +1644,18 @@ def test_main_runs_the_reload_rule_after_the_restart_path_for_each_allowed_sessi
     calls.clear()
     rab.main()                                                           # an unreadable plugin record: restarts go on
     assert calls[0] == "handle" and calls[1][1] is None
+
+
+def test_no_tmux_on_path_is_one_plain_line_not_a_traceback(tmp_path, monkeypatch):
+    """Seen on a Mac over a bare ssh shell (B-0096): tmux lives in Homebrew's folder, which was not on PATH."""
+    rab = _rab(tmp_path, monkeypatch)
+    import pitstop_common as pc
+    monkeypatch.setattr(sys, "argv", ["x"])
+    monkeypatch.setattr(pc, "newest_installed_version", lambda: "2.1.322")
+    monkeypatch.setattr(pc, "live_sessions", lambda: ([_sess()], "registry"))
+
+    def no_tmux(*a, **k):
+        raise FileNotFoundError(2, "No such file or directory: 'tmux'")
+    monkeypatch.setattr(rab.subprocess, "run", no_tmux)
+    monkeypatch.setattr(rab, "handle", lambda *a: (_ for _ in ()).throw(AssertionError("looked at a session")))
+    rab.main()                                                           # returns; no exception

@@ -1015,7 +1015,14 @@ def main():
     if LIVE:
         for d in ("state", "ok"):
             os.makedirs(os.path.join(BASE, d), exist_ok=True)
-    tty_map, now = panes(), time.time()
+    try:
+        tty_map, now = panes(), time.time()
+    except (OSError, subprocess.SubprocessError) as e:
+        # tmux missing from PATH (a timer or a bare ssh shell without Homebrew's folder), or not answering:
+        # say so in one line instead of a traceback every run. Nothing can be typed without it.
+        log(f"tmux cannot be run ({type(e).__name__}: {str(e)[:80]}); nothing done. Fleet mode needs tmux on PATH: "
+            f"/pit-stop setup --fleet writes a timer with a PATH that has it")
+        return
     counts = {"restart": 0, "compact": 0, "reload": 0}
     info = None
     if CFG.get("reload_plugins"):
