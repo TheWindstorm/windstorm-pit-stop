@@ -1118,7 +1118,8 @@ def _live_reload(tmp_path, monkeypatch, rows, ctx=60_000, idle=4000):
 
 def test_live_reload_types_once_confirms_and_then_leaves_the_session_alone(tmp_path, monkeypatch):
     rab, typed, info, now = _live_reload(tmp_path, monkeypatch,
-                                         ["  \u23bf  Reloaded: 1 plugin \u00b7 1 skill \u00b7 7 agents \u00b7 1 hook"])
+                                         ["\u276f /reload-plugins",
+                                          "  \u23bf  Reloaded: 1 plugin \u00b7 1 skill \u00b7 7 agents \u00b7 1 hook"])
     counts = {"restart": 0, "compact": 0, "reload": 0}
     s = _sess(version="2.1.322", started=(now - 86400) * 1000)          # on the newest version, started a day ago
     rab.maybe_reload(s, "pane", now, counts, info)
@@ -1180,3 +1181,165 @@ def test_plugin_install_time_is_read_from_claude_codes_record(tmp_path):
              "lastUpdated": "2026-11-10T18:35:05.800Z"}]}}))
     v, t = pc.plugin_installed(str(tmp_path))
     assert v == "0.1.4" and time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) == "2026-11-10T18:35:05"
+
+
+# ---------------------------------------------------------------- 0.2.2, from the independent review
+def _transcript(pc, cwd, sid, rows):
+    d = pc.project_dir(cwd)
+    os.makedirs(d, exist_ok=True)
+    with open(os.path.join(d, sid + ".jsonl"), "w") as f:
+        for r in rows:
+            f.write(json.dumps(r) + "\n")
+
+
+def _iso(t):
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + ".000Z"
+
+
+def test_cache_age_follows_the_last_model_call_not_the_last_dated_row(tmp_path, monkeypatch):
+    """A /restart, /reload-plugins or /model writes a dated row without calling the model. The session
+    then looks quiet for minutes while its cache has been cold for hours."""
+    rab = _rab(tmp_path, monkeypatch)
+    import pitstop_common as pc
+    monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
+    now = time.time()
+    s = {"cwd": str(tmp_path / "lane"), "sessionId": "sid-9", "name": "Lane"}
+    _transcript(pc, s["cwd"], "sid-9", [
+        {"type": "assistant", "timestamp": _iso(now - 5 * 3600),
+         "message": {"content": [{"type": "text"}], "usage": {"input_tokens": 300_000}}},
+        {"type": "system", "subtype": "local_command", "timestamp": _iso(now - 2500), "content": "/reload-plugins"}])
+    ctx, idle = rab.ctx_and_idle(s)
+    call_age = rab.call_age_of(s, idle)
+    assert ctx == 300_000 and 2400 <= idle <= 2600 and 5 * 3600 - 5 <= call_age <= 5 * 3600 + 60
+    cfg = dict(rab.CFG)
+    l = _lane(ctx=300_000, idle=idle, call_age=call_age)
+    assert rab.cache_warm(idle, cfg) is True and rab.cache_warm(call_age, cfg) is False
+    act, why = rab.plan(l, cfg)                     # behind, big: NOT /compact on a cold cache; the hour-idle restart
+    assert act == "restart" and "cache cold" in why
+    assert rab.plan(dict(l, call_age=idle), cfg)[0] == "compact"       # had its last call really been 40 min ago
+    # the reload rule's "cache cold" reads the same clock, and still wants the session left alone a few minutes
+    on = dict(cfg, reload_plugins=True)
+    assert rab.reload_due(_rl(idle=idle, call_age=call_age, ctx=300_000), on)[0] is True
+    assert rab.reload_due(_rl(idle=30, call_age=call_age, ctx=300_000), on)[0] is False
+    # no call seen at all (or a test's stand-in): quiet time is used
+    assert rab.call_age_of({"sessionId": "never-read"}, 77) == 77
+
+
+def test_a_restart_ready_session_that_lost_the_run_limit_is_not_reloaded_instead(tmp_path, monkeypatch):
+    rab, typed, info, now = _live_reload(tmp_path, monkeypatch, [], ctx=300_000, idle=4000)
+    rab.PLANNED.clear()
+    counts = {"restart": 0, "compact": 0, "reload": 0}
+    a = _sess(version="2.1.319", started=(now - 86400) * 1000, name="Lane A")
+    b = _sess(version="2.1.319", started=(now - 86400) * 1000, name="Lane B")
+    for s, pane in ((a, "pane-a"), (b, "pane-b")):
+        rab.handle(s, "2.1.322", pane, now, counts)
+        rab.maybe_reload(s, pane, now, counts, info)
+    assert typed == ["/restart"] and counts["reload"] == 0 and "pane-b" in rab.PLANNED
+
+
+def test_type_line_itself_marks_the_pane_also_in_a_dry_run(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    sent = []
+    monkeypatch.setattr(rab, "input_empty", lambda t: True)
+    monkeypatch.setattr(rab, "screen_busy", lambda t: False)
+    monkeypatch.setattr(rab, "tmux", lambda *a: sent.append(a))
+    monkeypatch.setattr(rab, "screen", lambda t, escapes=False: [rab.PROMPT + " /restart"])
+    monkeypatch.setattr(rab.time, "sleep", lambda n: None)
+    rab.TYPED.clear()
+    monkeypatch.setattr(rab, "LIVE", False)
+    assert rab.type_line("pane-1", "/restart") == (True, "") and "pane-1" in rab.TYPED and sent == []
+    monkeypatch.setattr(rab, "LIVE", True)
+    assert rab.type_line("pane-2", "/restart") == (True, "") and "pane-2" in rab.TYPED
+    assert ("send-keys", "-t", "pane-2", "Enter") in sent
+    monkeypatch.setattr(rab, "input_empty", lambda t: False)
+    assert rab.type_line("pane-3", "/restart") == (False, "busy") and "pane-3" not in rab.TYPED
+
+
+def test_not_before_equals_form_and_a_misspelled_option_never_start_a_run(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    t = rab.utc_ts("2099-01-01T00:00:00Z")
+    assert rab.too_early(["x", "--live", "--not-before=2099-01-01T00:00:00Z"], now=t - 50) == 50
+    assert rab.too_early(["x", "--not-before=soon"], now=0) == -1
+    assert rab.too_early(["x", "--not-before", "2099-01-01T00:00:00Z", "--not-before=2099-01-01T00:00:00Z"], now=0) == -1
+    assert rab.unknown_options(["x", "--live", "--only", "A", "--not-before=2099-01-01T00:00:00Z"]) == []
+    assert rab.unknown_options(["x", "--live", "--not-befor", "2099-01-01T00:00:00Z"]) == ["--not-befor"]
+    import pitstop_common as pc
+
+    def boom(*a, **k):
+        raise AssertionError("the run started")
+    monkeypatch.setattr(pc, "live_sessions", boom)
+    monkeypatch.setattr(pc, "newest_installed_version", boom)
+    for argv in (["x", "--live", "--not-befor", "2099-01-01T00:00:00Z"],      # misspelled
+                 ["x", "--live", "--not-before=2099-01-01T00:00:00Z"],          # not yet
+                 ["x", "--live", "--not-before", "tomorrow"]):                  # unreadable
+        monkeypatch.setattr(sys, "argv", argv)
+        rab.main()                                                              # returns without looking at any session
+
+
+def test_a_number_in_restart_json_must_be_a_number(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    cfg, warn = dict(rab._DEFAULTS, idle_compact_after=True, cold_idle="3600", min_idle=-5, ctx_max=90_000), []
+    rab._check_numbers(cfg, rab._DEFAULTS, warn)
+    assert cfg["idle_compact_after"] is None and cfg["cold_idle"] == 3600 and cfg["min_idle"] == 300
+    assert cfg["ctx_max"] == 90_000 and len(warn) == 3 and "idle_compact_after" in " ".join(warn)
+    up = _lane(behind=False, ctx=300_000, idle=2)
+    assert rab.plan(up, cfg)[0] == "none"                              # `true` is not "after one second"
+    ok, warn = dict(rab._DEFAULTS, idle_compact_after=2400), []
+    rab._check_numbers(ok, rab._DEFAULTS, warn)
+    assert ok["idle_compact_after"] == 2400 and warn == []
+
+
+def test_only_the_answer_to_the_newest_reload_command_confirms_it(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    old = ["\u276f /reload-plugins", "  \u23bf  Reloaded: 1 plugin \u00b7 1 hook", "\u25cf some later reply"]
+    assert rab.reloaded_row(old) == "Reloaded: 1 plugin \u00b7 1 hook"
+    assert rab.reloaded_row(old + ["\u276f /reload-plugins", "  \u23bf  Plugin reload failed"]) is None   # the new one failed
+    assert rab.reloaded_row(old + ["\u276f /reload-plugins"]) is None                                    # no answer yet
+    assert rab.reloaded_row(["  \u23bf  Reloaded: 1 plugin"]) is None                                    # nobody typed it
+    new = old + ["\u276f /reload-plugins", "  \u23bf  Reloaded: 2 plugins \u00b7 3 hooks"]
+    assert rab.reloaded_row(new) == "Reloaded: 2 plugins \u00b7 3 hooks"
+
+
+def test_reload_rule_is_quiet_while_the_box_is_busy_backs_off_after_mismatches_and_a_dry_run_writes_nothing(tmp_path, monkeypatch):
+    rab, typed, info, now = _live_reload(tmp_path, monkeypatch, [])
+    counts = {"restart": 0, "compact": 0, "reload": 0}
+    s = _sess(version="2.1.322", started=(now - 86400) * 1000)
+    key = rab.lane_key("Lane One", "abcd1234-0000")
+    monkeypatch.setattr(rab, "input_empty", lambda t: False)            # the person is typing
+    for _ in range(3):
+        rab.maybe_reload(s, "pane", now, counts, info)
+    assert typed == [] and not os.path.exists(rab.EVENTS) and not os.path.exists(rab.LOG)
+    monkeypatch.setattr(rab, "input_empty", lambda t: True)
+    os.makedirs(os.path.join(rab.BASE, "state"), exist_ok=True)
+    with open(os.path.join(rab.BASE, "state", key + ".mismatch"), "w") as f:
+        json.dump({"n": 2, "at": now - 60}, f)                         # typing failed twice a minute ago
+    rab.maybe_reload(s, "pane", now, counts, info)
+    assert typed == []
+    os.remove(os.path.join(rab.BASE, "state", key + ".mismatch"))
+    monkeypatch.setattr(rab, "LIVE", False)                             # dry run: says what it would do, stamps nothing
+    rab.maybe_reload(s, "pane", now, counts, info)
+    assert typed == ["/reload-plugins"] and os.listdir(os.path.join(rab.BASE, "state")) == []
+    assert rab.reload_due(_rl(compact_age=300, idle=10, ctx=300_000, call_age=10), dict(rab.CFG, reload_plugins=True))[0] is False
+
+
+def test_main_runs_the_reload_rule_after_the_restart_path_for_each_allowed_session(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    import pitstop_common as pc
+    calls = []
+    s = _sess(version="2.1.322")
+    monkeypatch.setattr(sys, "argv", ["x"])
+    monkeypatch.setattr(pc, "newest_installed_version", lambda: "2.1.322")
+    monkeypatch.setattr(pc, "live_sessions", lambda: ([s], "registry"))
+    monkeypatch.setattr(rab, "panes", lambda: {"/dev/pts/9": "pane"})
+    monkeypatch.setattr(rab, "pid_tty", lambda pid: "/dev/pts/9")
+    monkeypatch.setattr(rab, "handle", lambda *a: calls.append("handle"))
+    monkeypatch.setattr(rab, "maybe_reload", lambda s, target, now, counts, info: calls.append(("reload", info, counts)))
+    rab.TYPED.add("stale")
+    rab.main()
+    assert calls[0] == "handle" and calls[1][0] == "reload" and calls[1][1] is None     # rule off: no plugin read
+    assert calls[1][2] == {"restart": 0, "compact": 0, "reload": 0} and rab.TYPED == set()
+    rab.CFG.update(reload_plugins=True)
+    monkeypatch.setattr(rab, "plugin_info", lambda: (_ for _ in ()).throw(ValueError("odd file")))
+    calls.clear()
+    rab.main()                                                           # an unreadable plugin record: restarts go on
+    assert calls[0] == "handle" and calls[1][1] is None

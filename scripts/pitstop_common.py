@@ -360,6 +360,8 @@ def plugin_installed(claude_dir=None):
     try:
         with open(os.path.join(claude_dir or CLAUDE_DIR, "plugins", "installed_plugins.json")) as f:
             plugins = json.load(f).get("plugins") or {}
+        if not isinstance(plugins, dict):
+            raise ValueError("plugins is not an object")
     except Exception:
         return None, None
     rows = [r for k, v in plugins.items() if k.split("@")[0] == "windstorm-pit-stop" and isinstance(v, list)
@@ -432,6 +434,8 @@ def plugin_root(claude_dir=None):
     try:
         with open(os.path.join(claude_dir or CLAUDE_DIR, "plugins", "installed_plugins.json")) as f:
             plugins = json.load(f).get("plugins") or {}
+        if not isinstance(plugins, dict):
+            raise ValueError("plugins is not an object")
     except Exception:
         return None
     rows = [r for k, v in plugins.items() if k.split("@")[0] == PLUGIN_NAME and isinstance(v, list)
