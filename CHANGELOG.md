@@ -14,6 +14,8 @@ New:
 - `.gitattributes`: LF line endings on checkout, so a Windows clone has the same bytes as everyone else's.
 - README: an hour-idle restart types no note.
 
+Tested: the hook smoke test on a real Windows machine, for 0.2.0 and 0.1.4 (see README, Tested). 56 tests.
+
 ## 0.2.0 (2026-11-10)
 From a review of 0.1.3 against a fleet of 94 sessions and Claude Code 2.1.322. In 4 days that fleet compacted 275 times: 39% by Claude Code's own idle compaction, 33% as a prompt arrived, 29% mid-task. 46 sessions sat on an old version, 34 of them for one reason: a big context and no compaction in the last 30 minutes.
 
