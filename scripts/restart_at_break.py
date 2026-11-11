@@ -62,10 +62,14 @@ seconds (6 h). A session that stopped its jobs for a restart the helper then
 could not do is told, after consent_timeout (30 min), to start them again.
 
 RELOAD (reload_plugins: true; off by default). A session loads a plugin's
-hooks when its process starts. One that started before Pit Stop was installed
-or last updated runs old hooks, or none, and a session already on the newest
-Claude Code is never restarted. For such a session the helper types
-/reload-plugins (a local command: no turn starts), at a break, when that is
+hooks when its process starts, and a session already on the newest Claude
+Code is never restarted. The helper types /reload-plugins (a local command:
+no turn starts) into a session whose Pit Stop hooks are MISSING or WRONG: it
+started before the plugin was installed and has none; or the version folder
+its hooks run from has been removed; or the plugin's hook generation
+(hooks/generation.json, raised only when a running session must reload) is
+not the installed one. A session that merely runs an older release's hooks
+of the same generation is left alone. It is typed at a break, when that is
 cheap: right after a compaction, on a small context, or when the cache has
 gone cold. A reload can make the session's next turn write its context to the
 prompt cache again, so a big session with a warm cache waits (reload_warm:
@@ -586,17 +590,22 @@ def tell_rearm(target, okf, mmf, text, now):
 def reload_due(l, cfg):
     """(True, why) when this session should get /reload-plugins now, else
     (False, why). Pure, for tests. l: name, status, idle, ctx, compact_age,
-    started (when its process last started, epoch), reloaded_at (the helper's
-    last confirmed reload, or None), tried_age (seconds since its last try, or
-    None), plugin_at (when the plugin was installed or last updated, or None)."""
+    want_gen (the installed plugin's hook generation, or None if it cannot be
+    read), runs_root (the plugin folder this session's hooks run from, or None
+    if it loaded none), runs_gen (that folder's hook generation, None if the
+    folder or its hooks are gone), tried_age (seconds since the helper's last
+    reload try, or None).
+    A session is due only when the hooks it runs are MISSING or WRONG: it has
+    none, or the folder they run from is gone, or their generation differs
+    from the installed one. Merely older is not due (see hooks/generation.json)."""
     if not cfg.get("reload_plugins"):
         return False, "off"
-    if not l.get("plugin_at"):
-        return False, "the plugin's install time cannot be read"
+    if not l.get("want_gen"):
+        return False, "the installed plugin's hooks cannot be read"
     only = cfg.get("reload_only_names") or []
     if only and l["name"] not in only:
         return False, "not in reload_only_names"
-    if max(l.get("started") or 0, l.get("reloaded_at") or 0) >= l["plugin_at"]:
+    if l.get("runs_gen") == l["want_gen"]:
         return False, "loaded"
     if l.get("tried_age") is not None and l["tried_age"] < cfg["reload_retry"]:
         return False, f"a reload was tried {int(l['tried_age'])}s ago (waits {cfg['reload_retry']}s)"
@@ -605,16 +614,45 @@ def reload_due(l, cfg):
     idle, ctx, cage = l["idle"], l["ctx"], l.get("compact_age")
     if idle < 0:
         return False, "no transcript found"
+    what = ("it has no Pit Stop hook" if not l.get("runs_root") else
+            "the folder its hooks run from is gone" if l.get("runs_gen") is None else
+            f"it runs hook generation {l['runs_gen']}, the installed one is {l['want_gen']}")
     if cage is not None and cage <= cfg["compact_window"] and idle >= cfg["min_idle_after_compact"]:
-        return True, f"compacted {int(cage)}s ago, idle {int(idle)}s"
+        return True, f"{what}; compacted {int(cage)}s ago, idle {int(idle)}s"
     if ctx is not None and ctx < cfg["ctx_max"] and idle >= cfg["min_idle"]:
-        return True, f"small context {ctx}, idle {int(idle)}s"
+        return True, f"{what}; small context {ctx}, idle {int(idle)}s"
     if idle >= cfg["cache_ttl"]:
-        return True, f"idle {int(idle)}s, cache cold"
+        return True, f"{what}; idle {int(idle)}s, cache cold"
     if cfg.get("reload_warm") and idle >= cfg["min_idle"]:
-        return True, f"reload_warm is on, idle {int(idle)}s"
-    return False, (f"context {ctx}, idle {int(idle)}s: big and warm, so it waits for a compaction, "
+        return True, f"{what}; reload_warm is on, idle {int(idle)}s"
+    return False, (f"{what}; context {ctx}, idle {int(idle)}s: big and warm, so it waits for a compaction, "
                    f"a context under {cfg['ctx_max']} or a cold cache")
+
+
+def plugin_info():
+    """What the reload rule needs to know about the installed plugin, read once per run."""
+    root = pc.plugin_root()
+    return {"root": root, "gen": pc.hook_generation(root), "versions": pc.plugin_versions()}
+
+
+def lane_hooks(s, info, reloaded_at=None):
+    """(folder, generation) of the Pit Stop hooks this session runs.
+    Best evidence first: the stamp the plugin's own hooks leave for the session
+    (~/.claude/pit-stop/seen/<id>: a time and the folder they ran from), if it is
+    newer than the session's last start or reload. Otherwise it is worked out:
+    a session loads its plugins when its process starts or on /reload-plugins,
+    and gets the newest version folder that was in the cache at that moment."""
+    loaded_at = max((s.get("startedAt") or 0) / 1000, reloaded_at or 0)
+    root = None
+    try:
+        with open(os.path.join(pc.SEEN, pc.safe_id(s.get("sessionId")))) as f:
+            parts = f.read().strip().split(" ", 1)
+        if len(parts) == 2 and float(parts[0]) >= loaded_at and parts[1]:
+            root = parts[1]
+    except (OSError, ValueError):
+        pass
+    root = root or pc.root_loaded_at(loaded_at, info["versions"])
+    return root, (pc.hook_generation(root) if root else None)
 
 
 def confirm_reload(target, wait=12):
@@ -628,7 +666,7 @@ def confirm_reload(target, wait=12):
     return None
 
 
-def maybe_reload(s, target, now, counts, plugin_at):
+def maybe_reload(s, target, now, counts, info):
     """Type /reload-plugins into one session if reload_due says so. Called after
     handle(), and only for a session nothing was typed into in this run."""
     if not CFG.get("reload_plugins") or target in TYPED:
@@ -643,10 +681,10 @@ def maybe_reload(s, target, now, counts, plugin_at):
     ctx, idle = ctx_and_idle(s)
     if s.get("statusUpdatedAt") and idle >= 0:
         idle = min(now - s["statusUpdatedAt"] / 1000, idle)
+    runs_root, runs_gen = lane_hooks(s, info, reloaded_at)
     l = {"name": name, "status": s.get("status"), "idle": idle, "ctx": ctx,
          "compact_age": last_compact_age(transcript_path(s), now=now),
-         "started": (s.get("startedAt") or 0) / 1000, "reloaded_at": reloaded_at,
-         "tried_age": age_of(tryf, now), "plugin_at": plugin_at}
+         "want_gen": info["gen"], "runs_root": runs_root, "runs_gen": runs_gen, "tried_age": age_of(tryf, now)}
     due, why = reload_due(l, CFG)
     if not due:
         if why not in ("off", "loaded", "not in reload_only_names") and not LIVE:
@@ -660,8 +698,7 @@ def maybe_reload(s, target, now, counts, plugin_at):
         if not LIVE:   # a live run stays quiet here: many sessions can be due at once, one line each per run adds up
             log(f"{name}: run limit reached for /reload-plugins; next run")
         return
-    log(f"{name}: plugin hooks not loaded (its process started before the plugin's install or update); "
-        f"/reload-plugins: {why}" + ("" if LIVE else " (DRY)"))
+    log(f"{name}: /reload-plugins: {why}" + ("" if LIVE else " (DRY)"))
     sent, how = type_line(target, "/reload-plugins")
     note_typing(mmf, sent, how, now)
     if not sent:
@@ -871,7 +908,7 @@ def main():
             os.makedirs(os.path.join(BASE, d), exist_ok=True)
     tty_map, now = panes(), time.time()
     counts = {"restart": 0, "compact": 0, "reload": 0}
-    plugin_at = pc.plugin_installed()[1] if CFG.get("reload_plugins") else None
+    info = plugin_info() if CFG.get("reload_plugins") else None
     for s in sorted(sessions, key=lambda x: x["name"]):
         try:
             target = tty_map.get(pid_tty(s.get("pid")) or "")
@@ -880,7 +917,7 @@ def main():
             if not allowed(s["name"], s.get("cwd") or "", CFG):
                 continue
             handle(s, newest, target, now, counts)
-            maybe_reload(s, target, now, counts, plugin_at)
+            maybe_reload(s, target, now, counts, info)
         except Exception as e:  # one odd session (an unreadable transcript, a vanished pane) never stops the run
             log(f"{s.get('name') or '?'}: skip: error {type(e).__name__}: {str(e)[:120]}")
 

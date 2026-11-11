@@ -1003,25 +1003,29 @@ def test_events_log_keeps_actions_and_leaves_out_skips(tmp_path, monkeypatch):
     assert len(ev) == 2 and "RESTARTED" in ev[0] and "refused" in ev[1]
 
 
-# ---------------------------------------------------------------- 0.2.2: reload sessions that lack the hooks
+# ---------------------------------------------------------------- 0.2.2: reload sessions whose hooks are missing or wrong
 def _rl(**kw):
-    l = {"name": "Lane One", "status": "idle", "idle": 600, "ctx": 300_000, "compact_age": None,
-         "started": 1000, "reloaded_at": None, "tried_age": None, "plugin_at": 2000}
+    l = {"name": "Lane One", "status": "idle", "idle": 4000, "ctx": 300_000, "compact_age": None,
+         "want_gen": 2, "runs_root": None, "runs_gen": None, "tried_age": None}
     l.update(kw)
     return l
 
 
-def test_reload_due_is_off_by_default_and_only_for_sessions_older_than_the_plugin(tmp_path, monkeypatch):
+def test_reload_due_only_when_the_hooks_are_missing_or_wrong_not_merely_older(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     on = dict(rab.CFG, reload_plugins=True)
-    assert rab.reload_due(_rl(idle=4000), rab.CFG) == (False, "off")
-    assert rab.reload_due(_rl(idle=4000, plugin_at=None), on)[0] is False
-    assert rab.reload_due(_rl(idle=4000, started=3000), on) == (False, "loaded")          # started after the install
-    assert rab.reload_due(_rl(idle=4000, reloaded_at=2500), on) == (False, "loaded")      # the helper reloaded it since
-    assert rab.reload_due(_rl(idle=4000, reloaded_at=1500), on)[0] is True                # ...but before a newer update
-    assert rab.reload_due(_rl(idle=4000, tried_age=600), on)[0] is False                  # tried lately: left alone
-    assert rab.reload_due(_rl(idle=4000, status="busy"), on)[0] is False
-    assert rab.reload_due(_rl(idle=4000, status="shell"), on)[0] is True                  # background jobs do not matter
+    assert rab.reload_due(_rl(), rab.CFG) == (False, "off")
+    assert rab.reload_due(_rl(want_gen=None), on)[0] is False                              # installed plugin unreadable
+    due, why = rab.reload_due(_rl(), on)
+    assert due is True and "no Pit Stop hook" in why                                       # started before the install
+    assert rab.reload_due(_rl(runs_root="/c/0.1.2", runs_gen=2), on) == (False, "loaded")  # older release, same generation
+    due, why = rab.reload_due(_rl(runs_root="/c/0.1.2", runs_gen=1), on)
+    assert due is True and "generation 1" in why and "installed one is 2" in why
+    due, why = rab.reload_due(_rl(runs_root="/c/0.1.2", runs_gen=None), on)                # its version folder was removed
+    assert due is True and "folder its hooks run from is gone" in why
+    assert rab.reload_due(_rl(tried_age=600), on)[0] is False                              # tried lately: left alone
+    assert rab.reload_due(_rl(status="busy"), on)[0] is False
+    assert rab.reload_due(_rl(status="shell"), on)[0] is True                              # background jobs do not matter
 
 
 def test_reload_due_takes_cold_small_or_just_compacted_first_and_makes_big_warm_wait(tmp_path, monkeypatch):
@@ -1035,8 +1039,65 @@ def test_reload_due_takes_cold_small_or_just_compacted_first_and_makes_big_warm_
     assert rab.reload_due(_rl(ctx=60_000, idle=100), on)[0] is False                      # small but only just quiet
     assert rab.reload_due(_rl(ctx=300_000, idle=600), dict(on, reload_warm=True))[0] is True
     staged = dict(on, reload_only_names=["Lane Two"])
-    assert rab.reload_due(_rl(idle=4000), staged) == (False, "not in reload_only_names")
-    assert rab.reload_due(_rl(idle=4000, name="Lane Two"), staged)[0] is True
+    assert rab.reload_due(_rl(), staged) == (False, "not in reload_only_names")
+    assert rab.reload_due(_rl(name="Lane Two"), staged)[0] is True
+
+
+def _plugin_dir(base, version, generation=None, when=None):
+    root = base / "plugins" / "cache" / "thewindstorm" / "windstorm-pit-stop" / version
+    (root / "hooks").mkdir(parents=True)
+    (root / ".claude-plugin").mkdir()
+    (root / "hooks" / "hooks.json").write_text("{}")
+    (root / ".claude-plugin" / "plugin.json").write_text("{}")
+    if generation is not None:
+        (root / "hooks" / "generation.json").write_text(json.dumps({"generation": generation}))
+    if when:
+        os.utime(root / ".claude-plugin" / "plugin.json", (when, when))
+    return str(root)
+
+
+def test_hook_generation_and_which_version_a_session_loaded(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    import pitstop_common as pc
+    cfg, now = tmp_path / "cfg", time.time()
+    old = _plugin_dir(cfg, "0.1.2", when=now - 5000)                   # no generation file: generation 1
+    mid = _plugin_dir(cfg, "0.1.4", when=now - 3000)
+    new = _plugin_dir(cfg, "0.2.1", generation=2, when=now - 1000)
+    assert (pc.hook_generation(old), pc.hook_generation(mid), pc.hook_generation(new)) == (1, 1, 2)
+    assert pc.hook_generation(str(cfg / "nowhere")) is None and pc.hook_generation(None) is None
+    (cfg / "plugins" / "bad").mkdir()
+    for junk in ('{"generation": "2"}', '{"generation": true}', "[]", "not json", '{"generation": 0}'):
+        (tmp_path / "cfg" / "plugins" / "cache" / "thewindstorm" / "windstorm-pit-stop" / "0.1.4" / "hooks"
+         / "generation.json").write_text(junk)
+        assert pc.hook_generation(mid) == 1                              # an unreadable number never invents a generation
+    vs = pc.plugin_versions()
+    assert [os.path.basename(r) for _, r in vs] == ["0.1.2", "0.1.4", "0.2.1"]
+    assert pc.root_loaded_at(now - 6000, vs) is None                     # started before the first install: no hook
+    assert pc.root_loaded_at(now - 4000, vs) == old and pc.root_loaded_at(now - 10, vs) == new
+    info = {"root": new, "gen": 2, "versions": vs}
+    s = _sess(version="2.1.322", started=(now - 4000) * 1000)
+    assert rab.lane_hooks(s, info) == (old, 1)                           # worked out from its start time
+    assert rab.lane_hooks(s, info, reloaded_at=now - 500) == (new, 2)    # the helper reloaded it since
+    # the plugin's own hook leaves a stamp with the folder it ran from: that beats working it out
+    os.makedirs(pc.SEEN, exist_ok=True)
+    with open(os.path.join(pc.SEEN, pc.safe_id(s["sessionId"])), "w") as f:
+        f.write(f"{int(now - 100)} {mid}")
+    assert rab.lane_hooks(s, info) == (mid, 1)
+    assert rab.lane_hooks(s, info, reloaded_at=now - 50) == (new, 2)     # ...unless it was reloaded after that stamp
+    import shutil
+    shutil.rmtree(mid)
+    assert rab.lane_hooks(s, info) == (mid, None)                        # its folder was removed: hooks that cannot run
+
+
+def test_generation_file_was_looked_at_when_the_hook_files_last_changed():
+    """If this fails, hooks/hooks.json or a hooks/*.py changed. Decide: must a session that is already
+    running reload to work properly with this release? If yes, raise "generation" in hooks/generation.json.
+    Either way record the new hook_files_sha256 there (the value is in the failure message)."""
+    import pitstop_common as pc
+    g = json.load(open(os.path.join(ROOT, "hooks", "generation.json")))
+    assert isinstance(g["generation"], int) and g["generation"] >= 2
+    assert g["hook_files_sha256"] == pc.hook_files_signature(ROOT), pc.hook_files_signature(ROOT)
+    assert pc.hook_generation(ROOT) == g["generation"]
 
 
 def _live_reload(tmp_path, monkeypatch, rows, ctx=60_000, idle=4000):
@@ -1050,56 +1111,59 @@ def _live_reload(tmp_path, monkeypatch, rows, ctx=60_000, idle=4000):
         return True, ""
     monkeypatch.setattr(rab, "type_line", fake_type)
     monkeypatch.setattr(rab, "screen", lambda t, escapes=False: rows)
-    return rab, typed
+    now = time.time()
+    new = _plugin_dir(tmp_path / "cfg", "0.2.1", generation=2, when=now - 3600)   # installed an hour ago
+    return rab, typed, {"root": new, "gen": 2, "versions": [(now - 3600, new)]}, now
 
 
 def test_live_reload_types_once_confirms_and_then_leaves_the_session_alone(tmp_path, monkeypatch):
-    import time
-    rab, typed = _live_reload(tmp_path, monkeypatch,
-                              ["  \u23bf  Reloaded: 1 plugin \u00b7 1 skill \u00b7 7 agents \u00b7 1 hook"])
-    now, counts = time.time(), {"restart": 0, "compact": 0, "reload": 0}
+    rab, typed, info, now = _live_reload(tmp_path, monkeypatch,
+                                         ["  \u23bf  Reloaded: 1 plugin \u00b7 1 skill \u00b7 7 agents \u00b7 1 hook"])
+    counts = {"restart": 0, "compact": 0, "reload": 0}
     s = _sess(version="2.1.322", started=(now - 86400) * 1000)          # on the newest version, started a day ago
-    rab.maybe_reload(s, "pane", now, counts, now - 3600)                # the plugin was installed an hour ago
+    rab.maybe_reload(s, "pane", now, counts, info)
     assert typed == ["/reload-plugins"] and counts["reload"] == 1
     key = rab.lane_key("Lane One", "abcd1234-0000")
     assert os.path.exists(os.path.join(rab.BASE, "state", key + ".reloaded"))
-    assert "RELOADED plugins" in open(rab.LOG).read() and "1 hook" in open(rab.LOG).read()
+    log = open(rab.LOG).read()
+    assert "RELOADED plugins" in log and "1 hook" in log and "no Pit Stop hook" in log
     rab.TYPED.clear()
-    rab.maybe_reload(s, "pane", now + 600, counts, now - 3600)          # next run: it is loaded now
+    rab.maybe_reload(s, "pane", time.time() + 600, counts, info)        # next run: it is loaded now
     assert typed == ["/reload-plugins"]
     rab.maybe_reload(_sess(version="2.1.322", started=(now - 86400) * 1000, name="Lane Two"), "pane2", now, counts,
-                     now - 3600)                                         # one reload per run
+                     info)                                               # one reload per run
+    assert typed == ["/reload-plugins"]
+    started_after = _sess(version="2.1.322", started=(now - 60) * 1000, name="Lane Three")
+    rab.maybe_reload(started_after, "pane3", now, dict(counts, reload=0), info)   # it started after the install: loaded
     assert typed == ["/reload-plugins"]
 
 
 def test_live_reload_not_confirmed_waits_for_the_retry_time(tmp_path, monkeypatch):
-    import time
-    rab, typed = _live_reload(tmp_path, monkeypatch, ["some other screen"])
-    now, counts = time.time(), {"restart": 0, "compact": 0, "reload": 0}
+    rab, typed, info, now = _live_reload(tmp_path, monkeypatch, ["some other screen"])
+    counts = {"restart": 0, "compact": 0, "reload": 0}
     s = _sess(version="2.1.322", started=(now - 86400) * 1000)
-    rab.maybe_reload(s, "pane", now, counts, now - 3600)
+    rab.maybe_reload(s, "pane", now, counts, info)
     assert typed == ["/reload-plugins"] and "RELOAD NOT CONFIRMED" in open(rab.LOG).read()
     key = rab.lane_key("Lane One", "abcd1234-0000")
     assert not os.path.exists(os.path.join(rab.BASE, "state", key + ".reloaded"))
     rab.TYPED.clear()
-    rab.maybe_reload(s, "pane", now + 3600, dict(counts, reload=0), now - 3600)     # an hour on: not again yet
+    rab.maybe_reload(s, "pane", now + 3600, dict(counts, reload=0), info)           # an hour on: not again yet
     assert typed == ["/reload-plugins"]
-    rab.maybe_reload(s, "pane", now + 22000, dict(counts, reload=0), now - 3600)    # after reload_retry: once more
+    rab.maybe_reload(s, "pane", now + 22000, dict(counts, reload=0), info)          # after reload_retry: once more
     assert typed == ["/reload-plugins", "/reload-plugins"]
 
 
 def test_a_session_restarted_in_this_run_is_not_also_reloaded_and_off_means_nothing_typed(tmp_path, monkeypatch):
-    import time
-    rab, typed = _live_reload(tmp_path, monkeypatch, [], ctx=60_000, idle=4000)
-    now, counts = time.time(), {"restart": 0, "compact": 0, "reload": 0}
-    s = _sess(version="2.1.319", started=(now - 86400) * 1000)          # behind AND older than the plugin
+    rab, typed, info, now = _live_reload(tmp_path, monkeypatch, [], ctx=60_000, idle=4000)
+    counts = {"restart": 0, "compact": 0, "reload": 0}
+    s = _sess(version="2.1.319", started=(now - 86400) * 1000)          # behind AND without the hook
     rab.handle(s, "2.1.322", "pane", now, counts)
-    rab.maybe_reload(s, "pane", now, counts, now - 3600)
+    rab.maybe_reload(s, "pane", now, counts, info)
     assert typed == ["/restart"] and counts["reload"] == 0              # the restart loads the plugin anyway
     rab.TYPED.clear()
     rab.CFG.update(reload_plugins=False)
     rab.maybe_reload(_sess(version="2.1.322", started=(now - 86400) * 1000, name="Lane Two"), "pane2", now, counts,
-                     now - 3600)
+                     info)
     assert typed == ["/restart"]
 
 

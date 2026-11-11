@@ -66,11 +66,16 @@ def ask_ok(a):
     return norm(okf) == norm(os.path.join(OK_DIR, name))
 
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 def touch(path):
+    """The stamp says when this session's Stop hook last ran and from which plugin folder: the restart
+    helper reads it to know which version's hooks the session runs."""
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
-            f.write(str(int(time.time())))
+            f.write(f"{int(time.time())} {ROOT}")
     except Exception:
         pass
 
