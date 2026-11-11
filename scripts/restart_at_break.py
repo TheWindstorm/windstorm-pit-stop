@@ -258,14 +258,22 @@ def ctx_and_idle(s):
     p = transcript_path(s)
     if not os.path.exists(p):
         return None, -1
-    idle = time.time() - os.path.getmtime(p)
-    ctx = None
+    # Idle is counted from the newest entry that carries a time, not from the
+    # file's modification time: on a quiet lane the file's time was seen moving
+    # about once an hour with nothing appended (Veron, 2026-11-11), which reset
+    # the idle clock and kept the hour-idle rule from ever applying.
+    ctx, newest = None, None
     for e in pc.iter_entries(p, tail_bytes=3_000_000):
+        t = utc_ts(e.get("timestamp") or "")
+        if t and (newest is None or t > newest):
+            newest = t
         if pc.is_compact_boundary(e):
             ctx = 0
         elif e.get("type") == "assistant" and not e.get("isSidechain") and pc.usage_total(e):
             ctx = pc.usage_total(e)
-    return ctx, idle
+    now = time.time()
+    idle = now - newest if newest is not None else now - os.path.getmtime(p)
+    return ctx, max(0.0, idle)
 
 
 def utc_ts(s):
@@ -705,7 +713,29 @@ def handle(s, newest, target, now, counts):
             os.remove(f)
 
 
+def too_early(argv=None, now=None):
+    """--not-before 2026-11-11T20:45:00Z: do nothing before that time (UTC).
+    For a booked test window: a run started early by a few seconds once typed
+    six seconds before its slot (2026-11-10). Returns the seconds still to
+    wait (> 0), 0 when it is time or the option is absent, and -1 when the
+    time given cannot be read (the run then does nothing: a booked test that
+    cannot tell its start time must not start)."""
+    argv = sys.argv if argv is None else argv
+    if "--not-before" not in argv:
+        return 0
+    i = argv.index("--not-before")
+    t = utc_ts(argv[i + 1]) if i + 1 < len(argv) and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", argv[i + 1]) else None
+    if t is None:
+        return -1
+    return max(0, t - (time.time() if now is None else now))
+
+
 def main():
+    wait = too_early()
+    if wait:
+        log("--not-before: cannot read the time (want 2026-11-11T20:45:00Z); nothing done" if wait < 0
+            else f"--not-before: {int(wait) + 1}s too early; nothing done")
+        return
     newest = pc.newest_installed_version()
     if not newest:
         log("no installed versions found; exit")

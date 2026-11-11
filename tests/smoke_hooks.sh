@@ -50,7 +50,7 @@ payload("stop.json", {"session_id": "smoke-ask"})
 payload("start.json", {"source": "compact", "cwd": t})
 os.makedirs(os.path.join(t, "cfg", "pit-stop", "asks"))
 payload(os.path.join("cfg", "pit-stop", "asks", "smoke-ask.json"),
-        {"newest": "9.9.9", "ver": "0.0.1", "okf": os.path.join(t, "rearm"), "at": 1, "delivered": None})
+        {"newest": "9.9.9", "ver": "0.0.1", "okf": os.path.join(t, "cfg", "pit-stop", "restart", "ok", "smoke-ask"), "at": 1, "delivered": None})
 # a memory index over the 24 KB load limit, for the reading check
 key = "".join(c if c.isalnum() else "-" for c in os.path.abspath(os.path.join(t, "proj")))
 mem = os.path.join(t, "cfg", "projects", key, "memory")
