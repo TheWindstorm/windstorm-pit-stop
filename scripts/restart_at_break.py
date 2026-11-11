@@ -106,6 +106,8 @@ CFG = {"tmux_socket": None, "allow_names": [], "deny_names": [], "deny_name_glob
 CFG.update(pc.read_json(os.path.join(pc.STATE_DIR, "restart.json"), {}) or {})
 BASE = os.path.join(pc.STATE_DIR, "restart")
 LOG = os.path.join(BASE, "restart.log")
+EVENTS = os.path.join(BASE, "events.log")   # only what was done, typed, refused or asked: small, so it lasts
+QUIET = (" skip: ", " wait: ", " at a break: ", "run limit reached", "--not-before: ")
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 DIM_SEG = re.compile(r"\x1b\[2m.*?(?=\x1b\[(?:0|22)?m|$)")
 PROMPT = "❯"
@@ -129,6 +131,11 @@ def log(msg):
         os.replace(LOG, LOG + ".1")  # keep one old log; never grow without bound
     with open(LOG, "a") as f:
         f.write(f"{ts()} {msg}\n")
+    # restart.log gets one line per session every run (about 20,000 lines in 31
+    # hours on a 95-session machine), so it rotates within days and the
+    # restarts scroll away with it. Everything that is not a skip is kept here too.
+    if not any(q in msg for q in QUIET):
+        pc.append_log(EVENTS, msg)
 
 
 def tmux(*args):

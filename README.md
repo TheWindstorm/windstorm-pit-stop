@@ -40,6 +40,8 @@ Claude Code compacts in two ways, and Pit Stop sets a point for each:
 
 So a session set to 200K / 500K compacts at 200K or more when it gets a quiet hour, and at about 500K if it never does: a little past 500K if it is mid-task, at the next break.
 
+**When Claude Code prepares the summary early.** Claude Code can write the summary ahead of time, in the background: it asks the hook at about 82% of the window, and when the window is reached it swaps the finished summary in within milliseconds, keeping the newest messages word for word. That swap can land in the middle of a tool call and the hook is not asked again. So with this on, Pit Stop's hold decides where the summary *ends* (at a break, so the summary covers finished steps), and the swap itself costs no wait. Whether it is on is Anthropic's rollout and the `precomputeCompactionEnabled` setting; on the fleet this was measured on, 96 of 537 automatic compactions in a week were swaps of this kind. `/pit-stop optimize` counts them separately.
+
 ## What you get
 
 | Part | What it does | On by default? |

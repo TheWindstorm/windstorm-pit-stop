@@ -90,7 +90,7 @@ def analyze(project, days, only=None):
     sessions = boundaries = 0
     outs = []
     drifts, cold_tokens, cold_wakes, t_first, t_last = [], 0, 0, None, None
-    when = {"idle": 0, "prompt": 0, "mid_task": 0}
+    when = {"idle": 0, "prompt": 0, "mid_task": 0, "instant": 0}
     for path in files:
         sessions += 1
         prev_reads, cur_reads, after_compact = set(), set(), None
@@ -103,7 +103,12 @@ def analyze(project, days, only=None):
             if pc.is_compact_boundary(e):
                 boundaries += 1
                 quiet = ts - last_ts if ts and last_ts else 0
-                when["mid_task" if last_kind == "tool" else "idle" if last_kind == "reply" and quiet >= 1800
+                # "instant": Claude Code wrote the summary ahead of time, in the
+                # background, and swapped it in here in milliseconds with the
+                # newest messages kept word for word. Nobody waits and the work
+                # in hand is kept, so it is not counted as a mid-task compaction.
+                when["instant" if (e.get("compactMetadata") or {}).get("precomputed")
+                     else "mid_task" if last_kind == "tool" else "idle" if last_kind == "reply" and quiet >= 1800
                      else "prompt"] += 1
                 if cur["turns"]:
                     cur["compacted"] = True
@@ -379,7 +384,8 @@ def main():
               f"idle >1h share {m['long_gap_share']}, tool error rate {m['tool_error_rate']}")
         print(f"  work mix {m['work_mix']}")
         w = m["compactions_when"]
-        print(f"  compactions happened: {w['idle']} while idle, {w['prompt']} as a prompt arrived, {w['mid_task']} mid-task")
+        print(f"  compactions happened: {w['idle']} while idle, {w['prompt']} as a prompt arrived, {w['mid_task']} mid-task, "
+              f"{w.get('instant', 0)} swapped in instantly (summary prepared ahead by Claude Code)")
         print(f"  topic change {m['topic_change']}, cold wake-ups per day {m['cold_wakes_per_day']}, "
               f"tokens paid again on cold wake-ups per day {pc.fmt_k(m['cold_wake_tokens_per_day'])}")
         print(f"Recommended idle point: {pc.fmt_k(rec['idle_point'])} (now {pc.fmt_k(m['current_idle_point'] or pc.IDLE_DEFAULT)})")

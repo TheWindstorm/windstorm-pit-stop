@@ -963,3 +963,41 @@ def test_not_before_holds_a_run_until_its_time():
     assert rab.too_early(["x", "--not-before", "2026-11-11T20:45:00Z"], now=t + 5) == 0
     for bad in (["x", "--not-before"], ["x", "--not-before", "20:45"], ["x", "--not-before", "2026-11-11 20:45:00"]):
         assert rab.too_early(bad, now=t + 5) == -1                               # unreadable: the run does nothing
+
+
+def test_a_summary_swapped_in_instantly_is_not_counted_as_mid_task(tmp_path, monkeypatch):
+    """Claude Code can prepare the summary ahead and swap it in mid-tool-call in
+    milliseconds (compactMetadata.precomputed); seen on Veron 2026-11-04..11."""
+    import pitstop_common as pc
+    import optimize as op
+    monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
+    proj = tmp_path / "lane"
+    proj.mkdir()
+    d = tmp_path / "projects" / pc.project_key(str(proj))
+    d.mkdir(parents=True)
+    ents = []
+    for n, pre in enumerate((True, False)):
+        ts = f"2026-11-11T1{n}:00:00.000Z"
+        ents.append({"type": "assistant", "timestamp": ts, "message": {"content": [{"type": "tool_use", "name": "Bash", "input": {}}],
+                                                                       "usage": usage(300_000)}})
+        ents.append({"type": "user", "timestamp": ts, "message": {"content": [{"type": "tool_result"}]}})
+        ents.append({"type": "system", "subtype": "compact_boundary", "timestamp": ts,
+                     "compactMetadata": {"trigger": "auto", "precomputed": True} if pre else {"trigger": "auto"}})
+    (d / "s.jsonl").write_text("\n".join(json.dumps(e) for e in ents) + "\n")
+    w = op.analyze(str(proj), None)["compactions_when"]
+    assert (w["instant"], w["mid_task"]) == (1, 1)
+
+
+def test_events_log_keeps_actions_and_leaves_out_skips(tmp_path, monkeypatch):
+    import restart_at_break as rab
+    monkeypatch.setattr(rab, "LIVE", True)
+    monkeypatch.setattr(rab, "BASE", str(tmp_path))
+    monkeypatch.setattr(rab, "LOG", str(tmp_path / "restart.log"))
+    monkeypatch.setattr(rab, "EVENTS", str(tmp_path / "events.log"))
+    rab.log("Lane A: 2.1.319->2.1.322 skip: status=busy (working)")
+    rab.log("Lane A: 2.1.319->2.1.322 at a break: small context 70162, idle 1606s")
+    rab.log("Lane A: RESTARTED 2.1.319 -> 2.1.322, same session")
+    rab.log("Lane B: /restart refused by Claude Code (see its pane); next try after 21600s")
+    assert len((tmp_path / "restart.log").read_text().splitlines()) == 4
+    ev = (tmp_path / "events.log").read_text().splitlines()
+    assert len(ev) == 2 and "RESTARTED" in ev[0] and "refused" in ev[1]
