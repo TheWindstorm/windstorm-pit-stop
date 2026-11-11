@@ -13,6 +13,12 @@
                                 profile per session (~/.claude/pit-stop/lanes/)
   optimize.py ... --max-steps N move each point at most N steps from where it
                                 is now (the weekly tune uses 1)
+  optimize.py ... --budget economy|balanced|roomy
+                                how hard to hold down usage (default: "budget"
+                                in ~/.claude/pit-stop/config.json, else
+                                balanced). A folder that reads a lot from the
+                                cache every day gets a lower window; roomy
+                                tunes for memory only.
 
 Two points per folder:
   - the IDLE POINT: Claude Code compacts a session by itself once it has gone
@@ -91,10 +97,13 @@ def analyze(project, days, only=None):
     outs = []
     drifts, cold_tokens, cold_wakes, t_first, t_last = [], 0, 0, None, None
     when = {"idle": 0, "prompt": 0, "mid_task": 0, "instant": 0}
+    calls, read_once, seen_ids = 0, 0, set()   # one model call can span several transcript rows: count it once
+    busiest = None                             # the most cache reads per day of any one session with a day of history
     for path in files:
         sessions += 1
         prev_reads, cur_reads, after_compact = set(), set(), None
         touched, cold_pending, last_kind, last_ts = [], False, None, None
+        s_read, s_first, s_last = 0, None, None
         cur = {"peak": 0, "turns": 0, "start": None, "end": None}
         for e in pc.iter_entries(path):
             ts = pc.parse_ts(e.get("timestamp"))
@@ -135,6 +144,14 @@ def analyze(project, days, only=None):
             if t == "assistant" and not e.get("isSidechain"):
                 u = pc.usage(e)
                 total = pc.usage_total(e)
+                mid = pc.message(e).get("id")
+                if total and (mid is None or mid not in seen_ids):
+                    seen_ids.add(mid)
+                    calls += 1
+                    read_once += pc.num(u.get("cache_read_input_tokens"))
+                    s_read += pc.num(u.get("cache_read_input_tokens"))
+                    if ts:
+                        s_first, s_last = s_first or ts, ts
                 if total:
                     cur["peak"] = max(cur["peak"], total)
                     max_ctx = max(max_ctx, total)
@@ -180,6 +197,8 @@ def analyze(project, days, only=None):
         if cur["turns"]:
             cycles.append(cur)
         drifts.extend(drift_of(touched))
+        if s_first and s_last and s_last - s_first >= 86400:
+            busiest = max(busiest or 0, int(s_read / ((s_last - s_first) / 86400)))
     compacted = [c for c in cycles if c.get("compacted")]
     hours = [(c["end"] - c["start"]) / 3600 for c in compacted if c["start"] and c["end"]]
     span_days = max((t_last - t_first) / 86400, 1 / 24) if t_first and t_last else None
@@ -198,6 +217,12 @@ def analyze(project, days, only=None):
         "cold_wakes_per_day": round(cold_wakes / span_days, 1) if span_days else None,
         "cold_wake_tokens_per_day": int(cold_tokens / span_days) if span_days else None,
         "topic_change": round(statistics.median(drifts), 2) if len(drifts) >= 3 else None,
+        # a rate per day from less than a day of history would be a guess: then there is none
+        "calls_per_day": int(calls / span_days) if span_days and span_days >= 1 else None,
+        "cache_read_per_day": int(read_once / span_days) if span_days and span_days >= 1 else None,
+        # usage is judged by the folder's busiest single session: the window is a per-session limit, and a
+        # folder shared by many light sessions is not a heavy one
+        "busiest_session_read_per_day": busiest,
         "compactions_when": when,
         "work_mix": {k: round(v / ntools, 2) for k, v in tools.items()},
         "tool_error_rate": round(errors / tool_results, 3) if tool_results else None,
@@ -220,7 +245,52 @@ def toward(now, target, step, max_steps):
     return max(now - lim, min(now + lim, target))
 
 
-def recommend(m, context_limit=None, max_steps=None):
+BUDGETS = ("economy", "balanced", "roomy")
+HEAVY, VERY_HEAVY = 100_000_000, 250_000_000   # tokens read from the cache per day, in one folder
+SUMMARY_KEEPS, WINDOW_MARGIN = 20_000, 33_000  # what a compaction leaves; how far under the window it starts
+
+
+def usage_cap(m, budget, big, rr):
+    """(cap or None, class, sentence) for the window from how much this folder
+    reads. Almost all of a long session's usage is the context being read
+    again from the cache on every model call, so usage follows context size
+    times calls. The window is the one setting that moves context size.
+      roomy     no cap: tune for memory only (the 0.2.x behaviour)
+      balanced  a heavy folder (100M+ tokens read a day) is capped at 500K, a
+                very heavy one (250M+) at 400K
+      economy   every folder is capped at 400K, a heavy one at 300K, and no
+                window is raised (unless sessions re-read a lot, see below)
+    "Reads a day" is the folder's busiest single session, with at least a day
+    of history. A folder whose sessions re-read a lot after compacting (30%+)
+    gets one step more: compacting it harder would cost reads of its own. A
+    capped folder's window is also never raised above where it is now."""
+    reads = m.get("busiest_session_read_per_day")
+    if not big or reads is None or budget == "roomy":
+        return None, None, None
+    cls = "very heavy" if reads >= VERY_HEAVY else "heavy" if reads >= HEAVY else "light"
+    cap = {"balanced": {"very heavy": 400_000, "heavy": 500_000},
+           "economy": {"very heavy": 300_000, "heavy": 300_000, "light": 400_000}}[budget].get(cls)
+    if cap is None:
+        return None, cls, None
+    if rr is not None and rr >= 0.30:
+        cap += 100_000
+    return cap, cls, (f"usage: this folder's busiest session reads about {reads / 1e6:.0f}M tokens a day from the "
+                      f"cache ({cls}); under the '{budget}' budget its window is capped at {pc.fmt_k(cap)}")
+
+
+def read_saving(old, new):
+    """Rough share of cache reads saved by moving the window from OLD to NEW:
+    between compactions the context runs from what a summary keeps up to the
+    window, so the average context is about halfway."""
+    if not old or not new or new >= old:
+        return 0.0
+    return round(1 - (SUMMARY_KEEPS + new - WINDOW_MARGIN) / (SUMMARY_KEEPS + old - WINDOW_MARGIN), 2)
+
+
+def recommend(m, context_limit=None, max_steps=None, budget=None):
+    budget = budget or pc.config().get("budget") or "balanced"
+    if budget not in BUDGETS:
+        budget = "balanced"
     limit = context_limit or (1_000_000 if m["max_context"] > 200_000 else 200_000)
     big = limit >= 1_000_000
     step = 100_000 if big else 20_000
@@ -261,6 +331,23 @@ def recommend(m, context_limit=None, max_steps=None):
                    f"start at the neutral {pc.fmt_k(window)}"]
     else:
         window = max(lo, min(hi, toward(m["current_window"], window, step, max_steps)))
+    # Usage: a folder that reads a lot gets a lower window, whatever the memory signals say.
+    cap, usage_class, cap_why = usage_cap(m, budget, big, rr)
+    if cap is not None:
+        target = min(cap, m["current_window"] or cap)       # heavy: hold at the cap, and never above where it is now
+        if window > target:
+            window = max(lo, toward(m["current_window"], target, step, max_steps) if m["current_window"] else target)
+            why.append(cap_why + (f"; moving one step at a time, {pc.fmt_k(window)} now" if window > cap else "")
+                       + ("" if window >= cap else f"; it stays at {pc.fmt_k(window)}, where it already is"))
+    if (budget == "economy" and m["current_window"] and window > m["current_window"]
+            and not (rr is not None and rr >= 0.30)):
+        window = m["current_window"]
+        why.append(f"economy budget: a window is not raised unless sessions re-read a lot after compacting; "
+                   f"it stays at {pc.fmt_k(window)}")
+    saving = read_saving(m["current_window"], window)
+    if saving >= 0.05:
+        why.append(f"a window of {pc.fmt_k(window)} instead of {pc.fmt_k(m['current_window'])} should cut this folder's "
+                   f"cache reads by roughly {int(saving * 100)}% (an estimate), for more frequent compactions")
 
     # The idle point: where a session that has gone quiet compacts by itself.
     istep = 50_000
@@ -293,7 +380,8 @@ def recommend(m, context_limit=None, max_steps=None):
     idle = max(ilo, min(idle, window - step))
     why += iwhy
     ceiling = max(min(window + 2 * step, int(limit * (0.85 if big else 0.90))), window)
-    base = {"context_limit": limit, "idle_point": idle, "window": window, "ceiling": ceiling, "why": why}
+    base = {"context_limit": limit, "idle_point": idle, "window": window, "ceiling": ceiling, "why": why,
+            "budget": budget, "usage_class": usage_class, "est_read_saving": saving}
     er = m["tool_error_rate"]
     if m["prompts"] < MIN_PROMPTS_FOR_SUGGESTIONS:
         return dict(base, model_effort_suggestions=[
@@ -311,7 +399,7 @@ def recommend(m, context_limit=None, max_steps=None):
     return dict(base, model_effort_suggestions=suggestions)
 
 
-def lane_recs(project, days, context_limit=None, max_steps=None, newer_than_days=3):
+def lane_recs(project, days, context_limit=None, max_steps=None, newer_than_days=3, budget=None):
     """One recommendation per recent session of the folder, keyed by session id.
     A session with too little history of its own is left out (it follows the folder)."""
     out = {}
@@ -322,7 +410,7 @@ def lane_recs(project, days, context_limit=None, max_steps=None, newer_than_days
         m = analyze(project, days, only=path)
         if m["prompts"] < MIN_PROMPTS_FOR_SUGGESTIONS:
             continue
-        r = recommend(m, context_limit, max_steps)
+        r = recommend(m, context_limit, max_steps, budget)
         out[os.path.basename(path)[:-len(".jsonl")]] = {
             "idle_point": r["idle_point"], "window": r["window"], "ceiling": r["ceiling"], "why": r["why"],
             "prompts": m["prompts"], "compactions": m["compactions"], "topic_change": m["topic_change"]}
@@ -366,13 +454,14 @@ def main():
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--lanes", action="store_true")
     ap.add_argument("--max-steps", type=int)
+    ap.add_argument("--budget", choices=BUDGETS)
     a = ap.parse_args()
     m = analyze(a.project, a.days)
     if not m["transcripts"]:
         print(f"No session history for {m['project']} in the last {a.days} days.")
         return 1
-    rec = recommend(m, a.context_limit, a.max_steps)
-    lanes = lane_recs(a.project, a.days, a.context_limit, a.max_steps) if a.lanes else {}
+    rec = recommend(m, a.context_limit, a.max_steps, a.budget)
+    lanes = lane_recs(a.project, a.days, a.context_limit, a.max_steps, budget=a.budget) if a.lanes else {}
     if a.json:
         print(json.dumps({"metrics": m, "recommendation": rec, "lanes": lanes}, indent=2))
     else:
@@ -386,6 +475,10 @@ def main():
         w = m["compactions_when"]
         print(f"  compactions happened: {w['idle']} while idle, {w['prompt']} as a prompt arrived, {w['mid_task']} mid-task, "
               f"{w.get('instant', 0)} swapped in instantly (summary prepared ahead by Claude Code)")
+        print(f"  model calls per day {m['calls_per_day']}, tokens read from the cache per day "
+              f"{pc.fmt_k(m['cache_read_per_day'])}, busiest session {pc.fmt_k(m['busiest_session_read_per_day'])} "
+              f"(budget: {rec['budget']}"
+              + (f", this folder is {rec['usage_class']}" if rec["usage_class"] else "") + ")")
         print(f"  topic change {m['topic_change']}, cold wake-ups per day {m['cold_wakes_per_day']}, "
               f"tokens paid again on cold wake-ups per day {pc.fmt_k(m['cold_wake_tokens_per_day'])}")
         print(f"Recommended idle point: {pc.fmt_k(rec['idle_point'])} (now {pc.fmt_k(m['current_idle_point'] or pc.IDLE_DEFAULT)})")

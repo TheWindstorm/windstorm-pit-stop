@@ -447,9 +447,23 @@ def test_plan_idle_compact_is_opt_in(tmp_path, monkeypatch):
     on = dict(cfg, idle_compact_after=600)
     assert rab.plan(up, on)[0] == "compact"
     assert rab.plan(dict(up, ctx=150_000), on)[0] == "none"             # under its idle point
-    assert rab.plan(dict(up, idle_point=None), on)[0] == "none"         # no point set for it
+    assert rab.plan(dict(up, idle_point=None), on)[0] == "compact"      # no point tuned: Claude Code's 200K default
+    assert rab.plan(dict(up, idle_point=None, ctx=180_000), on)[0] == "none"
     assert rab.plan(dict(up, idle=3000), on)[0] == "none"               # cache cold: leave it
-    assert rab.plan(dict(up, status="shell"), on)[0] == "none"
+    assert rab.plan(dict(up, idle=300), on)[0] == "none"                # not quiet long enough yet
+    assert rab.plan(dict(up, compact_age=600), on)[0] == "none"         # it compacted a moment ago
+    assert rab.plan(dict(up, compact_ask_age=900), on)[0] == "none"     # /compact was typed lately: no hammering
+    # 0.3.0: background jobs do not stop a compaction (they stop a restart), on the newest version or behind it
+    assert rab.plan(dict(up, status="shell"), on)[0] == "compact"
+    act, why = rab.plan(dict(up, status="shell", behind=True), on)
+    assert act == "compact" and "cannot be restarted" in why
+    assert rab.plan(dict(up, status="shell", behind=True), cfg)[0] == "ask"               # switched off: as before
+    assert rab.plan(dict(up, status="shell", behind=True, ctx=150_000), on)[0] == "ask"   # under its idle point
+    # behind, big, at its prompt, and compact-before-restart switched off (as on the measured fleet)
+    off = dict(on, compact_before_restart=False)
+    assert rab.plan(dict(up, behind=True), off)[0] == "compact"
+    assert rab.plan(dict(up, behind=True), dict(cfg, compact_before_restart=False))[0] == "skip"
+    assert rab.plan(dict(up, status="busy"), on)[0] == "none"           # working: never
     assert rab.plan(dict(up, compact_age=300), on)[0] == "none"         # it just compacted
     assert rab.plan(dict(up, compact_ask_age=900), on)[0] == "none"     # already asked
 
@@ -1116,3 +1130,147 @@ def test_plugin_install_time_is_read_from_claude_codes_record(tmp_path):
              "lastUpdated": "2026-11-10T18:35:05.800Z"}]}}))
     v, t = pc.plugin_installed(str(tmp_path))
     assert v == "0.1.4" and time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) == "2026-11-10T18:35:05"
+
+
+# ---------------------------------------------------------------- 0.3.0: usage-aware tuning
+def _m(**kw):
+    m = {"max_context": 600_000, "reread_after_compaction": 0.0, "long_gap_share": 0.1, "topic_change": 0.5,
+         "work_mix": {"edit": 0.1, "shell": 0.5, "read": 0.1, "msg": 0.2, "web": 0.0, "other": 0.1},
+         "compactions": 20, "current_window": 600_000, "current_idle_point": None, "cold_wakes_per_day": 1,
+         "cold_wake_tokens_per_day": 100_000, "tool_error_rate": 0.0, "prompts": 100, "median_output_tokens": 500,
+         "busiest_session_read_per_day": 50_000_000}
+    m.update(kw)
+    return m
+
+
+def test_budget_caps_the_window_of_a_folder_that_reads_a_lot(tmp_path, monkeypatch):
+    import pitstop_common as pc
+    import optimize as op
+    monkeypatch.setattr(pc, "CONFIG", str(tmp_path / "config.json"))
+    light, heavy, very = _m(), _m(busiest_session_read_per_day=150_000_000), _m(busiest_session_read_per_day=600_000_000)
+    roomy = op.recommend(very, budget="roomy")
+    assert roomy["window"] >= 500_000 and roomy["usage_class"] is None            # 0.2.x behaviour: memory only
+    assert op.recommend(light)["window"] == roomy["window"]                        # balanced leaves a light folder alone
+    assert op.recommend(heavy)["window"] == 500_000 and op.recommend(heavy)["usage_class"] == "heavy"
+    r = op.recommend(very)
+    assert r["window"] == 400_000 and r["budget"] == "balanced" and r["est_read_saving"] >= 0.3
+    assert any("very heavy" in w for w in r["why"]) and any("roughly" in w for w in r["why"])
+    assert op.recommend(light, budget="economy")["window"] == 400_000
+    assert op.recommend(very, budget="economy")["window"] == 300_000
+    # sessions that re-read a lot after compacting get one step more: compacting harder would cost reads too
+    assert op.recommend(_m(busiest_session_read_per_day=600_000_000, reread_after_compaction=0.4))["window"] == 500_000
+    # a cap never raises a window, and the weekly tune still moves one step at a time
+    assert op.recommend(_m(busiest_session_read_per_day=600_000_000, current_window=300_000))["window"] == 300_000
+    assert op.recommend(_m(busiest_session_read_per_day=150_000_000, current_window=400_000))["window"] == 400_000
+    assert op.recommend(very, max_steps=1)["window"] == 500_000
+    # economy never raises a window the user set low, unless sessions re-read a lot after compacting
+    low = _m(max_context=150_000, current_window=70_000)
+    assert op.recommend(low, budget="balanced")["window"] > 70_000
+    assert op.recommend(low, budget="economy")["window"] == 70_000
+    assert op.recommend(dict(low, reread_after_compaction=0.5), budget="economy")["window"] > 70_000
+    # the dial in config.json is the default; an unknown word falls back to balanced
+    (tmp_path / "config.json").write_text(json.dumps({"budget": "economy"}))
+    assert op.recommend(very)["window"] == 300_000 and op.recommend(very)["budget"] == "economy"
+    (tmp_path / "config.json").write_text(json.dumps({"budget": "cheap"}))
+    assert op.recommend(very)["budget"] == "balanced"
+
+
+def test_usage_per_day_needs_a_day_of_history_and_counts_a_model_call_once(tmp_path, monkeypatch):
+    import pitstop_common as pc
+    import optimize as op
+    monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
+    proj = tmp_path / "lane"
+    proj.mkdir()
+    d = tmp_path / "projects" / pc.project_key(str(proj))
+    d.mkdir(parents=True)
+
+    def call(ts, mid):   # one model call written as two rows (text, then a tool call), as Claude Code does
+        return [{"type": "assistant", "timestamp": ts, "message": {"id": mid, "content": [{"type": k}], "usage": usage(300_000)}}
+                for k in ("text", "tool_use")]
+    (d / "short.jsonl").write_text("\n".join(json.dumps(e) for e in call("2026-11-11T10:00:00.000Z", "a")) + "\n")
+    assert op.analyze(str(proj), None)["cache_read_per_day"] is None              # minutes of history: no rate
+    rows = call("2026-11-09T10:00:00.000Z", "a") + call("2026-11-11T10:00:00.000Z", "b")
+    (d / "short.jsonl").write_text("\n".join(json.dumps(e) for e in rows) + "\n")
+    m = op.analyze(str(proj), None)
+    assert m["calls_per_day"] == 1 and m["cache_read_per_day"] == 300_000         # 2 calls over 2 days, not 4 rows
+    assert m["busiest_session_read_per_day"] == 300_000
+    # twenty light sessions sharing the folder do not make it a heavy one
+    for i in range(20):
+        more = call("2026-11-09T10:00:00.000Z", f"a{i}") + call("2026-11-11T10:00:00.000Z", f"b{i}")
+        (d / f"s{i}.jsonl").write_text("\n".join(json.dumps(e) for e in more) + "\n")
+    m = op.analyze(str(proj), None)
+    assert m["cache_read_per_day"] == 21 * 300_000 and m["busiest_session_read_per_day"] == 300_000
+
+
+# ---------------------------------------------------------------- 0.3.0: the short list of what needs a person
+def _needs(tmp_path, monkeypatch, cfg=None):
+    import pitstop_common as pc
+    rab = _rab(tmp_path, monkeypatch)
+    import needs_you as ny
+    rab.CFG.update(cfg or {})
+    monkeypatch.setattr(ny, "OUT", os.path.join(pc.STATE_DIR, "needs-you.md"))
+    vers = tmp_path / "versions"
+    vers.mkdir(exist_ok=True)
+    (vers / "2.1.322").write_text("")
+    monkeypatch.setattr(pc, "VERSIONS", str(vers))
+    return pc, rab, ny
+
+
+def _s(name, version="2.1.322", status="idle", st_age=60, started_ago=3600, now=None):
+    now = now or time.time()
+    return {"name": name, "cwd": "/work/" + name, "version": version, "sessionId": name.lower().replace(" ", "-") + "-0000",
+            "status": status, "statusUpdatedAt": (now - st_age) * 1000, "startedAt": (now - started_ago) * 1000,
+            "pid": os.getpid()}
+
+
+def test_needs_you_lists_who_waits_who_is_stuck_and_why(tmp_path, monkeypatch):
+    pc, rab, ny = _needs(tmp_path, monkeypatch, {"allow_names": ["A", "B", "C", "D", "E"]})
+    now = time.time()
+    os.utime(os.path.join(pc.VERSIONS, "2.1.322"), (now - 3 * 86400, now - 3 * 86400))   # newest installed 3 days ago
+    sessions = [_s("A", now=now),                                                    # fine
+                _s("B", status="waiting", st_age=70 * 3600, version="2.1.319", now=now),
+                _s("C", status="shell", version="2.1.319", now=now),
+                _s("D", status="idle", version="2.1.319", now=now),
+                _s("E", status="waiting", st_age=600, now=now),                      # a prompt for 10 minutes: not yet
+                _s("Other", version="2.1.318", now=now)]                             # not on the list
+    d = ny.collect(sessions, "2.1.322", now)
+    assert [n for n, _ in d["waiting"]] == ["B"]
+    why = {n: w for n, _, _, w in d["stuck"]}
+    assert set(why) == {"B", "C", "D", "Other"} and (d["on_newest"], d["total"]) == (2, 6)
+    assert "background jobs" in why["C"] and "waiting" in why["B"] and "never quiet" in why["D"]
+    assert why["Other"] == ny.NOT_LISTED
+    text = ny.render(d, now)
+    assert "- B: 70 hours" in text and "2 of 6 sessions" in text and "1 session(s) are not on the list" in text
+    assert "Nothing needs you" not in text
+    assert ny.headline(d).startswith("pit-stop: 1 session(s) waiting for you (B, 70 hours); 4 cannot be updated")
+    # behind for less than a day is not a problem yet
+    os.utime(os.path.join(pc.VERSIONS, "2.1.322"), (now - 3600, now - 3600))
+    d = ny.collect(sessions, "2.1.322", now)
+    assert d["stuck"] == [] and len(d["behind_new"]) == 4
+    calm = ny.collect([_s("A", now=now)], "2.1.322", now)
+    assert "Nothing needs you." in ny.render(calm, now) and ny.headline(calm) == ""
+
+
+def test_needs_you_file_is_written_hourly_and_the_person_is_told_once_per_change(tmp_path, monkeypatch):
+    pc, rab, ny = _needs(tmp_path, monkeypatch)
+    told = []
+    monkeypatch.setattr(rab, "notify", lambda msg: told.append(msg))
+    now = time.time()
+    waiting = [_s("B", status="waiting", st_age=5 * 3600, now=now)]
+    assert ny.refresh(waiting, "2.1.322", now) is not None
+    assert "- B: 5 hours" in open(ny.OUT).read() and len(told) == 1
+    assert ny.refresh(waiting, "2.1.322", now + 600) is None                        # written a moment ago: not again
+    os.utime(ny.OUT, (now - 4000, now - 4000))
+    ny.refresh(waiting, "2.1.322", now + 4000)
+    assert len(told) == 1                                                            # same names: no second message
+    os.utime(ny.OUT, (now - 4000, now - 4000))
+    ny.refresh([_s("B", now=now)], "2.1.322", now + 8000)                            # answered: quiet, and not announced
+    assert "Nothing needs you." in open(ny.OUT).read() and len(told) == 1
+
+
+def test_needs_you_counts_sessions_older_than_the_plugin(tmp_path, monkeypatch):
+    pc, rab, ny = _needs(tmp_path, monkeypatch)
+    now = time.time()
+    monkeypatch.setattr(pc, "plugin_installed", lambda claude_dir=None: ("0.3.0", now - 7200))
+    d = ny.collect([_s("Old", started_ago=86400, now=now), _s("New", started_ago=600, now=now)], "2.1.322", now)
+    assert d["unloaded"] == ["Old"] and "reload_plugins" in ny.render(d, now)

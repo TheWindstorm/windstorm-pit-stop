@@ -211,6 +211,7 @@ def config():
       auto_tune            true = re-tune each folder weekly in the background (set by /pit-stop setup)
       compact_instructions true (default), false, or a string of extra notes for the summary
       nudge                false = never show the "an update is waiting" line
+      budget               "economy", "balanced" (default) or "roomy": how hard tuning holds down usage
     """
     d = read_json(CONFIG, {})
     return d if isinstance(d, dict) else {}
