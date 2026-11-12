@@ -68,7 +68,7 @@ def collect(sessions, newest, now, panes=None):
         info = rab.plugin_info()
     except Exception:
         info = {"root": None, "gen": None, "versions": []}
-    waiting, stuck, behind_new, unloaded = [], [], [], []
+    waiting, stuck, behind_new, unloaded, nohook = [], [], [], [], []
     for s in sorted(sessions, key=lambda x: x.get("name") or ""):
         name, ver, st = s.get("name") or "(no name)", s.get("version"), s.get("status")
         sid = pc.safe_id(s.get("sessionId"))
@@ -102,11 +102,14 @@ def collect(sessions, newest, now, panes=None):
                 reloaded = os.path.getmtime(os.path.join(rab.BASE, "state", key + ".reloaded"))
             except OSError:
                 reloaded = None
-            if rab.lane_hooks(s, info, reloaded)[1] != info["gen"]:   # missing or wrong, not merely older
+            gen = rab.lane_hooks(s, info, reloaded)[1]
+            if gen != info["gen"]:   # missing or wrong, not merely older
                 unloaded.append(name)
+                if gen is None:
+                    nohook.append(name)
     on_newest = sum(1 for s in sessions if newest and s.get("version") and pc.vkey(s["version"]) >= pc.vkey(newest))
     return {"newest": newest, "total": len(sessions), "on_newest": on_newest, "waiting": waiting, "stuck": stuck,
-            "behind_new": behind_new, "unloaded": unloaded, "reload_on": bool(cfg.get("reload_plugins"))}
+            "behind_new": behind_new, "unloaded": unloaded, "nohook": nohook, "reload_on": bool(cfg.get("reload_plugins"))}
 
 
 def render(d, now):
@@ -127,11 +130,18 @@ def render(d, now):
         out += ["", f"Behind for less than a day, nothing to do yet: {len(d['behind_new'])} "
                     f"({', '.join(d['behind_new'][:6])}{', ...' if len(d['behind_new']) > 6 else ''})."]
     if d["unloaded"]:
-        out += ["", f"{len(d['unloaded'])} session(s) have no working Pit Stop hook: they started before it was installed, "
-                    f"or run hooks this release replaced ({', '.join(d['unloaded'][:6])}"
-                    f"{', ...' if len(d['unloaded']) > 6 else ''}). "
-                + ("The helper reloads them at a break (reload_plugins is on)." if d["reload_on"] else
-                   "Switch on \"reload_plugins\" in restart.json, or type /reload-plugins in each.")]
+        none = [n for n in d["unloaded"] if n in d.get("nohook", [])]
+        old = [n for n in d["unloaded"] if n not in none]
+        parts = []
+        if none:
+            parts.append(f"{len(none)} session(s) run no Pit Stop hook (they started before it was installed, or the "
+                         f"folder their hooks ran from is gone): {', '.join(none[:6])}{', ...' if len(none) > 6 else ''}.")
+        if old:
+            parts.append(f"{len(old)} session(s) run the hooks of an older release: they still wait for breaks, but "
+                         f"miss what this release changed ({', '.join(old[:6])}{', ...' if len(old) > 6 else ''}).")
+        out += ["", " ".join(parts) + " " + (
+            "The helper reloads them at a break (reload_plugins is on)." if d["reload_on"] else
+            "Switch on \"reload_plugins\" in restart.json, or type /reload-plugins in each.")]
     if not (d["waiting"] or d["stuck"]):
         out += ["", "Nothing needs you."]
     return "\n".join(out) + "\n"

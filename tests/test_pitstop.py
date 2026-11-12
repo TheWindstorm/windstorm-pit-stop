@@ -1456,6 +1456,11 @@ def test_needs_you_counts_sessions_whose_hooks_are_missing_or_wrong(tmp_path, mo
     open(os.path.join(rab.BASE, "state", key + ".reloaded"), "w").write("x")        # the helper reloaded it just now
     d = ny.collect(sessions, "2.1.322", now)
     assert d["unloaded"] == ["NoHook", "OldGen"] and "reload_plugins" in ny.render(d, now)
+    assert d["nohook"] == ["NoHook"]                                                 # none at all, told apart from older
+    text = ny.render(d, now)
+    assert "1 session(s) run no Pit Stop hook" in text and "is gone): NoHook." in text
+    assert "1 session(s) run the hooks of an older release: they still wait for breaks" in text and "(OldGen)" in text
+    assert "no working Pit Stop hook" not in text
     # had the newer release kept the hook generation, the session on the older one would not be listed
     with open(os.path.join(new, "hooks", "generation.json"), "w") as f:
         json.dump({"generation": 1}, f)
