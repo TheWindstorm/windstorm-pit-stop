@@ -97,6 +97,7 @@ Config (optional) ~/.claude/pit-stop/restart.json:
    "plugin_updates": "off",        # "pit-stop": keep this plugin up to date; "all": every plugin installed for the
                                    # user; with Claude Code's own commands, before restarting anyone (see update_plugins)
    "plugin_update_every": 86400,
+   "off_list_reasons": {},         # {"Session name": "why it is kept off"}: shown in needs-you.md and the weekly notice
    "reload_plugins": false, "reload_only_names": [], "reload_warm": false,
    "reload_retry": 21600,
    "needs_you": true,              # keep ~/.claude/pit-stop/needs-you.md (hourly) and tell notify_command when it changes

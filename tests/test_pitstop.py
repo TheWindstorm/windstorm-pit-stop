@@ -2245,9 +2245,15 @@ def test_needs_you_names_sessions_kept_off_the_list_once_a_week_when_behind_a_we
     off = [_s("Contabo", version="2.1.318", now=now), _s("Ghost", version="2.1.318", now=now)]
     ny.refresh([_s("A", now=now)] + off, "2.1.322", now, force=True)
     assert len(told) == 1 and "2 session(s) behind the newest Claude Code for a week or more are off the helper's list" in told[0]
-    assert "Contabo, Ghost" in told[0] and "allow_names" in told[0]
+    assert "Contabo; Ghost" in told[0] and "allow_names" in told[0]
     ny.refresh([_s("A", now=now)] + off, "2.1.322", now + 3600, force=True)
     assert len(told) == 1                                                            # once a week, not every hour
     os.utime(os.path.join(rab.BASE, "state", "needs-you.offlist"), (now - 8 * 86400, now - 8 * 86400))
     ny.refresh([_s("A", now=now)] + off, "2.1.322", now + 7200, force=True)
     assert len(told) == 2
+    # the owner's reason, written once in restart.json, is shown in the file and in the notice
+    rab.CFG.update(off_list_reasons={"Ghost": "in a folder that is Grant's call (BOARD 2026-11-12T17:16:18Z)", "X": 5})
+    os.utime(os.path.join(rab.BASE, "state", "needs-you.offlist"), (now - 8 * 86400, now - 8 * 86400))
+    ny.refresh([_s("A", now=now)] + off, "2.1.322", now + 9000, force=True)
+    assert "Ghost (in a folder that is Grant's call (BOARD 2026-11-12T17:16:18Z))" in told[-1]
+    assert "  - Ghost: in a folder that is Grant's call" in open(ny.OUT).read() and "X:" not in open(ny.OUT).read()
