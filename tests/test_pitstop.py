@@ -285,6 +285,28 @@ def test_hook_command_falls_back_to_python_when_python3_is_a_stub(tmp_path):
             assert "Python was not found" not in r.stdout
 
 
+def test_a_hook_whose_plugin_folder_is_gone_lets_claude_code_go_on(tmp_path):
+    """Claude Code deletes an old version folder 14 days after an update (its .orphaned_at marker). A session
+    that loaded its hooks from there still runs the same command. Without the file check, python exits 2 on a
+    missing script, and for PreCompact exit 2 means HOLD: that session could never compact again. With it,
+    each hook exits 0 and prints nothing: the compaction (or the stop, or the start) simply goes ahead."""
+    import shutil
+    import pytest
+    if os.name == "nt" or not shutil.which("sh"):
+        pytest.skip("needs a POSIX sh")
+    hooks = json.load(open(os.path.join(ROOT, "hooks", "hooks.json")))["hooks"]
+    gone = tmp_path / "cache" / "windstorm-pit-stop" / "0.1.2"            # never created: the folder was deleted
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp_path / "cfg"), CLAUDE_PLUGIN_ROOT=str(gone))
+    for event in ("PreCompact", "Stop", "SessionStart"):
+        r = subprocess.run(["sh", "-c", hooks[event][0]["hooks"][0]["command"]],
+                           input=json.dumps({"trigger": "auto", "session_id": "s", "transcript_path": "/nonexistent"}),
+                           capture_output=True, text=True, env=env)
+        assert (r.returncode, r.stdout) == (0, ""), (event, r.returncode, r.stderr)
+    # the old command (0.1.4 to 0.3.3) held it: python exits 2 on a missing script
+    old = 'P=python3; python3 -I -c pass </dev/null >/dev/null 2>&1 || P=python; exec "$P" -I "${CLAUDE_PLUGIN_ROOT}/hooks/precompact_wait_for_break.py"'
+    assert subprocess.run(["sh", "-c", old], input="{}", capture_output=True, text=True, env=env).returncode == 2
+
+
 # ---------------------------------------------------------------- 0.2.0
 
 def test_hook_instructions_can_be_switched_off_or_extended(tmp_path):
@@ -653,7 +675,7 @@ def test_every_hook_command_uses_the_python_probe_and_passes_exit_2(tmp_path):
     for event, files in (("PreCompact", "precompact_wait_for_break.py"), ("Stop", "stop_pit_stop.py"),
                          ("SessionStart", "session_start.py")):
         command = hooks[event][0]["hooks"][0]["command"]
-        assert command.startswith("P=python3; python3 -I -c pass") and files in command
+        assert command.startswith(f'F="${{CLAUDE_PLUGIN_ROOT}}/hooks/{files}"; [ -f "$F" ] || exit 0; P=python3; python3 -I -c pass')
         assert os.path.exists(os.path.join(ROOT, "hooks", files))
     assert hooks["PreCompact"][0]["matcher"] == "auto"
     asks = tmp_path / "cfg" / "pit-stop" / "asks"
