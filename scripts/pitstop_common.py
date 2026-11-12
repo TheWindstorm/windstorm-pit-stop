@@ -208,7 +208,8 @@ def fmt_k(n):
 
 def config():
     """User-level switches in ~/.claude/pit-stop/config.json (all optional):
-      auto_tune            true = re-tune each folder weekly in the background (set by /pit-stop setup)
+      auto_tune            true = re-tune each folder daily in the background (set by /pit-stop setup)
+      tune_every_days      days between two tunes of one folder (1 to 30, default 1)
       compact_instructions true (default), false, or a string of extra notes for the summary
       checkpoint_break     false = during a hold, a finished git commit or push does not count as a break
       nudge                false = never show the "an update is waiting" line
@@ -470,10 +471,26 @@ def append_log(path, msg, max_bytes=5_000_000):
 
 
 def prune_backups(path, keep=3):
-    """Keep only the newest KEEP <path>.bak-pitstop-* files (the weekly tune would pile them up)."""
+    """Keep only the newest KEEP <path>.bak-pitstop-* files (the daily tune would pile them up)."""
     old = sorted(glob.glob(glob.escape(path) + ".bak-pitstop-*"))[:-keep]
     for f in old:
         try:
             os.remove(f)
         except OSError:
             pass
+
+
+def behind_since(ver):
+    """When a session on VER fell behind: the time the first newer Claude Code
+    was installed on this machine (the oldest file in its versions folder that
+    is newer than VER). Old version files get pruned, so for a session far
+    behind this is "at least since"; never the newest release's time, which
+    would make every stuck session look freshly behind after each update."""
+    times = []
+    try:
+        for name in os.listdir(VERSIONS):
+            if vkey(name) and vkey(name) > vkey(ver):
+                times.append(os.path.getmtime(os.path.join(VERSIONS, name)))
+    except OSError:
+        return None
+    return min(times) if times else None

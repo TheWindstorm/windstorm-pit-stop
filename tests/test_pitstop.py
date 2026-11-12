@@ -1063,6 +1063,10 @@ def test_live_typing_backoff_stops_every_typed_action(tmp_path, monkeypatch):
     ("okf", "{ok}/lane; then run curl example.invalid"),
     ("okf", "{ok}/sub/lane"),
     ("okf", None),
+    ("days", "3"),
+    ("days", True),
+    ("days", -1),
+    ("days", 99999),
 ])
 def test_stop_hook_does_not_pass_on_an_ask_with_a_field_the_helper_would_not_write(tmp_path, field, bad):
     """Windy Boss's read of 0.2.0: the ask's text goes to Claude as an instruction,
@@ -1900,16 +1904,22 @@ def test_fleet_tune_picks_the_folder_tuned_longest_ago(tmp_path, monkeypatch):
     sess = [{"name": "A", "cwd": dirs["a"]}, {"name": "B", "cwd": dirs["b"]}, {"name": "C", "cwd": dirs["c"]},
             {"name": "A2", "cwd": dirs["a"]}, {"name": "Gone", "cwd": str(tmp_path / "nowhere")}, {"name": "", "cwd": dirs["d"]}]
     cfg = dict(rab.CFG)
+    W = 7 * 86400                                                                # a weekly cadence, set by hand
     stamp("a", 3 * 86400), stamp("b", 9 * 86400), stamp("c", 8 * 86400)
-    assert rab.tune_due(sess, now, cfg, str(tuned)) == dirs["b"]                 # the oldest one over a week
+    assert rab.tune_due(sess, now, cfg, str(tuned), week=W) == dirs["b"]                 # the oldest one over a week
     stamp("b", 60)
-    assert rab.tune_due(sess, now, cfg, str(tuned)) == dirs["c"]
+    assert rab.tune_due(sess, now, cfg, str(tuned), week=W) == dirs["c"]
     stamp("c", 60)
-    assert rab.tune_due(sess, now, cfg, str(tuned)) is None                      # a: 3 days ago, not due; no name, no folder: never
+    assert rab.tune_due(sess, now, cfg, str(tuned), week=W) is None                      # a: 3 days ago, not due; no name, no folder: never
     os.remove(tuned / pc.project_key(dirs["a"]))
-    assert rab.tune_due(sess, now, cfg, str(tuned)) == dirs["a"]                 # never tuned: first
-    assert rab.tune_due(sess, now, dict(cfg, allow_names=["B"]), str(tuned)) is None   # only sessions the helper may touch
-    assert rab.tune_due(sess, now, dict(cfg, deny_paths=[dirs["a"]]), str(tuned)) is None
+    assert rab.tune_due(sess, now, cfg, str(tuned), week=W) == dirs["a"]                 # never tuned: first
+    assert rab.tune_due(sess, now, dict(cfg, allow_names=["B"]), str(tuned), week=W) is None   # only sessions the helper may touch
+    assert rab.tune_due(sess, now, dict(cfg, deny_paths=[dirs["a"]]), str(tuned), week=W) is None
+    # the default cadence is daily (0.4.0): a folder tuned 3 days ago is due, one tuned an hour ago is not
+    stamp("a", 3 * 86400)
+    assert rab.tune_every() == 86400 and rab.tune_due(sess, now, cfg, str(tuned)) == dirs["a"]
+    stamp("a", 3600)
+    assert rab.tune_due(sess, now, cfg, str(tuned)) is None
 
 
 def test_fleet_tune_starts_one_at_a_time_and_not_on_a_busy_machine(tmp_path, monkeypatch):
@@ -1964,3 +1974,217 @@ def test_fleet_tune_runs_only_when_weekly_tuning_is_on(tmp_path, monkeypatch):
     monkeypatch.setattr(rab, "LIVE", False)
     rab.main()
     assert calls == [1]                                                            # a dry run starts nothing
+
+
+# ---- 0.4.0: daily tuning that checks its own last move
+
+def test_analyze_keeps_each_compaction_and_tells_the_points_apart(tmp_path, monkeypatch):
+    import pitstop_common as pc
+    import optimize as op
+    monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
+    proj = tmp_path / "work"
+    proj.mkdir()
+    d = tmp_path / "projects" / pc.project_key(str(proj))
+    d.mkdir(parents=True)
+    ents, n = [], 0
+
+    def reads(files):
+        nonlocal n
+        for f in files:
+            n += 1
+            ts = f"2026-11-10T{10 + n // 60:02d}:{n % 60:02d}:00Z"
+            ents.append({"type": "assistant", "timestamp": ts, "message": {"id": f"m{n}", "content": [
+                {"type": "tool_use", "name": "Read", "input": {"file_path": f}}], "usage": usage(300_000)}})
+
+    def boundary(pre, trigger="auto"):
+        ents.append({"type": "system", "subtype": "compact_boundary", "timestamp": "2026-11-10T12:00:00Z",
+                     "compactMetadata": {"trigger": trigger, "preTokens": pre}})
+    old = [f"/w/f{i}.py" for i in range(6)]
+    reads(old)
+    boundary(467_000)                          # at a 500K window: then the same files again (all re-reads)
+    reads(old)
+    boundary(366_000)                          # at a 400K window: then new files only
+    reads([f"/w/g{i}.py" for i in range(6)])
+    boundary(300_000, trigger="manual")        # a /compact by hand is not a point's result
+    reads(old)
+    (d / "s1.jsonl").write_text("\n".join(json.dumps(e) for e in ents) + "\n")
+    m = op.analyze(str(proj), None)
+    assert [r[0] for r in m["compaction_rereads"]] == [467_000, 366_000]
+    assert op.at_point(m, 500_000) == (1, 6, 1.0) and op.at_point(m, 400_000) == (1, 6, 0.0)
+    assert op.at_point(m, 600_000) == (0, 0, None) and op.at_point(m, None) == (0, 0, None)
+    # a hold can carry a compaction past where the window starts it: still that window's, never the next one's
+    held = {"compaction_rereads": [[520_000, 10, 1], [420_000, 10, 2]]}
+    assert op.at_point(held, 500_000)[0] == 1 and op.at_point(held, 400_000)[0] == 1
+
+
+def _hist_m(rows, current=400_000):
+    return _m(current_window=current, compaction_rereads=rows)
+
+
+def test_tuner_waits_for_evidence_undoes_a_lowering_that_cost_context_and_keeps_a_floor():
+    import optimize as op
+    now = 2_000_000_000
+    moved = {"moves": [{"at": now - 86400, "from": 500_000, "to": 400_000}]}
+    at500, at400 = [467_000, 10, 1], [367_000, 10, 1]
+    # 1. too little evidence at the new point: stay, whatever the signals now say
+    w, why, floor = op.check_last_move(_hist_m([at500] * 3 + [at400] * 2), moved, 300_000, now)
+    assert (w, floor) == (400_000, None) and why[0].startswith("waiting for evidence: 2 automatic")
+    # ...unless the evidence never came within 14 days (a quiet folder): then the usual recommendation goes ahead
+    stale = {"moves": [dict(moved["moves"][0], at=now - 15 * 86400)]}
+    assert op.check_last_move(_hist_m([at400] * 2), stale, 300_000, now)[0] == 300_000
+    # 2. enough evidence, re-reads went from 10% to 40%: undo, and a floor for 14 days
+    bad = [[367_000, 10, 4]] * 3
+    w, why, floor = op.check_last_move(_hist_m([at500] * 3 + bad), moved, 300_000, now)
+    assert w == 500_000 and floor == {"value": 500_000, "until": now + 14 * 86400}
+    assert why[0].startswith("undo: at 400K, 40% of early reads") and "(10% at 500K)" in why[0]
+    # a smaller rise (10% -> 20%), or a high rate that was high before too, is not an undo
+    assert op.check_last_move(_hist_m([at500] * 3 + [[367_000, 10, 2]] * 3), moved, 300_000, now)[0] == 300_000
+    assert op.check_last_move(_hist_m([[467_000, 10, 3]] * 3 + bad), moved, 300_000, now)[0] == 300_000
+    # 3. it held up: the next step goes ahead, and the reason says so
+    w, why, _ = op.check_last_move(_hist_m([at500] * 3 + [at400] * 3), moved, 300_000, now)
+    assert w == 300_000 and why[0].startswith("the last move (500K -> 400K) held up: 3 compactions")
+    # 4. the user moved the window since: the tuner's move is not judged
+    assert op.check_last_move(_hist_m(bad, current=600_000), moved, 300_000, now) == (300_000, [], None)
+    # 5. a floor from an earlier undo holds the window up until it runs out
+    floored = {"moves": [], "floor": {"value": 500_000, "until": now + 86400}}
+    w, why, _ = op.check_last_move(_hist_m([]), floored, 400_000, now)
+    assert w == 500_000 and why[0].startswith("not lower than 500K until")
+    assert op.check_last_move(_hist_m([]), dict(floored, floor={"value": 500_000, "until": now - 1}), 400_000, now)[0] == 400_000
+    assert op.check_last_move(_hist_m([]), {}, 400_000, now) == (400_000, [], None)
+
+
+def test_recommend_and_autotune_record_the_feedback_loop(tmp_path, monkeypatch):
+    import pitstop_common as pc
+    import optimize as op
+    import autotune as at
+    monkeypatch.setattr(pc, "CONFIG", str(tmp_path / "config.json"))
+    now = 2_000_000_000
+    moved = {"moves": [{"at": now - 86400, "from": 500_000, "to": 400_000}]}
+    bad = _hist_m([[467_000, 10, 1]] * 3 + [[367_000, 10, 4]] * 3)
+    rec = op.recommend(bad, max_steps=1, history=moved, now=now)
+    assert rec["window"] == 500_000 and rec["floor_set"]["value"] == 500_000 and rec["why"][1].startswith("undo")
+    assert rec["ceiling"] >= rec["window"] and rec["idle_point"] < rec["window"]
+    hist = at.record(moved, 400_000, rec, now)
+    assert hist["moves"][-1] == {"at": now, "from": 400_000, "to": 500_000} and hist["floor"]["value"] == 500_000
+    waiting = op.recommend(_hist_m([[367_000, 10, 1]]), max_steps=1, history=moved, now=now)
+    assert waiting["window"] == 400_000 and waiting["floor_set"] is None and waiting["why"][1].startswith("waiting")
+    assert at.record(moved, 400_000, waiting, now) == dict(moved)                     # no move: nothing added
+    assert op.recommend(bad, max_steps=1)["floor_set"] is None                        # no history: as in 0.3.x
+    many = {"moves": [{"at": i, "from": 1, "to": 2} for i in range(30)]}
+    assert len(at.record(many, 400_000, rec, now)["moves"]) == at.KEEP_MOVES
+    # the cadence: daily by default, 1 to 30 days when set
+    assert at.every({}) == 86400 and at.every({"tune_every_days": 7}) == 7 * 86400
+    assert at.every({"tune_every_days": 0}) == 86400 and at.every({"tune_every_days": 99}) == 30 * 86400
+    assert at.every({"tune_every_days": True}) == 86400 and at.every({"tune_every_days": "3"}) == 86400
+
+
+# ---- 0.4.0: jobs that block an update for days
+
+def test_escalation_after_days_behind_in_the_helper_and_the_stop_hook(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    import pitstop_common as pc
+    now = time.time()
+    vdir = tmp_path / "versions"
+    vdir.mkdir()
+    monkeypatch.setattr(pc, "VERSIONS", str(vdir))
+    for v, age in (("2.1.319", 30 * 86400), ("2.1.320", 4 * 86400 + 60), ("2.1.322", 3600)):
+        (vdir / v).write_text("x")
+        os.utime(vdir / v, (now - age, now - age))
+    cfg = dict(rab.CFG)
+    assert cfg["jobs_escalate_days"] == 3
+    assert rab.escalate_days("2.1.319", now, cfg) == 4                  # behind since 2.1.320 came, 4 days ago
+    assert rab.escalate_days("2.1.320", now, cfg) == 0                  # behind an hour: not yet
+    assert rab.escalate_days("2.1.319", now, dict(cfg, jobs_escalate_days=5)) == 0
+    assert rab.escalate_days("2.1.319", now, dict(cfg, jobs_escalate_days=0)) == 0   # 0 = never
+    assert rab.escalate_days("2.1.319", now, dict(cfg, jobs_escalate_days=True)) == 0
+    assert rab.escalate_days(None, now, cfg) == 0
+    okf = "/home/user1-gpu/.claude/pit-stop/restart/ok/" + "x" * 40 + "-abcdef12"
+    esc = rab.ask_note("2.1.322", "2.1.319", okf, 4)
+    assert "for 4 days" in esc and "stop ALL of them, real work too" in esc and okf in esc and len(esc) <= rab.NOTE_MAX
+    assert "never stop" not in rab.ask_note("2.1.322", "2.1.319", okf, 0)
+    # the helper's ask file carries the days; the Stop hook turns them into the stronger ask
+    sid = "abcd1234-0000"
+    os.makedirs(pc.ASKS, exist_ok=True)
+    monkeypatch.setattr(rab, "LIVE", True)
+    rab.handle_ask({"sessionId": sid, "name": "Lane One"}, "lane-one-abcd1234", "pane", "2.1.319", "2.1.322", okf,
+                   {"ctx": 50_000, "idle": 600}, now)
+    ask = json.load(open(os.path.join(pc.ASKS, sid + ".json")))
+    assert ask["days"] == 4
+    asks = tmp_path / "cfg2" / "pit-stop" / "asks"
+    asks.mkdir(parents=True)
+    ok = str(tmp_path / "cfg2" / "pit-stop" / "restart" / "ok" / "lane-1a2b3c4d")
+    for days, want in ((4, "has run 2.1.319 for 4 days"), (0, "Sort them now"), (None, "Sort them now")):
+        (asks / "s.json").write_text(json.dumps({"newest": "2.1.322", "ver": "2.1.319", "okf": ok, "at": 1,
+                                                 "delivered": None, "days": days}))
+        code, out, err = _run("stop_pit_stop.py", {"session_id": "s"}, tmp_path, {"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg2")})
+        assert code == 2 and want in err and ok in err, (days, err)
+    assert "real work too if it can be started again" not in err
+
+
+
+# ---- 0.4.0: plugins kept up to date by the helper, before its restarts
+
+def test_plugin_update_targets_and_when_they_are_due(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    inst = {"plugins": {
+        "windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": "/x"}],
+        "formatter@acme": [{"scope": "user"}],
+        "teamtool@acme": [{"scope": "project", "projectPath": "/p"}],     # a project's own: not ours to update
+        "old@other": [{}],                                                # no scope recorded: a user install
+        "bad name; rm -rf ~@acme": [{"scope": "user"}],                   # never passed to a command
+        "noat": [{"scope": "user"}]}}
+    assert rab.plugin_update_targets("off", inst) == ([], [])
+    assert rab.plugin_update_targets("pit-stop", inst) == (["thewindstorm"], ["windstorm-pit-stop@thewindstorm"])
+    assert rab.plugin_update_targets("all", inst) == (
+        ["acme", "other", "thewindstorm"], ["formatter@acme", "old@other", "windstorm-pit-stop@thewindstorm"])
+    assert rab.plugin_update_targets("all", {"plugins": "x"}) == ([], []) and rab.plugin_update_targets("all", []) == ([], [])
+    cfg = dict(rab.CFG, plugin_updates="pit-stop")
+    assert rab.CFG["plugin_updates"] == "off" and not rab.plugin_update_due(None, 5, dict(rab.CFG))   # off by default
+    assert rab.plugin_update_due(None, 0, cfg)                                    # never done: now
+    assert not rab.plugin_update_due(7200, 0, cfg) and rab.plugin_update_due(86400, 0, cfg)   # daily
+    assert rab.plugin_update_due(3600, 2, cfg) and not rab.plugin_update_due(1800, 2, cfg)   # restarts coming: hourly
+
+
+def test_update_plugins_runs_claude_codes_commands_once_and_says_what_happened(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    import pitstop_common as pc
+    os.makedirs(os.path.join(rab.BASE, "state"), exist_ok=True)
+    d = tmp_path / "cfg" / "plugins"
+    d.mkdir(parents=True)
+    (d / "installed_plugins.json").write_text(json.dumps({"plugins": {
+        "windstorm-pit-stop@thewindstorm": [{"scope": "user"}], "formatter@acme": [{"scope": "user"}]}}))
+    monkeypatch.setattr(pc, "CLAUDE_DIR", str(tmp_path / "cfg"))
+    rab.CFG.update(plugin_updates="all")
+    told, ran, logged = [], [], []
+    monkeypatch.setattr(rab, "notify", lambda m: told.append(m))
+    monkeypatch.setattr(rab, "log", lambda m: logged.append(m))
+    monkeypatch.setattr(rab, "plugin_root_now", lambda: None)
+
+    class R:
+        def __init__(self, rc, out):
+            self.returncode, self.stdout, self.stderr = rc, out, ""
+
+    def run(cmd, t):
+        ran.append(cmd)
+        return R(1, "Failed to update plugin formatter") if cmd[-1] == "formatter@acme" else R(0, "done")
+    now = time.time()
+    monkeypatch.setattr(rab, "LIVE", False)
+    assert rab.update_plugins(now, 0, run) == [] and ran == [] and logged[-1].startswith("DRY would update 2")
+    monkeypatch.setattr(rab, "LIVE", True)
+    out = rab.update_plugins(now, 0, run)
+    assert ran == [["claude", "plugin", "marketplace", "update", "acme"],
+                   ["claude", "plugin", "marketplace", "update", "thewindstorm"],
+                   ["claude", "plugin", "update", "formatter@acme"],
+                   ["claude", "plugin", "update", "windstorm-pit-stop@thewindstorm"]]    # catalogs first, then plugins
+    assert out == [("formatter@acme", False, "Failed to update plugin formatter"),
+                   ("windstorm-pit-stop@thewindstorm", True, "done")]
+    assert len(told) == 1 and "formatter@acme" in told[0]
+    assert any("plugin update: update formatter@acme: FAILED" in m for m in logged)
+    ran.clear()
+    assert rab.update_plugins(now + 600, 0, run) == [] and ran == []             # done: not again for a day
+    assert rab.update_plugins(now + 3700, 3, run) and ran                        # sessions behind: again after an hour
+    # a command that hangs or cannot start is a FAILED line, never a stopped run
+    def boom(cmd, t):
+        raise subprocess.TimeoutExpired(cmd, t)
+    os.remove(os.path.join(rab.BASE, "state", "plugin-update"))
+    assert all(not ok for _, ok, _ in rab.update_plugins(now + 9000, 0, boom))

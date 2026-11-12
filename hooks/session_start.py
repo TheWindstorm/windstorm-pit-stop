@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pit Stop, part 4: the clean windshield, and the weekly tune.
+"""Pit Stop, part 4: the clean windshield, and the daily tune.
 
 Claude Code runs this SessionStart hook when a session starts, resumes, or
 comes back from a compaction. Whatever it prints is added to the session's
@@ -9,10 +9,10 @@ context; it never starts a turn.
     jobs, re-read only what the next step needs, say so if the summary leaves
     the next step unclear. Switch it off with "after_compact_note": false in
     ~/.claude/pit-stop/config.json.
-  - On a normal START or RESUME it prints nothing. If weekly tuning is on
+  - On a normal START or RESUME it prints nothing. If tuning is on
     ("auto_tune": true, set by /pit-stop setup), it starts scripts/autotune.py
     for this folder in the background and returns at once; autotune does
-    nothing if the folder was tuned in the last 7 days.
+    nothing if the folder was tuned within "tune_every_days" (default 1).
 Any error: print nothing, exit 0.
 """
 import json

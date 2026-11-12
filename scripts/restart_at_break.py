@@ -92,11 +92,16 @@ Config (optional) ~/.claude/pit-stop/restart.json:
    "cache_ttl": 3600, "compact_retry": 21600, "idle_compact_after": null,
    "ask_again": 43200, "ask_fallback_after": 1800, "consent_timeout": 1800,
    "restart_cooldown": 21600,
+   "jobs_escalate_days": 3,        # behind this many days because background jobs never stop: the ask says to stop
+                                   # ALL of them at the next point where nothing is lost, real work too (0 = never)
+   "plugin_updates": "off",        # "pit-stop": keep this plugin up to date; "all": every plugin installed for the
+                                   # user; with Claude Code's own commands, before restarting anyone (see update_plugins)
+   "plugin_update_every": 86400,
    "reload_plugins": false, "reload_only_names": [], "reload_warm": false,
    "reload_retry": 21600,
    "needs_you": true,              # keep ~/.claude/pit-stop/needs-you.md (hourly) and tell notify_command when it changes
-   "fleet_tune": true,             # when weekly tuning is on (config.json "auto_tune"): tune the folder of every
-                                   # running session the helper may touch once a week, one folder per run, in the
+   "fleet_tune": true,             # when tuning is on (config.json "auto_tune"): tune the folder of every
+                                   # running session the helper may touch once a day ("tune_every_days"), one folder per run, in the
                                    # background, and not while the machine is busy (see start_tune)
    "mismatch_backoff": 1800, "mismatch_backoff_max": 43200,
    "notify_command": null}         # e.g. ["notify-send", "pit-stop"]; gets the message as last arg
@@ -129,6 +134,7 @@ CFG = {"tmux_socket": None, "allow_names": [], "deny_names": [], "deny_name_glob
        "compact_before_restart": True, "min_idle_before_compact": 300, "cache_ttl": 3600,
        "compact_retry": 21600, "idle_compact_after": None,
        "ask_again": 43200, "ask_fallback_after": 1800, "consent_timeout": 1800, "restart_cooldown": 21600,
+       "jobs_escalate_days": 3, "plugin_updates": "off", "plugin_update_every": 86400,
        "reload_plugins": False, "reload_only_names": [], "reload_warm": False, "reload_retry": 21600,
        "needs_you": True, "fleet_tune": True,
        "mismatch_backoff": 1800, "mismatch_backoff_max": 43200}
@@ -564,8 +570,18 @@ def consent_state(okf, asked_at, now):
     return True, now - mtime, False
 
 
-def ask_note(newest, ver, okf):
-    """The background-jobs ask. A long path (a long home folder) gets the short form."""
+def ask_note(newest, ver, okf, days=0):
+    """The background-jobs ask, typed. A long path (a long home folder) gets the
+    short form. DAYS (from escalate_days): the session has been behind that long
+    because of its jobs, so the ask is to stop everything that can be restarted."""
+    if days:
+        text = (f"[AUTOMATED pit-stop restart, not your user] Claude Code {newest} is in; you have run {ver} for {days} "
+                f"days because your background jobs never stop. At the next point where nothing is lost, stop ALL of "
+                f"them, real work too if it can be restarted: (1) one line per job, with how to start it again, into "
+                f"{okf}; (2) stop them. The helper restarts you, then says to start them again. Only if a job cannot "
+                f"stop without losing work, do nothing. No reply needed.")
+        if len(text) <= NOTE_MAX:
+            return text
     text = (f"[AUTOMATED pit-stop restart, not your user] Claude Code {newest} is installed; you run {ver}, and /restart "
             f"is refused while background jobs run. If any is real work (a build, a test, a deploy), do nothing: "
             f"you will be asked again. If all are watchers or loops you can start again: (1) write one line per job "
@@ -576,6 +592,17 @@ def ask_note(newest, ver, okf):
     return (f"[AUTOMATED pit-stop restart, not your user] Claude Code {newest} is in (you run {ver}); /restart waits "
             f"for background jobs. Real work running: do nothing. Else list them, one a line, in {okf} (empty if none), "
             f"and stop them; the helper restarts you, then says to start them again. No reply needed.")
+
+
+def escalate_days(ver, now, cfg=None):
+    """Whole days a session on VER has been behind (since a newer Claude Code was
+    installed here), once that is jobs_escalate_days or more; else 0."""
+    esc = (CFG if cfg is None else cfg).get("jobs_escalate_days")
+    if not isinstance(esc, int) or isinstance(esc, bool) or esc <= 0 or not ver:
+        return 0
+    since = pc.behind_since(ver)
+    days = max(0, int((now - since) // 86400)) if since else 0
+    return days if days >= esc else 0
 
 
 def handle_ask(s, key, target, ver, newest, okf, l, now):
@@ -591,7 +618,8 @@ def handle_ask(s, key, target, ver, newest, okf, l, now):
         a = None  # a newer version, or the last ask is old: ask afresh
     if a is None:
         if LIVE:
-            pc.write_json_atomic(askf, {"newest": newest, "ver": ver, "okf": okf, "at": now, "delivered": None})
+            pc.write_json_atomic(askf, {"newest": newest, "ver": ver, "okf": okf, "at": now, "delivered": None,
+                                        "days": escalate_days(ver, now)})
         log(f"{name}: {ver}->{newest} background jobs: ask left for its Stop hook" + ("" if LIVE else " (DRY)"))
         return
     if a.get("delivered"):
@@ -620,7 +648,7 @@ def handle_ask(s, key, target, ver, newest, okf, l, now):
     if not input_empty(target) or screen_busy(target):
         log(f"{name}: {ver}->{newest} skip: text in the input box or a dialog on screen")
         return
-    sent, how = type_line(target, ask_note(newest, ver, okf))
+    sent, how = type_line(target, ask_note(newest, ver, okf, escalate_days(ver, now)))
     note_typing(os.path.join(BASE, "state", key + ".mismatch"), sent, how, now)
     if sent and LIVE:
         stamp(typedf, now)
@@ -990,11 +1018,108 @@ def handle(s, newest, target, now, counts):
             os.remove(f)
 
 
-def tune_due(sessions, now, cfg, tuned_dir=None, week=7 * 86400):
-    """The folder whose weekly tune is due, or None: among the running sessions
+PIT_STOP = "windstorm-pit-stop"
+UPDATE_BUDGET = 300   # seconds one run may spend on plugin updates in all
+
+
+def plugin_update_targets(scope, installed=None):
+    """(marketplaces, plugins) the helper keeps up to date, from Claude Code's
+    installed_plugins.json: for "pit-stop" this plugin and its marketplace; for
+    "all" every plugin installed for the user (project and local installs are
+    their project's business). Pure when INSTALLED is given."""
+    if scope not in ("pit-stop", "all"):
+        return [], []
+    if installed is None:
+        installed = pc.read_json(os.path.join(pc.CLAUDE_DIR, "plugins", "installed_plugins.json"), {}) or {}
+    rows = installed.get("plugins") if isinstance(installed, dict) else None
+    rows = rows if isinstance(rows, dict) else {}
+    plugins = []
+    for key, v in sorted(rows.items()):
+        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9._-]+@[A-Za-z0-9._-]+", key):
+            continue
+        if not any(isinstance(r, dict) and r.get("scope", "user") == "user" for r in (v if isinstance(v, list) else [])):
+            continue
+        if scope == "all" or key.split("@")[0] == PIT_STOP:
+            plugins.append(key)
+    return sorted({k.split("@")[1] for k in plugins}), plugins
+
+
+def plugin_update_due(age, behind_sessions, cfg):
+    """True when the plugins should be brought up to date now: once every
+    plugin_update_every, and also (at most hourly) when sessions are about to be
+    restarted onto a newer Claude Code, so that the same restart brings them the
+    newest plugins too. Pure."""
+    if cfg.get("plugin_updates") not in ("pit-stop", "all"):
+        return False
+    if age is None:
+        return True
+    return age >= cfg["plugin_update_every"] or (behind_sessions > 0 and age >= 3600)
+
+
+def update_plugins(now, behind_sessions, run=None):
+    """Bring the plugins up to date with Claude Code's own commands
+    (claude plugin marketplace update, then claude plugin update), before this
+    run restarts anyone. New versions land on disk; a running session keeps the
+    version it loaded until its restart (or /reload-plugins). A dry run says
+    what it would do. Returns the list of (plugin, ok, first line)."""
+    run = run or (lambda cmd, t: subprocess.run(cmd, capture_output=True, text=True, timeout=t, stdin=subprocess.DEVNULL))
+    stampf = os.path.join(BASE, "state", "plugin-update")
+    if not plugin_update_due(age_of(stampf, now), behind_sessions, CFG):
+        return []
+    markets, plugins = plugin_update_targets(CFG["plugin_updates"])
+    if not plugins:
+        return []
+    if not LIVE:
+        log(f"DRY would update {len(markets)} marketplace(s) and {len(plugins)} plugin(s): {', '.join(plugins)[:200]}")
+        return []
+    stamp(stampf, now)   # first: a run that hangs is not repeated every two minutes
+    start, out = time.time(), []
+    for cmd in [["claude", "plugin", "marketplace", "update", m] for m in markets] + \
+               [["claude", "plugin", "update", p] for p in plugins]:
+        if time.time() - start > UPDATE_BUDGET:
+            log(f"plugin update: time budget used; the rest next time ({' '.join(cmd[2:])} and after)")
+            break
+        try:
+            r = run(cmd, 180)
+            ok, first = r.returncode == 0, ((r.stdout or r.stderr or "").strip().splitlines() or [""])[-1][:200]
+        except Exception as e:
+            ok, first = False, f"{type(e).__name__}: {str(e)[:120]}"
+        log(f"plugin update: {' '.join(cmd[2:])}: {'ok' if ok else 'FAILED'}: {first}")
+        if cmd[2] == "update":
+            out.append((cmd[3], ok, first))
+            if not ok:
+                notify(f"pit-stop: plugin update failed for {cmd[3]}: {first}")
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    newest = plugin_root_now()
+    if newest and os.path.realpath(newest) != os.path.realpath(here) and not os.environ.get("PIT_STOP_LAUNCHER"):
+        log(f"plugin update: this timer runs {here}, not the installed {newest}; to follow updates, point it at "
+            f"{os.path.join(pc.STATE_DIR, 'bin', 'pit-stop-restart')} (/pit-stop setup does)")
+    return out
+
+
+def plugin_root_now():
+    """The folder Claude Code has installed for this plugin now (see scripts/launcher.py), or None."""
+    try:
+        import launcher
+        return launcher.plugin_root(pc.CLAUDE_DIR)
+    except Exception:
+        return None
+
+
+def tune_every():
+    """Seconds between two tunes of one folder ("tune_every_days" in config.json, default 1)."""
+    v = pc.config().get("tune_every_days", 1)
+    v = v if isinstance(v, (int, float)) and not isinstance(v, bool) else 1
+    return max(1, min(30, v)) * 86400
+
+
+def tune_due(sessions, now, cfg, tuned_dir=None, week=None):
+    """The folder whose tune is due (WEEK: seconds between tunes, default
+    tune_every()), or None: among the running sessions
     the helper may touch, the folder tuned longest ago (never tuned first).
     Pure but for the stats of the stamp files autotune.py leaves."""
     tuned_dir = tuned_dir or os.path.join(pc.STATE_DIR, "tuned")
+    week = tune_every() - 600 if week is None else week
     best = None
     for s in sessions:
         cwd = s.get("cwd")
@@ -1019,7 +1144,7 @@ def machine_busy():
 
 
 def start_tune(sessions, now):
-    """Fleet-wide weekly tune. A session's folder used to be tuned only when a
+    """Fleet-wide tune (daily by default). A session's folder used to be tuned only when a
     session started there, so a session that runs for weeks was never looked at
     again. Each run of the helper starts at most ONE tune (scripts/autotune.py,
     in the background, lowest priority): never while the last one still runs,
@@ -1041,7 +1166,7 @@ def start_tune(sessions, now):
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
     with open(runf, "w") as f:
         f.write(str(p.pid))
-    log(f"weekly tune started for {folder.replace(pc.HOME, '~')} (in the background; result in autotune.log)")
+    log(f"tune started for {folder.replace(pc.HOME, '~')} (in the background; result in autotune.log)")
     return folder
 
 
@@ -1111,6 +1236,13 @@ def main():
             f"/pit-stop setup --fleet writes a timer with a PATH that has it")
         return
     counts = {"restart": 0, "compact": 0, "reload": 0}
+    if ONLY is None and CFG.get("plugin_updates") in ("pit-stop", "all"):
+        try:   # before any restart: the restart that brings a session the newest Claude Code brings the newest plugins
+            behind = sum(1 for s in sessions if s.get("version") and pc.vkey(s["version"]) < pc.vkey(newest)
+                         and allowed(s.get("name") or "", s.get("cwd") or "", CFG))
+            update_plugins(now, behind)
+        except Exception as e:
+            log(f"plugin update: skip: error {type(e).__name__}: {str(e)[:120]}")
     info = None
     if CFG.get("reload_plugins"):
         try:
@@ -1140,7 +1272,7 @@ def main():
         try:
             start_tune(sessions, time.time())
         except Exception as e:
-            log(f"weekly tune: skip: error {type(e).__name__}: {str(e)[:120]}")
+            log(f"tune: skip: error {type(e).__name__}: {str(e)[:120]}")
 
 
 if __name__ == "__main__":

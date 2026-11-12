@@ -44,19 +44,7 @@ def hours(sec):
 
 
 def behind_since(ver):
-    """When a session on VER fell behind: the time the first newer Claude Code
-    was installed on this machine (the oldest file in its versions folder that
-    is newer than VER). Old version files get pruned, so for a session far
-    behind this is "at least since"; never the newest release's time, which
-    would make every stuck session look freshly behind after each update."""
-    times = []
-    try:
-        for name in os.listdir(pc.VERSIONS):
-            if pc.vkey(name) and pc.vkey(name) > pc.vkey(ver):
-                times.append(os.path.getmtime(os.path.join(pc.VERSIONS, name)))
-    except OSError:
-        return None
-    return min(times) if times else None
+    return pc.behind_since(ver)
 
 
 def collect(sessions, newest, now, panes=None):

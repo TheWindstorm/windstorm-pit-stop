@@ -20,7 +20,7 @@ Claude Code compacts in two ways, and each folder gets a point for each:
 ### `/pit-stop setup` (start here)
 1. Run `scripts/setup.py` with no arguments. It prints a plan and changes nothing. Show the plan.
 2. If the user runs several sessions in tmux, run `scripts/setup.py --fleet` too and show that part. Then run `scripts/restart_at_break.py` (no `--live`) and show what the pit stop would do right now.
-3. Only after the user agrees, run it again with `--apply` (and `--fleet` if they want it). That switches weekly tuning on, fits the folder of every running session, and for fleet mode copies the launcher and installs a timer. It never changes an existing `restart.json` and never adds a second timer.
+3. Only after the user agrees, run it again with `--apply` (and `--fleet` if they want it). That switches daily tuning on, fits the folder of every running session, and for fleet mode copies the launcher and installs a timer. It never changes an existing `restart.json` and never adds a second timer.
 4. Say plainly: new points take effect at each session's next start; fleet mode types `/restart`, `/compact` and at most one note into idle tmux panes.
 
 ### `/pit-stop status` (read-only)
@@ -34,7 +34,7 @@ Run `scripts/report.py` (no arguments, or `--project DIR`). Show the table. Poin
 2. Explain the recommendation in plain words: the idle point, the window, the hard ceiling, and each reason. Mention when the folder's compactions happened (idle, as a prompt arrived, mid-task) and what cold wake-ups cost it.
 3. Model and effort lines are SUGGESTIONS. Never change the model or effort yourself; ask the user.
 4. Only after the user agrees, run it again with `--apply`. That writes the two env keys into `DIR/.claude/settings.local.json` (backup first, everything else in the file kept) and the profile in `~/.claude/pit-stop/folders/` (the hook reads its `ceiling`). The new points take effect at the session's next start; say so. To move the window of a running session at once, the user can type `/autocompact <tokens>` in it.
-5. Weekly tuning (`/pit-stop setup`) repeats this by itself, one step at a time. Without it, suggest re-running weekly.
+5. Daily tuning (`/pit-stop setup`) repeats this by itself, one measured step at a time, and undoes a lowering that cost context. Without it, suggest re-running now and then.
 
 ### `/pit-stop reading [DIR]` (the clean reload)
 1. Run `scripts/reading_check.py --project DIR`. It lists the instruction files the folder's sessions load, and the memory index size: Claude Code loads only the first 200 lines or about 24 KB (whichever comes first) of `MEMORY.md`, so entries past that never load.
@@ -52,7 +52,7 @@ Tell them plainly:
 
 ## The hooks (on when the plugin is enabled)
 - `hooks/precompact_wait_for_break.py` holds AUTOMATIC compaction while a tool call is in flight and lets it run at the next break. It never blocks a manual `/compact`, allows anything at or above the ceiling, and allows on any error. When an automatic compaction goes ahead it prints a keep-list for the summary. Log, counts only: `~/.claude/pit-stop/precompact.log`.
-- `hooks/session_start.py` adds a three-line checklist after a compaction, and starts the weekly tune in the background when it is switched on.
+- `hooks/session_start.py` adds a three-line checklist after a compaction, and starts the daily tune in the background when it is switched on.
 - `hooks/stop_pit_stop.py` hands over a waiting background-jobs ask once, or shows the user one line when an update is waiting and fleet mode is not running.
 - Switches, in `~/.claude/pit-stop/config.json`: `auto_tune`, `compact_instructions` (false, or a string of extra notes), `after_compact_note`, `nudge`.
 

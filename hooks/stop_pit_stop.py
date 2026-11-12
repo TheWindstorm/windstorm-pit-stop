@@ -34,6 +34,17 @@ LOG = os.path.join(pc.STATE_DIR, "stop.log")
 
 def ask_text(a):
     okf = a.get("okf") or ""
+    days = a.get("days") or 0
+    if days:  # behind for days because the jobs never stop: the helper asks for everything that can be restarted
+        return (f"Pit Stop (this plugin's own hook, set up by your user): Claude Code {a.get('newest')} is installed and "
+                f"this session has run {a.get('ver')} for {days} days, because its background jobs never stop and Claude "
+                f"Code will not restart a session while they run. It has waited long enough. At the next point where "
+                f"nothing is lost (a run has finished, work is saved, a job can pick up where it stopped), stop ALL your "
+                f"background jobs, real work too if it can be started again: (1) write one line per job, with how to "
+                f"start it again, into {okf}; (2) stop them yourself; (3) end your turn. The restart helper then restarts "
+                f"this session within a few minutes, same conversation, and tells you to start your jobs again. Only if a "
+                f"job cannot be stopped at all without losing work, change nothing and end your turn: you will be asked "
+                f"again later. Do not type /restart yourself. No reply to the user is needed for this.")
     return (f"Pit Stop (this plugin's own hook, set up by your user): Claude Code {a.get('newest')} is installed and this "
             f"session runs {a.get('ver')}. Claude Code will not restart a session while background work runs, and you have "
             f"background jobs. Sort them now: (A) watchers, monitors and loops that you can simply start again; "
@@ -50,11 +61,14 @@ OK_DIR = os.path.join(pc.STATE_DIR, "restart", "ok")
 
 def ask_ok(a):
     """True when every field the ask prints is what the restart helper writes:
-    two plain version numbers, and a re-arm list path directly inside
+    two plain version numbers, a whole number of days (or none), and a re-arm list path directly inside
     ~/.claude/pit-stop/restart/ok/ made of letters, digits, '.', '_' and '-'.
     The text goes to Claude as an instruction, so a file with anything else in
     it (someone else's writing, a path elsewhere, a line break) is not passed on."""
     if not all(isinstance(a.get(k), str) and VERSION.fullmatch(a[k]) for k in ("newest", "ver")):
+        return False
+    days = a.get("days", 0)
+    if days is not None and (not isinstance(days, int) or isinstance(days, bool) or not 0 <= days <= 3650):
         return False
     okf = a.get("okf")
     if not isinstance(okf, str) or len(okf) > 400:
