@@ -888,6 +888,35 @@ def test_every_typed_note_stays_under_the_length_claude_code_folds_into_a_paste_
         head + ": your list of 1 is in the file " + where + " (read it)" + tail)
 
 
+def test_notes_stay_under_the_limit_with_the_longest_key_and_long_home_folders(tmp_path, monkeypatch):
+    """Windy Boss's note on 0.3.2: the note that names the file had no fallback of its own, and the typed ask
+    had room for a re-arm path of only about 110 chars. Now the key's name part is capped and both notes have
+    a short last form, so a path of up to 300 chars still gives a note Claude Code shows as typed text."""
+    rab = _rab(tmp_path, monkeypatch)
+    key = rab.lane_key("A lane with a very long name " * 8, "abcdef12-3456-7890")
+    assert key == rab.lane_key("A lane with a very long name " * 9, "abcdef12-3456-7890")
+    assert len(key) == rab.KEY_NAME_MAX + 9 and key.endswith("-abcdef12") and "--" not in key
+    assert rab.lane_key("x-" * 30, "abcdef12") == "x-" * 19 + "x-abcdef12"          # never ends the name on a dash
+    assert rab.lane_key("Windy Hub", "cbdfe912-0000") == "windy-hub-cbdfe912"        # short names keep their key
+    heads = [("[AUTOMATED pit-stop restart, not your user] You were restarted at 2026-11-12T05:52:14Z onto Claude Code "
+              "2.1.9999 (was 2.1.9998); same conversation. The background jobs you stopped for it are down: start them "
+              "again now", ". Scheduled session crons survive a restart. No reply needed.")]
+    for home in ("/home/user1-gpu", "/Users/" + "h" * 60, "/" + "d" * 180):
+        okf = os.path.join(home, ".claude", "pit-stop", "restart", "ok", key)
+        ask = rab.ask_note("2.1.9999", "2.1.9998", okf)
+        assert len(ask) <= rab.NOTE_MAX and okf in ask and "empty if none" in ask.replace("an empty file", "empty")
+        for head, tail in heads:
+            where = okf + ".done-1794463224"
+            for jobs in (["inbox watcher"], ["w" * 300, "v" * 300]):
+                note = rab.rearm_note(head, jobs, tail, where)
+                assert len(note) <= rab.NOTE_MAX and (where in note or "inbox watcher" in note)
+    assert len(rab.ask_note("2.1.322", "2.1.319", "/home/user1-gpu/.claude/pit-stop/restart/ok/" + key)) > 500   # full form
+    long_okf = "/" + "d" * 180 + "/ok/" + key
+    assert "(1) write one line" not in rab.ask_note("2.1.322", "2.1.319", long_okf)                              # short form
+    short = rab.rearm_note("H" * 300, ["j" * 200], "T" * 100, "/" + "p" * 300)                 # neither longer form fits
+    assert short.startswith("[AUTOMATED pit-stop restart") and "/" + "p" * 300 in short and len(short) <= rab.NOTE_MAX
+
+
 def test_type_line_never_types_a_note_over_the_limit(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     sent = []

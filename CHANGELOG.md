@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3 (2026-11-12)
+Closes the gap left in 0.3.2 (from the review of 0.3.2): the 560-character limit had no fallback of its own.
+
+- **Each typed note has a short last form.** The "start your jobs again" note that names the list's file, and the typed background-jobs ask, now fall back to a short form when a long path would push them over 560 characters. The full ask had room for a re-arm path of only about 110 characters (Veron's longest is 78); a long home folder or a long session name would have had the ask refused every run. Now both notes fit with a path of up to 300 characters. Past that, `type_line` still refuses and logs it.
+- **The name part of a session's state key is cut at 40 letters** (`KEY_NAME_MAX`). The key is part of the path typed in those notes. Keys of names up to 40 letters are unchanged (all 96 sessions on Veron); a session with a longer name gets a new key, so an ask it has open at the moment of the update is asked again later.
+
 ## 0.3.2 (2026-11-12)
 One fix, found on the first live restarts of 0.3.1.
 
