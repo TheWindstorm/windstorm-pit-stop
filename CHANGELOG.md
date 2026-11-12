@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0 (2026-11-11)
+Three things the first fleet read asked for. Usage, because the account the fleet runs on hit its limit that day; a list for the person, because stuck sessions were silent; and the quiet-session pit stop, because cold wake-ups were re-paying for whole contexts.
+
+- **Usage-aware tuning, with one dial.** The optimizer now measures how many tokens a folder's busiest session reads from the cache each day, and a `"budget"` in `config.json` (or `/pit-stop setup --budget`, or `optimize.py --budget`) says how hard to hold that down: `roomy` (memory only, as before), `balanced` (default: heavy folders capped at 500K, very heavy at 400K, neither raised) or `economy` (every folder at most 400K, heavy ones 300K, none raised). Sessions that re-read a lot after compacting get one step more. It prints a rough estimate of the reads saved. 0.2.x would have raised the window of the fleet's heaviest session (616M tokens read a day) from 500K to 600K; `balanced` now takes it to 400K.
+- **`/pit-stop status`, the short list of what needs a person** (`scripts/needs_you.py`): sessions with a question on screen for 2 hours or more, sessions behind the newest Claude Code for a day or more with the reason, and sessions that never loaded the hooks. In fleet mode the helper keeps it in `~/.claude/pit-stop/needs-you.md` about once an hour and tells `notify_command` when the names on it change (`"needs_you": false` switches that off). Names, versions and durations only.
+- **The quiet-session pit stop reaches more sessions** (`idle_compact_after`, still off by default): it now also compacts quiet sessions that have background jobs or are behind the newest version, and uses Claude Code's 200K default where no idle point is tuned.
+- New optimizer output: model calls a day, cache reads a day, the busiest session's reads a day. A model call that spans several transcript rows is counted once. A rate needs at least a day of history.
+
+An independent review read this release before it was pushed and found defects, all fixed here with tests: the quiet-session pit stop judged "cache still warm" from the newest dated row rather than the last model call (it could have compacted a cold session); the budget's cap could exceed the range's top and said "stays" while raising; `economy` skipped folders with no usage history; the needs-you list measured "behind for a day" from the newest release's install, so the list emptied after every update, and it announced lists that only got shorter.
+
+Not proven on a live fleet yet: the budget's estimate against real usage after a week; the quiet-session pit stop typing `/compact` into a session with background jobs.
+
 ## 0.2.2 (2026-11-11)
 **Sessions that never loaded the hooks.** A session loads a plugin's hooks when its process starts. On the machine 0.2.1 was measured on, 28 of 95 sessions had started before Pit Stop was installed and so had no hook at all (one compacted mid-task 16 times in 31 hours), and a session already on the newest Claude Code is never restarted, so it would never get one. Running sessions also keep the hooks of the version they loaded, through every later plugin update.
 

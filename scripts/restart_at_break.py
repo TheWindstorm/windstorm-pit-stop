@@ -46,12 +46,16 @@ A session behind the newest version is handled like this (first match):
      a small context. compact_before_restart: false switches this off; then
      big sessions wait for their own compaction or for (c).
   5. Anything else: skipped, with the reason in the log.
-A session on the newest version is left alone, unless idle_compact_after is
-set (seconds, off by default): then a quiet session over its idle point (from
-/pit-stop optimize) gets /compact typed while its cache is warm. Claude Code
-does this by itself shortly before the cache expires (about 55 minutes with
-the 1-hour cache); this is for fleets whose sessions are woken more often
-than that and so never get there.
+THE QUIET-SESSION PIT STOP (idle_compact_after, seconds, off by default; 2400
+is a good value). A session that has been quiet that long, over its idle
+point (from /pit-stop optimize; else Claude Code's default, 200K), with its
+cache still warm, gets /compact typed, whether or not it is on the newest
+version and whether or not it has background jobs. Claude Code does this by
+itself shortly before the cache expires (about 53 minutes with the 1-hour
+cache), but on the fleet this was measured on it reached only about a third
+of the big quiet sessions: in 7 days 422 wake-ups of 200K or more paid for
+the whole context again. Otherwise a session on the newest version is left
+alone.
 
 Typing is checked: the helper presses Enter only if the input box holds
 exactly what it typed; otherwise it clears the line and backs off that
@@ -90,6 +94,7 @@ Config (optional) ~/.claude/pit-stop/restart.json:
    "restart_cooldown": 21600,
    "reload_plugins": false, "reload_only_names": [], "reload_warm": false,
    "reload_retry": 21600,
+   "needs_you": true,              # keep ~/.claude/pit-stop/needs-you.md (hourly) and tell notify_command when it changes
    "mismatch_backoff": 1800, "mismatch_backoff_max": 43200,
    "notify_command": null}         # e.g. ["notify-send", "pit-stop"]; gets the message as last arg
 Sessions come from Claude Code's local registry (~/.claude/sessions/*.json,
@@ -122,6 +127,7 @@ CFG = {"tmux_socket": None, "allow_names": [], "deny_names": [], "deny_name_glob
        "compact_retry": 21600, "idle_compact_after": None,
        "ask_again": 43200, "ask_fallback_after": 1800, "consent_timeout": 1800, "restart_cooldown": 21600,
        "reload_plugins": False, "reload_only_names": [], "reload_warm": False, "reload_retry": 21600,
+       "needs_you": True,
        "mismatch_backoff": 1800, "mismatch_backoff_max": 43200}
 _DEFAULTS = dict(CFG)
 _user = pc.read_json(os.path.join(pc.STATE_DIR, "restart.json"), {})
@@ -439,11 +445,22 @@ def plan(l, cfg):
     call_age = idle if call_age is None else call_age       # tests and older callers give only idle
     compact_ok = (st == "idle" and ctx is not None and not recent and cache_warm(call_age, cfg)
                   and (asked is None or asked >= cfg["compact_retry"]))
+    # The quiet-session pit stop (idle_compact_after): a session that has been
+    # quiet that long, over its idle point, cache still warm, gets /compact now,
+    # so its next wake-up does not pay for the whole context at the cache-write
+    # price. Background jobs do not matter for a compaction (they do for a
+    # restart), so status "shell" counts too. Without a tuned idle point,
+    # Claude Code's own default is used.
+    after, point = cfg.get("idle_compact_after"), l.get("idle_point") or pc.IDLE_DEFAULT
+    # "Warm" is the age of the last model call (call_age); "quiet" is the newest dated row (idle). Both
+    # must hold: a session restarted or reloaded 40 minutes ago whose last call is hours old is quiet
+    # but cold, and summarizing it now would read the whole context uncached.
+    quiet_stop = bool(after and ctx is not None and not recent and cache_warm(call_age, cfg)
+                      and (asked is None or asked >= cfg["compact_retry"]) and ctx >= point and idle >= after)
+    quiet_why = (f"quiet {int(idle)}s with context {ctx} over its idle point {point}, "
+                 f"last model call {int(call_age)}s ago so the cache is still warm")
     if not l["behind"]:
-        after, point = cfg.get("idle_compact_after"), l.get("idle_point")
-        if after and point and compact_ok and ctx >= point and idle >= after:
-            return "compact", f"quiet {int(idle)}s with context {ctx} over its idle point {point}"
-        return "none", ""
+        return ("compact", quiet_why) if quiet_stop else ("none", "")
     given_up = l["consented"] and l.get("consent_age", 0) >= cfg["consent_timeout"]
     if l.get("blocked"):
         # No restart for now (one was tried lately). Never ask it to stop its jobs for a restart
@@ -457,6 +474,8 @@ def plan(l, cfg):
                              f"so it cannot be restarted")
         if l["consented"]:
             return "wait", "re-arm list written; waiting for it to stop its background jobs"
+        if quiet_stop:
+            return "compact", quiet_why + " (it cannot be restarted while its background jobs run)"
         return "ask", "background jobs running"
     if asked is not None and asked < COMPACT_WAIT and not recent:
         return "wait", f"/compact typed {int(asked)}s ago; waiting for the summary"
@@ -466,6 +485,8 @@ def plan(l, cfg):
         return "compact", f"context {ctx}, idle {int(idle)}s, cache still warm: compact first, restart after"
     if ok:
         return "restart", why
+    if quiet_stop:
+        return "compact", quiet_why + "; the restart follows once it is at a break"
     return "skip", why
 
 
@@ -1022,6 +1043,12 @@ def main():
             maybe_reload(s, target, now, counts, info)
         except Exception as e:  # one odd session (an unreadable transcript, a vanished pane) never stops the run
             log(f"{s.get('name') or '?'}: skip: error {type(e).__name__}: {str(e)[:120]}")
+    if LIVE and ONLY is None and CFG.get("needs_you", True):
+        try:   # about once an hour: the short list of what needs a person (~/.claude/pit-stop/needs-you.md)
+            import needs_you
+            needs_you.refresh(sessions, newest, time.time(), panes=tty_map)
+        except Exception as e:
+            log(f"needs-you list: skip: error {type(e).__name__}: {str(e)[:120]}")
 
 
 if __name__ == "__main__":

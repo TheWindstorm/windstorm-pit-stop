@@ -1,6 +1,6 @@
 ---
 name: pit-stop
-description: Windstorm Pit Stop, a context optimizer for Claude Code. Use when the user says "pit stop", "/pit-stop setup", "/pit-stop report", "/pit-stop optimize", "/pit-stop reading" or "/pit-stop restart", or asks to tune when a session auto-compacts, set an idle point or a compaction window (300K/500K/700K), stop sessions compacting mid-task, check why sessions are not on the newest Claude Code, keep many sessions updated without watching them, check or trim MEMORY.md / CLAUDE.md so they load fully, or suggest a model and effort for a session's job.
+description: Windstorm Pit Stop, a context optimizer for Claude Code. Use when the user says "pit stop", "/pit-stop setup", "/pit-stop status", "/pit-stop report", "/pit-stop optimize", "/pit-stop reading" or "/pit-stop restart", or asks to tune when a session auto-compacts, set an idle point or a compaction window (300K/500K/700K), stop sessions compacting mid-task, check why sessions are not on the newest Claude Code, keep many sessions updated without watching them, check or trim MEMORY.md / CLAUDE.md so they load fully, or suggest a model and effort for a session's job.
 ---
 
 # Windstorm Pit Stop
@@ -22,6 +22,9 @@ Claude Code compacts in two ways, and each folder gets a point for each:
 2. If the user runs several sessions in tmux, run `scripts/setup.py --fleet` too and show that part. Then run `scripts/restart_at_break.py` (no `--live`) and show what the pit stop would do right now.
 3. Only after the user agrees, run it again with `--apply` (and `--fleet` if they want it). That switches weekly tuning on, fits the folder of every running session, and for fleet mode copies the launcher and installs a timer. It never changes an existing `restart.json` and never adds a second timer.
 4. Say plainly: new points take effect at each session's next start; fleet mode types `/restart`, `/compact` and at most one note into idle tmux panes.
+
+### `/pit-stop status` (read-only)
+Run `python3 -I <scripts>/needs_you.py` and show its output as it is. It is the short list of what needs a person: sessions waiting on a question or permission prompt for 2 hours or more, sessions that have been behind the newest Claude Code for a day or more and why, and sessions that never loaded the plugin's hooks. If it says "Nothing needs you.", say so in one line.
 
 ### `/pit-stop report` (read-only)
 Run `scripts/report.py` (no arguments, or `--project DIR`). Show the table. Point out sessions waiting for a restart (`*`) and memory indexes past the 200-line load limit (`!`).

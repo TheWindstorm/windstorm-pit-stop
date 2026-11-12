@@ -10,6 +10,12 @@ Options:
   --no-tune-now               do not tune the folders of the running sessions now
   --interval MIN              minutes between fleet runs (default 5)
   --days N                    days of history to read when tuning (default 14)
+  --budget economy|balanced|roomy
+                              how hard tuning holds down usage (kept in
+                              config.json; default balanced). economy: every
+                              window at most 400K, a heavy folder 300K, none
+                              raised. balanced: only heavy folders are capped.
+                              roomy: tune for memory only.
 
 What --apply does:
   1. Weekly tuning ON ("auto_tune": true in ~/.claude/pit-stop/config.json):
@@ -156,6 +162,7 @@ def main():
     ap.add_argument("--no-tune-now", action="store_true")
     ap.add_argument("--interval", type=int, default=5)
     ap.add_argument("--days", type=int, default=14)
+    ap.add_argument("--budget", choices=op.BUDGETS)
     a = ap.parse_args()
     word = "DOING" if a.apply else "PLAN (nothing is changed; add --apply)"
     sessions, source = pc.live_sessions()
@@ -170,13 +177,18 @@ def main():
     if is_wsl() or platform.system() == "Windows":
         print("  NOTE: Claude Code has no /restart on Windows or WSL. Compaction tuning works; fleet mode does not.")
 
-    print("1. Weekly tuning: " + ("left off (--no-auto-tune)" if a.no_auto_tune else "ON (auto_tune: true)"))
-    if a.apply and not a.no_auto_tune:
+    budget = a.budget or (pc.config().get("budget") if pc.config().get("budget") in op.BUDGETS else None) or "balanced"
+    print("1. Weekly tuning: " + ("left off (--no-auto-tune)" if a.no_auto_tune else "ON (auto_tune: true)")
+          + f"; usage budget: {budget}" + ("" if a.budget else " (change it with --budget economy|balanced|roomy)"))
+    if a.apply and (a.budget or not a.no_auto_tune):
         cfg, err = pc.read_json_strict(pc.CONFIG)
         if err or not isinstance(cfg, dict):
-            print(f"   NOT switched on: {pc.CONFIG} does not read as a JSON object ({err or 'not an object'}); fix it and run again")
+            print(f"   NOT written: {pc.CONFIG} does not read as a JSON object ({err or 'not an object'}); fix it and run again")
         else:
-            cfg["auto_tune"] = True
+            if not a.no_auto_tune:
+                cfg["auto_tune"] = True
+            if a.budget:
+                cfg["budget"] = a.budget
             pc.write_json_atomic(pc.CONFIG, cfg)
 
     folders = sorted({s.get("cwd") for s in sessions if s.get("cwd")} | {os.getcwd()})
@@ -195,10 +207,13 @@ def main():
             if not m["transcripts"]:
                 print(f"   {d.replace(pc.HOME, '~')}: no history in {a.days} days; left as it is")
                 continue
-            rec = op.recommend(m)
+            rec = op.recommend(m, budget=budget)
             print(f"   {d.replace(pc.HOME, '~')}: idle point {pc.fmt_k(m['current_idle_point'] or pc.IDLE_DEFAULT)} -> "
                   f"{pc.fmt_k(rec['idle_point'])}, window {pc.fmt_k(m['current_window'])} -> {pc.fmt_k(rec['window'])}"
-                  f"  ({m['compactions']} compactions, {m['compactions_when']['mid_task']} mid-task)")
+                  f"  ({m['compactions']} compactions, {m['compactions_when']['mid_task']} mid-task"
+                  + (f"; {rec['usage_class']} use" if rec.get("usage_class") in ("heavy", "very heavy") else "")
+                  + (f"; about {int(rec['est_read_saving'] * 100)}% fewer cache reads" if rec.get("est_read_saving", 0) >= 0.05 else "")
+                  + ")")
             if a.apply:
                 try:
                     s, _, _ = op.apply(d, rec, m)
