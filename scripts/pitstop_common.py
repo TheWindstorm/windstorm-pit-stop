@@ -351,6 +351,102 @@ def points(folder, session_id=None):
     return out
 
 
+def plugin_installed(claude_dir=None):
+    """(version, epoch seconds) of the Pit Stop plugin as Claude Code records it
+    in installed_plugins.json: the time it was last installed or updated. A
+    session whose process started before that time still runs the hooks it
+    loaded at its start (or none). (None, None) when it cannot be read."""
+    import calendar
+    try:
+        with open(os.path.join(claude_dir or CLAUDE_DIR, "plugins", "installed_plugins.json")) as f:
+            plugins = json.load(f).get("plugins") or {}
+        if not isinstance(plugins, dict):
+            raise ValueError("plugins is not an object")
+    except Exception:
+        return None, None
+    rows = [r for k, v in plugins.items() if k.split("@")[0] == "windstorm-pit-stop" and isinstance(v, list)
+            for r in v if isinstance(r, dict)]
+    rows.sort(key=lambda r: r.get("scope") != "user")
+    for r in rows:
+        when = r.get("lastUpdated") or r.get("installedAt")
+        try:
+            return r.get("version"), calendar.timegm(time.strptime(str(when)[:19], "%Y-%m-%dT%H:%M:%S"))
+        except Exception:
+            continue
+    return None, None
+
+
+PLUGIN_NAME = "windstorm-pit-stop"
+
+
+def hook_files_signature(root):
+    """sha256 over the plugin's hook files (hooks/hooks.json and hooks/*.py),
+    names and bytes, in name order. None if there is no hooks.json."""
+    import hashlib
+    d = os.path.join(root or "", "hooks")
+    if not root or not os.path.isfile(os.path.join(d, "hooks.json")):
+        return None
+    h = hashlib.sha256()
+    for name in sorted(n for n in os.listdir(d) if n == "hooks.json" or n.endswith(".py")):
+        with open(os.path.join(d, name), "rb") as f:
+            h.update(name.encode() + b"\0" + f.read().replace(b"\r\n", b"\n") + b"\0")
+    return h.hexdigest()
+
+
+def hook_generation(root):
+    """The HOOK GENERATION of a plugin folder: one whole number, kept in
+    hooks/generation.json, that a release raises only when a running session
+    must reload to work properly. A release that leaves the hooks alone, or
+    changes them in a way an older running session can live with, keeps it.
+    A folder with hooks but no such file (0.1.x) is generation 1. None when
+    the folder or its hooks.json is gone: a session whose hooks ran from there
+    now has none that work."""
+    if not root or not os.path.isfile(os.path.join(root, "hooks", "hooks.json")):
+        return None
+    g = (read_json(os.path.join(root, "hooks", "generation.json"), {}) or {})
+    g = g.get("generation") if isinstance(g, dict) else None
+    return g if isinstance(g, int) and not isinstance(g, bool) and g > 0 else 1
+
+
+def plugin_versions(claude_dir=None):
+    """Every Pit Stop version folder in Claude Code's plugin cache, oldest
+    first: [(installed epoch, root)]. The time is that of the folder's
+    .claude-plugin/plugin.json, which Claude Code writes when it fetches the
+    version (the folder's own time moves whenever Python caches a module in it)."""
+    out = []
+    for root in glob.glob(os.path.join(claude_dir or CLAUDE_DIR, "plugins", "cache", "*", PLUGIN_NAME, "*")):
+        try:
+            out.append((os.path.getmtime(os.path.join(root, ".claude-plugin", "plugin.json")), root))
+        except OSError:
+            continue
+    return sorted(out)
+
+
+def root_loaded_at(when, versions):
+    """The version folder a session that loaded its plugins at WHEN got: the
+    newest one already there at that time. None if Pit Stop was not installed yet."""
+    hits = [root for t, root in versions if t <= when]
+    return hits[-1] if hits else None
+
+
+def plugin_root(claude_dir=None):
+    """The folder of the installed plugin, as Claude Code records it (user scope first), or None."""
+    try:
+        with open(os.path.join(claude_dir or CLAUDE_DIR, "plugins", "installed_plugins.json")) as f:
+            plugins = json.load(f).get("plugins") or {}
+        if not isinstance(plugins, dict):
+            raise ValueError("plugins is not an object")
+    except Exception:
+        return None
+    rows = [r for k, v in plugins.items() if k.split("@")[0] == PLUGIN_NAME and isinstance(v, list)
+            for r in v if isinstance(r, dict)]
+    rows.sort(key=lambda r: r.get("scope") != "user")
+    for r in rows:
+        if r.get("installPath") and os.path.isdir(r["installPath"]):
+            return r["installPath"]
+    return None
+
+
 def fleet_active(max_age=3600):
     """True when the restart helper has run in the last hour (fleet mode is on)."""
     try:

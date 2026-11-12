@@ -107,7 +107,7 @@ def analyze(project, days, only=None):
                 # background, and swapped it in here in milliseconds with the
                 # newest messages kept word for word. Nobody waits and the work
                 # in hand is kept, so it is not counted as a mid-task compaction.
-                when["instant" if (e.get("compactMetadata") or {}).get("precomputed")
+                when["instant" if (e.get("compactMetadata") if isinstance(e.get("compactMetadata"), dict) else {}).get("precomputed")
                      else "mid_task" if last_kind == "tool" else "idle" if last_kind == "reply" and quiet >= 1800
                      else "prompt"] += 1
                 if cur["turns"]:

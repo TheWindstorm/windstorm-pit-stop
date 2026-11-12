@@ -61,6 +61,23 @@ refused or not confirmed) a session is left alone for restart_cooldown
 seconds (6 h). A session that stopped its jobs for a restart the helper then
 could not do is told, after consent_timeout (30 min), to start them again.
 
+RELOAD (reload_plugins: true; off by default). A session loads a plugin's
+hooks when its process starts, and a session already on the newest Claude
+Code is never restarted. The helper types /reload-plugins (a local command:
+no turn starts) into a session whose Pit Stop hooks are MISSING or WRONG: it
+started before the plugin was installed and has none; or the version folder
+its hooks run from has been removed; or the plugin's hook generation
+(hooks/generation.json, raised only when a running session must reload) is
+not the installed one. A session that merely runs an older release's hooks
+of the same generation is left alone. It is typed at a break, when that is
+cheap: right after a compaction, on a small context, or when the cache has
+gone cold. A reload can make the session's next turn write its context to the
+prompt cache again, so a big session with a warm cache waits (reload_warm:
+true lifts that). reload_only_names, if set, limits it to those names (for a
+staged roll-out). It is confirmed by the "Reloaded:" line on screen; at most
+max_per_run per run; a try is not repeated for reload_retry seconds (6 h).
+A session the helper restarts in the same run is not also reloaded.
+
 Config (optional) ~/.claude/pit-stop/restart.json:
   {"tmux_socket": null,            # tmux -L name; null = default server
    "allow_names": [],              # if set, ONLY these session names
@@ -71,6 +88,8 @@ Config (optional) ~/.claude/pit-stop/restart.json:
    "cache_ttl": 3600, "compact_retry": 21600, "idle_compact_after": null,
    "ask_again": 43200, "ask_fallback_after": 1800, "consent_timeout": 1800,
    "restart_cooldown": 21600,
+   "reload_plugins": false, "reload_only_names": [], "reload_warm": false,
+   "reload_retry": 21600,
    "mismatch_backoff": 1800, "mismatch_backoff_max": 43200,
    "notify_command": null}         # e.g. ["notify-send", "pit-stop"]; gets the message as last arg
 Sessions come from Claude Code's local registry (~/.claude/sessions/*.json,
@@ -102,8 +121,29 @@ CFG = {"tmux_socket": None, "allow_names": [], "deny_names": [], "deny_name_glob
        "compact_before_restart": True, "min_idle_before_compact": 300, "cache_ttl": 3600,
        "compact_retry": 21600, "idle_compact_after": None,
        "ask_again": 43200, "ask_fallback_after": 1800, "consent_timeout": 1800, "restart_cooldown": 21600,
+       "reload_plugins": False, "reload_only_names": [], "reload_warm": False, "reload_retry": 21600,
        "mismatch_backoff": 1800, "mismatch_backoff_max": 43200}
-CFG.update(pc.read_json(os.path.join(pc.STATE_DIR, "restart.json"), {}) or {})
+_DEFAULTS = dict(CFG)
+_user = pc.read_json(os.path.join(pc.STATE_DIR, "restart.json"), {})
+CFG.update(_user if isinstance(_user, dict) else {})
+CFG_WARNINGS = []
+
+
+def _check_numbers(cfg, defaults, warnings):
+    """A number in restart.json must be a number. `true` would count as 1 second
+    and "2400" would raise on every session, so a value of the wrong kind goes
+    back to its default (for idle_compact_after: off) and the run says so."""
+    for k, dv in list(defaults.items()) + [("idle_compact_after", None)]:
+        if k != "idle_compact_after" and (isinstance(dv, bool) or not isinstance(dv, (int, float))):
+            continue
+        v = cfg.get(k)
+        if (v is None and dv is None) or (isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0):
+            continue
+        warnings.append(f"restart.json: \"{k}\" must be a number of seconds or tokens (found {v!r}); using {dv!r}")
+        cfg[k] = dv
+
+
+_check_numbers(CFG, _DEFAULTS, CFG_WARNINGS)
 BASE = os.path.join(pc.STATE_DIR, "restart")
 LOG = os.path.join(BASE, "restart.log")
 EVENTS = os.path.join(BASE, "events.log")   # only what was done, typed, refused or asked: small, so it lasts
@@ -136,6 +176,10 @@ def log(msg):
     # restarts scroll away with it. Everything that is not a skip is kept here too.
     if not any(q in msg for q in QUIET):
         pc.append_log(EVENTS, msg)
+
+
+TYPED = set()   # panes typed into during this run: never two commands into one session in one run
+PLANNED = set()  # panes the restart path wants this run (a restart, a compaction, a note), typed or waiting its turn
 
 
 def tmux(*args):
@@ -216,6 +260,7 @@ def type_line(target, text):
     if not input_empty(target) or screen_busy(target):
         log(f"{target}: input not empty or busy at send time; skipped")
         return False, "busy"
+    TYPED.add(target)   # typed into (or would be, in a dry run) during this run
     if not LIVE:
         log(f"DRY would type into {target}: {text[:90]}")
         return True, ""
@@ -261,6 +306,20 @@ def transcript_path(s):
     return os.path.join(pc.project_dir(s.get("cwd") or ""), (s.get("sessionId") or "") + ".jsonl")
 
 
+CALL_AGE = {}   # session id -> seconds since its last model call, filled by ctx_and_idle (None if no call was seen)
+
+
+def call_age_of(s, idle):
+    """Seconds since this session's last MODEL CALL: what the prompt cache's
+    age follows. Quiet time (idle) is not the same thing: /restart,
+    /reload-plugins, /model and the away summary all write dated rows without
+    calling the model, so a session can look quiet for 20 minutes while its
+    cache has been cold for hours. Falls back to idle when the transcript read
+    saw no call (and in tests that replace ctx_and_idle)."""
+    v = CALL_AGE.get(s.get("sessionId"))
+    return idle if v is None else max(v, idle)
+
+
 def ctx_and_idle(s):
     p = transcript_path(s)
     if not os.path.exists(p):
@@ -269,17 +328,20 @@ def ctx_and_idle(s):
     # file's modification time: on a quiet lane the file's time was seen moving
     # about once an hour with nothing appended (Veron, 2026-11-11), which reset
     # the idle clock and kept the hour-idle rule from ever applying.
-    ctx, newest = None, None
+    ctx, newest, last_call = None, None, None
     for e in pc.iter_entries(p, tail_bytes=3_000_000):
         t = utc_ts(e.get("timestamp") or "")
         if t and (newest is None or t > newest):
             newest = t
         if pc.is_compact_boundary(e):
             ctx = 0
+            last_call = t or last_call      # a compaction is a model call too: it leaves a fresh cache entry
         elif e.get("type") == "assistant" and not e.get("isSidechain") and pc.usage_total(e):
             ctx = pc.usage_total(e)
+            last_call = t or last_call
     now = time.time()
     idle = now - newest if newest is not None else now - os.path.getmtime(p)
+    CALL_AGE[s.get("sessionId")] = None if last_call is None else max(0.0, now - last_call)
     return ctx, max(0.0, idle)
 
 
@@ -316,7 +378,7 @@ def last_compact_age(path, tail_bytes=64_000_000, now=None):
     return None if last is None else (now or time.time()) - last
 
 
-def at_a_break(status, idle, ctx, compact_age, cfg, consented=False):
+def at_a_break(status, idle, ctx, compact_age, cfg, consented=False, call_age=None):
     """(True, why) when a restart is cheap and safe by the rules in the docstring,
     else (False, the reason it is not). Pure: no reads, so it is easy to test."""
     if status not in ("idle", "shell"):
@@ -333,8 +395,12 @@ def at_a_break(status, idle, ctx, compact_age, cfg, consented=False):
         return False, f"it wrote its re-arm list; idle {int(idle)}s < {cfg['min_idle_after_compact']}s"
     if ctx is not None and ctx < cfg["ctx_max"] and idle >= cfg["min_idle"]:
         return True, f"small context {ctx}, idle {int(idle)}s"
-    if idle >= cfg["cold_idle"]:
-        return True, f"idle {int(idle)}s >= cold_idle (cache cold anyway)"
+    # (c) is about the cache: it is cold once the last MODEL CALL is cold_idle old. A dated row that is
+    # not a call (a /reload-plugins, a /model) must not start that hour again; the session only has to
+    # have been left alone for min_idle.
+    cold = idle if call_age is None else call_age
+    if cold >= cfg["cold_idle"] and idle >= min(cfg["min_idle"], cfg["cold_idle"]):
+        return True, f"idle {int(cold)}s >= cold_idle (cache cold anyway)"
     if ctx is None:
         return False, "context unreadable"
     return False, (f"idle {int(idle)}s, context {ctx}"
@@ -369,7 +435,9 @@ def plan(l, cfg):
         return ("skip" if l["behind"] else "none"), f"status={st} (working)"
     if idle < 0:
         return ("skip" if l["behind"] else "none"), "no transcript found"
-    compact_ok = (st == "idle" and ctx is not None and not recent and cache_warm(idle, cfg)
+    call_age = l.get("call_age")
+    call_age = idle if call_age is None else call_age       # tests and older callers give only idle
+    compact_ok = (st == "idle" and ctx is not None and not recent and cache_warm(call_age, cfg)
                   and (asked is None or asked >= cfg["compact_retry"]))
     if not l["behind"]:
         after, point = cfg.get("idle_compact_after"), l.get("idle_point")
@@ -392,7 +460,7 @@ def plan(l, cfg):
         return "ask", "background jobs running"
     if asked is not None and asked < COMPACT_WAIT and not recent:
         return "wait", f"/compact typed {int(asked)}s ago; waiting for the summary"
-    ok, why = at_a_break(st, idle, ctx, cage, cfg, l["consented"])
+    ok, why = at_a_break(st, idle, ctx, cage, cfg, l["consented"], call_age)
     if (cfg["compact_before_restart"] and compact_ok and ctx >= cfg["ctx_max"]
             and idle >= (cfg["min_idle_after_compact"] if l["consented"] else cfg["min_idle_before_compact"])):
         return "compact", f"context {ctx}, idle {int(idle)}s, cache still warm: compact first, restart after"
@@ -509,7 +577,7 @@ def handle_ask(s, key, target, ver, newest, okf, l, now):
             f"{CFG['ask_fallback_after']}s (this session has not loaded the plugin's hooks)")
         return
     small = l["ctx"] is not None and l["ctx"] < CFG["ctx_max"]
-    if not (small or cache_warm(l["idle"], CFG)) or l["idle"] < CFG["min_idle"]:
+    if not (small or cache_warm(l.get("call_age", l["idle"]), CFG)) or l["idle"] < CFG["min_idle"]:
         log(f"{name}: {ver}->{newest} skip: ask not typed now (idle {int(l['idle'])}s, context {l['ctx']}: a typed "
             f"note starts a turn, so only while the cache is warm or the context small, and after {CFG['min_idle']}s idle)")
         return
@@ -561,6 +629,153 @@ def tell_rearm(target, okf, mmf, text, now):
     if sent:
         archive(okf, "done", now)
     return sent
+
+
+def reload_due(l, cfg):
+    """(True, why) when this session should get /reload-plugins now, else
+    (False, why). Pure, for tests. l: name, status, idle, call_age, ctx, compact_age,
+    want_gen (the installed plugin's hook generation, or None if it cannot be
+    read), runs_root (the plugin folder this session's hooks run from, or None
+    if it loaded none), runs_gen (that folder's hook generation, None if the
+    folder or its hooks are gone), tried_age (seconds since the helper's last
+    reload try, or None).
+    A session is due only when the hooks it runs are MISSING or WRONG: it has
+    none, or the folder they run from is gone, or their generation differs
+    from the installed one. Merely older is not due (see hooks/generation.json)."""
+    if not cfg.get("reload_plugins"):
+        return False, "off"
+    if not l.get("want_gen"):
+        return False, "the installed plugin's hooks cannot be read"
+    only = cfg.get("reload_only_names") or []
+    if only and l["name"] not in only:
+        return False, "not in reload_only_names"
+    if l.get("runs_gen") == l["want_gen"]:
+        return False, "loaded"
+    if l.get("tried_age") is not None and l["tried_age"] < cfg["reload_retry"]:
+        return False, f"a reload was tried {int(l['tried_age'])}s ago (waits {cfg['reload_retry']}s)"
+    if l["status"] not in ("idle", "shell"):
+        return False, f"status={l['status']} (working)"
+    idle, ctx, cage = l["idle"], l["ctx"], l.get("compact_age")
+    if idle < 0:
+        return False, "no transcript found"
+    what = ("it has no Pit Stop hook" if not l.get("runs_root") else
+            "the folder its hooks run from is gone" if l.get("runs_gen") is None else
+            f"it runs hook generation {l['runs_gen']}, the installed one is {l['want_gen']}")
+    if cage is not None and cage <= cfg["compact_window"] and idle >= cfg["min_idle_after_compact"]:
+        return True, f"{what}; compacted {int(cage)}s ago, idle {int(idle)}s"
+    if ctx is not None and ctx < cfg["ctx_max"] and idle >= cfg["min_idle"]:
+        return True, f"{what}; small context {ctx}, idle {int(idle)}s"
+    cold = l.get("call_age")
+    cold = idle if cold is None else cold
+    if cold >= cfg["cache_ttl"] and idle >= min(cfg["min_idle"], cfg["cache_ttl"]):
+        return True, f"{what}; last model call {int(cold)}s ago, cache cold"
+    if cfg.get("reload_warm") and idle >= cfg["min_idle"]:
+        return True, f"{what}; reload_warm is on, idle {int(idle)}s"
+    return False, (f"{what}; context {ctx}, idle {int(idle)}s: big and warm, so it waits for a compaction, "
+                   f"a context under {cfg['ctx_max']} or a cold cache")
+
+
+def plugin_info():
+    """What the reload rule needs to know about the installed plugin, read once per run."""
+    root = pc.plugin_root()
+    return {"root": root, "gen": pc.hook_generation(root), "versions": pc.plugin_versions()}
+
+
+def lane_hooks(s, info, reloaded_at=None):
+    """(folder, generation) of the Pit Stop hooks this session runs.
+    Best evidence first: the stamp the plugin's own hooks leave for the session
+    (~/.claude/pit-stop/seen/<id>: a time and the folder they ran from), if it is
+    newer than the session's last start or reload. Otherwise it is worked out:
+    a session loads its plugins when its process starts or on /reload-plugins,
+    and gets the newest version folder that was in the cache at that moment."""
+    loaded_at = max((s.get("startedAt") or 0) / 1000, reloaded_at or 0)
+    root = None
+    try:
+        with open(os.path.join(pc.SEEN, pc.safe_id(s.get("sessionId")))) as f:
+            parts = f.read().strip().split(" ", 1)
+        if len(parts) == 2 and float(parts[0]) >= loaded_at and parts[1]:
+            root = parts[1]
+    except (OSError, ValueError):
+        pass
+    root = root or pc.root_loaded_at(loaded_at, info["versions"])
+    return root, (pc.hook_generation(root) if root else None)
+
+
+def reloaded_row(rows):
+    """The "Reloaded: ..." row that answers the NEWEST /reload-plugins on screen,
+    or None. A row left from an earlier reload does not count: it sits above
+    the command just typed. Pure, for tests."""
+    rows = [ANSI.sub("", r).strip() for r in rows]
+    cmd = [i for i, r in enumerate(rows) if "/reload-plugins" in r and "Reloaded:" not in r]
+    if not cmd:
+        return None
+    for r in rows[cmd[-1] + 1:]:
+        if "Reloaded:" in r:
+            return r[r.index("Reloaded:"):][:160]
+    return None
+
+
+def confirm_reload(target, wait=12):
+    """Claude Code's answer to the /reload-plugins just typed, or None if it does not show in WAIT seconds."""
+    for _ in range(wait):
+        time.sleep(1)
+        row = reloaded_row(screen(target))
+        if row:
+            return row
+    return None
+
+
+def maybe_reload(s, target, now, counts, info):
+    """Type /reload-plugins into one session if reload_due says so. Called after
+    handle(), and only for a session nothing was typed into in this run."""
+    if not CFG.get("reload_plugins") or not info or target in TYPED or target in PLANNED:
+        return   # (a session the restart path wants is left to it: the restart loads the plugin anyway)
+    name, sid = s["name"], pc.safe_id(s.get("sessionId"))
+    key, st_dir = lane_key(name, sid), os.path.join(BASE, "state")
+    donef, tryf, mmf = (os.path.join(st_dir, key + x) for x in (".reloaded", ".reload_try", ".mismatch"))
+    try:
+        reloaded_at = os.path.getmtime(donef)
+    except OSError:
+        reloaded_at = None
+    ctx, idle = ctx_and_idle(s)
+    if s.get("statusUpdatedAt") and idle >= 0:
+        idle = min(now - s["statusUpdatedAt"] / 1000, idle)
+    runs_root, runs_gen = lane_hooks(s, info, reloaded_at)
+    l = {"name": name, "status": s.get("status"), "idle": idle, "ctx": ctx, "call_age": call_age_of(s, idle),
+         "compact_age": last_compact_age(transcript_path(s), now=now),
+         "want_gen": info["gen"], "runs_root": runs_root, "runs_gen": runs_gen, "tried_age": age_of(tryf, now)}
+    due, why = reload_due(l, CFG)
+    if not due:
+        if why not in ("off", "loaded", "not in reload_only_names") and not LIVE:
+            log(f"{name}: reload wait: {why}")
+        return
+    mm = pc.read_json(mmf, {}) or {}
+    if mm.get("n") and mismatch_wait(mm["n"], CFG) - (now - float(mm.get("at", 0))) > 0:
+        log(f"{name}: skip: reload due, but typed text did not match {mm['n']} time(s) in a row; backing off")
+        return
+    if counts["reload"] >= CFG["max_per_run"]:
+        if not LIVE:   # a live run stays quiet here: many sessions can be due at once, one line each per run adds up
+            log(f"{name}: run limit reached for /reload-plugins; next run")
+        return
+    if not input_empty(target) or screen_busy(target):
+        if not LIVE:   # quiet in a live run: this can be true run after run, and it is not an event
+            log(f"{name}: reload wait: text in its input box, a dialog, or work on screen")
+        return
+    log(f"{name}: /reload-plugins: {why}" + ("" if LIVE else " (DRY)"))
+    sent, how = type_line(target, "/reload-plugins")
+    note_typing(mmf, sent, how, now)
+    if not sent:
+        return
+    counts["reload"] += 1
+    if not LIVE:
+        return
+    stamp(tryf, now)   # tried: whatever happens next, leave it alone for reload_retry
+    row = confirm_reload(target)
+    if row:
+        stamp(donef, time.time())
+        log(f"{name}: RELOADED plugins, no turn started ({row})")
+    else:
+        log(f"{name}: RELOAD NOT CONFIRMED (no 'Reloaded:' line on screen); next try after {CFG['reload_retry']}s")
 
 
 def handle(s, newest, target, now, counts):
@@ -628,12 +843,14 @@ def handle(s, newest, target, now, counts):
     ctx, idle = ctx_and_idle(s)
     if s.get("statusUpdatedAt") and idle >= 0:
         idle = min(now - s["statusUpdatedAt"] / 1000, idle)
-    l = {"status": status, "idle": idle, "ctx": ctx, "behind": behind,
+    l = {"status": status, "idle": idle, "ctx": ctx, "behind": behind, "call_age": call_age_of(s, idle),
          "compact_age": last_compact_age(transcript_path(s), now=now),
          "consented": consented, "consent_age": consent_age, "compact_ask_age": age_of(compf, now),
          "idle_point": pc.points(cwd, s.get("sessionId"))["idle_point"],
          "blocked": blocked, "typing_blocked": typing_blocked}
     action, why = plan(l, CFG)
+    if action in ("restart", "compact", "rearm"):
+        PLANNED.add(target)   # this run has something to type here (now or next run): nothing else is typed into it
     if action == "none":
         return
     if action in ("skip", "wait"):
@@ -720,24 +937,47 @@ def handle(s, newest, target, now, counts):
             os.remove(f)
 
 
-def too_early(argv=None, now=None):
-    """--not-before 2026-11-11T20:45:00Z: do nothing before that time (UTC).
-    For a booked test window: a run started early by a few seconds once typed
-    six seconds before its slot (2026-11-10). Returns the seconds still to
-    wait (> 0), 0 when it is time or the option is absent, and -1 when the
-    time given cannot be read (the run then does nothing: a booked test that
-    cannot tell its start time must not start)."""
+KNOWN_OPTIONS = ("--live", "--only", "--not-before")
+
+
+def unknown_options(argv=None):
+    """Options this helper does not know. A run with one does nothing: a
+    misspelled --not-before must never turn into a run that starts at once."""
     argv = sys.argv if argv is None else argv
-    if "--not-before" not in argv:
+    return [a for a in argv[1:] if a.startswith("--") and a.split("=", 1)[0] not in KNOWN_OPTIONS]
+
+
+def too_early(argv=None, now=None):
+    """--not-before 2026-11-11T20:45:00Z (or --not-before=...): do nothing
+    before that time (UTC). For a booked test window: a run started early by a
+    few seconds once typed six seconds before its slot (2026-11-10). Returns
+    the seconds still to wait (> 0), 0 when it is time or the option is
+    absent, and -1 when the time given cannot be read (the run then does
+    nothing: a booked test that cannot tell its start time must not start)."""
+    argv = sys.argv if argv is None else argv
+    given = [a for a in argv if a == "--not-before" or a.startswith("--not-before=")]
+    if not given:
         return 0
-    i = argv.index("--not-before")
-    t = utc_ts(argv[i + 1]) if i + 1 < len(argv) and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", argv[i + 1]) else None
+    if len(given) > 1:
+        return -1
+    if "=" in given[0]:
+        val = given[0].split("=", 1)[1]
+    else:
+        i = argv.index("--not-before")
+        val = argv[i + 1] if i + 1 < len(argv) else ""
+    t = utc_ts(val) if re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", val) else None
     if t is None:
         return -1
     return max(0, t - (time.time() if now is None else now))
 
 
 def main():
+    bad = unknown_options()
+    if bad:
+        log(f"unknown option(s) {' '.join(bad)}; nothing done (known: {' '.join(KNOWN_OPTIONS)})")
+        return
+    for w in CFG_WARNINGS:
+        log(w)
     wait = too_early()
     if wait:
         log("--not-before: cannot read the time (want 2026-11-11T20:45:00Z); nothing done" if wait < 0
@@ -754,8 +994,23 @@ def main():
     if LIVE:
         for d in ("state", "ok"):
             os.makedirs(os.path.join(BASE, d), exist_ok=True)
-    tty_map, now = panes(), time.time()
-    counts = {"restart": 0, "compact": 0}
+    try:
+        tty_map, now = panes(), time.time()
+    except (OSError, subprocess.SubprocessError) as e:
+        # tmux missing from PATH (a timer or a bare ssh shell without Homebrew's folder), or not answering:
+        # say so in one line instead of a traceback every run. Nothing can be typed without it.
+        log(f"tmux cannot be run ({type(e).__name__}: {str(e)[:80]}); nothing done. Fleet mode needs tmux on PATH: "
+            f"/pit-stop setup --fleet writes a timer with a PATH that has it")
+        return
+    counts = {"restart": 0, "compact": 0, "reload": 0}
+    info = None
+    if CFG.get("reload_plugins"):
+        try:
+            info = plugin_info()
+        except Exception as e:   # an odd installed_plugins.json must not stop the restarts
+            log(f"reload rule: skip this run: cannot read the installed plugin ({type(e).__name__})")
+    TYPED.clear()
+    PLANNED.clear()
     for s in sorted(sessions, key=lambda x: x["name"]):
         try:
             target = tty_map.get(pid_tty(s.get("pid")) or "")
@@ -764,6 +1019,7 @@ def main():
             if not allowed(s["name"], s.get("cwd") or "", CFG):
                 continue
             handle(s, newest, target, now, counts)
+            maybe_reload(s, target, now, counts, info)
         except Exception as e:  # one odd session (an unreadable transcript, a vanished pane) never stops the run
             log(f"{s.get('name') or '?'}: skip: error {type(e).__name__}: {str(e)[:120]}")
 
