@@ -93,7 +93,7 @@ def analyze(project, days, only=None):
     cache_read = cache_new = fresh_in = 0
     max_ctx = 0
     rereads = reread_checks = 0
-    by_comp = []           # one [tokens before, re-read checks, re-reads] per compaction: how each point did
+    by_comp = []           # one [time, tokens before, re-read checks, re-reads] per automatic compaction
     sessions = boundaries = 0
     outs = []
     drifts, cold_tokens, cold_wakes, t_first, t_last = [], 0, 0, None, None
@@ -127,8 +127,8 @@ def analyze(project, days, only=None):
                 prev_reads, cur_reads, after_compact = cur_reads, set(), 0
                 md = e.get("compactMetadata") if isinstance(e.get("compactMetadata"), dict) else {}
                 comp_rec = None
-                if isinstance(md.get("preTokens"), int) and md.get("trigger") == "auto":
-                    comp_rec = [md["preTokens"], 0, 0]
+                if isinstance(md.get("preTokens"), int) and md.get("trigger") == "auto" and ts:
+                    comp_rec = [ts, md["preTokens"], 0, 0]
                     by_comp.append(comp_rec)
                 continue
             t = e.get("type")
@@ -199,8 +199,8 @@ def analyze(project, days, only=None):
                             reread_checks += 1
                             rereads += 1 if fp in prev_reads else 0
                             if comp_rec is not None:
-                                comp_rec[1] += 1
-                                comp_rec[2] += 1 if fp in prev_reads else 0
+                                comp_rec[2] += 1
+                                comp_rec[3] += 1 if fp in prev_reads else 0
                         cur_reads.add(fp)
                     if after_compact is not None:
                         after_compact += 1
@@ -244,20 +244,41 @@ def analyze(project, days, only=None):
     }
 
 
-def at_point(m, window):
-    """How the automatic compactions that ran at WINDOW went: (count, re-read
-    checks, re-read rate or None). Claude Code starts a compaction about
-    WINDOW_MARGIN under the window, and a Pit Stop hold can carry it some way
-    past that, so a compaction counts for WINDOW when its tokens-before are
-    from 5% under that start to 15% over it. Steps are far enough apart that
-    no compaction counts for two points; that tells the points apart within
-    one history, whichever session ran them."""
-    if not window or window <= WINDOW_MARGIN:
-        return 0, 0, None
-    start = window - WINDOW_MARGIN
-    rows = [r for r in m.get("compaction_rereads") or [] if start * 0.95 <= r[0] <= start * 1.15]
-    checks, hits = sum(r[1] for r in rows), sum(r[2] for r in rows)
+def start_of(window):
+    """Where Claude Code starts an automatic compaction for WINDOW (about WINDOW_MARGIN under it)."""
+    return window - WINDOW_MARGIN if window and window > WINDOW_MARGIN else None
+
+
+def at_point(m, lo=None, hi=None, since=None, until=None):
+    """How the automatic compactions with tokens-before in [LO, HI) and a time
+    in [SINCE, UNTIL) went: (count, re-read checks, re-read rate or None).
+    The caller picks bounds that only one window can have produced (see
+    check_last_move): a compaction's size alone does not tell its window,
+    because a Pit Stop hold can carry it well past where the window starts it,
+    and a session keeps the window it started with until its next restart."""
+    rows = [r for r in m.get("compaction_rereads") or []
+            if isinstance(r, list) and len(r) == 4
+            and (lo is None or r[1] >= lo) and (hi is None or r[1] < hi)
+            and (since is None or r[0] >= since) and (until is None or r[0] < until)]
+    checks, hits = sum(r[2] for r in rows), sum(r[3] for r in rows)
     return len(rows), checks, (round(hits / checks, 2) if checks else None)
+
+
+def clean_history(h):
+    """A tune history as autotune.py writes it, with anything else dropped:
+    {"moves": [{"at": number, "from": int or None, "to": int}], "floor": {"value": int, "until": number}}.
+    A hand-edited or damaged file never stops a folder's tuning. Pure."""
+    num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)          # noqa: E731
+    whole = lambda x: isinstance(x, int) and not isinstance(x, bool) and x > 0        # noqa: E731
+    h = h if isinstance(h, dict) else {}
+    moves = [x for x in (h.get("moves") if isinstance(h.get("moves"), list) else [])
+             if isinstance(x, dict) and num(x.get("at")) and whole(x.get("to"))
+             and (x.get("from") is None or whole(x.get("from")))]
+    out = {"moves": moves}
+    fl = h.get("floor")
+    if isinstance(fl, dict) and whole(fl.get("value")) and num(fl.get("until")):
+        out["floor"] = {"value": fl["value"], "until": fl["until"]}
+    return out
 
 
 def current_window(project):
@@ -328,29 +349,41 @@ UNDO_FLOOR = 14 * 86400                           # after an undone lowering, no
 
 def check_last_move(m, history, window, now):
     """The tuner's own feedback loop: did its last move help? HISTORY is what
-    autotune.py keeps for the folder ({"moves": [{"at", "from", "to"}],
-    "floor": {"value", "until"}}). Returns (window, why lines, floor or None).
-      - The last move has too little evidence yet (fewer than 3 automatic
-        compactions at its new point): stay where it is and wait, so one step
-        is measured before the next is taken.
+    autotune.py keeps for the folder (see clean_history). Returns (window, why
+    lines, floor or None).
+    Which compactions count. A session keeps the window it started with, so
+    after a move both windows run for a while. Only compactions that the NEW
+    window alone can have produced count for it: after the move, and for a
+    lowering, smaller than where the old window would start one (for a raise,
+    or a first move, at least where the new one starts). The old window's
+    record is the compactions between the move before and this one.
+      - Too little evidence for the new point yet (fewer than 3 such automatic
+        compactions, or under 10 re-read checks): stay where it is and wait, so
+        one step is measured before the next is taken (at most 14 days).
       - It LOWERED the window and the sessions now re-read much more after a
-        compaction (30% or more, and 15 points above the old point): it cost
-        context, so it is undone, and the window is not lowered again for 14
-        days.
+        compaction (30% or more, and 15 points above the old point when that
+        has a record): it cost context, so it is undone, and the window is not
+        lowered again for 14 days.
       - Otherwise it held up, and the usual recommendation goes ahead.
     A move the user has since overridden (the window is not where the move
     left it) is not judged. Pure, for tests."""
-    moves = (history or {}).get("moves") or []
+    h = clean_history(history)
+    moves = h["moves"]
     last, cur, why, floor = (moves[-1] if moves else None), m.get("current_window"), [], None
-    if last and cur == last.get("to") and last.get("from") and last["from"] != last["to"]:
-        n_new, ch_new, r_new = at_point(m, last["to"])
-        n_old, _, r_old = at_point(m, last["from"])
+    if last and cur == last["to"] and last["from"] != last["to"]:
+        new_start, old_start = start_of(last["to"]), start_of(last["from"])
+        lowered = bool(last["from"]) and last["to"] < last["from"]
+        lo, hi = new_start * 0.95, (old_start * 0.95 if lowered else None)
+        n_new, ch_new, r_new = at_point(m, lo, hi, since=last["at"])
+        prev_at = moves[-2]["at"] if len(moves) > 1 else None
+        n_old, _, r_old = (at_point(m, old_start * 0.95, None, since=prev_at, until=last["at"]) if old_start
+                           else (0, 0, None))
         if n_new < EVIDENCE_COMPACTIONS or ch_new < EVIDENCE_CHECKS:
-            if now - float(last.get("at") or 0) < EVIDENCE_WAIT and window != cur:
+            if now - last["at"] < EVIDENCE_WAIT and window != cur:
                 return cur, [f"waiting for evidence: {n_new} automatic compaction(s) at {pc.fmt_k(cur)} since the move "
                              f"from {pc.fmt_k(last['from'])} (each move is measured before the next; needs "
                              f"{EVIDENCE_COMPACTIONS})"], None
-        elif (last["to"] < last["from"] and r_new is not None and r_new >= 0.30
+        elif (lowered and r_new is not None and r_new >= 0.30
               and (r_old is None or n_old < EVIDENCE_COMPACTIONS or r_new >= r_old + 0.15)):
             floor = {"value": last["from"], "until": now + UNDO_FLOOR}
             return last["from"], [f"undo: at {pc.fmt_k(cur)}, {int(r_new * 100)}% of early reads after a compaction "
@@ -361,8 +394,8 @@ def check_last_move(m, history, window, now):
         else:
             why.append(f"the last move ({pc.fmt_k(last['from'])} -> {pc.fmt_k(cur)}) held up: {n_new} compactions there"
                        + (f", {int(r_new * 100)}% re-reads after them" if r_new is not None else ""))
-    fl = (history or {}).get("floor") or {}
-    if isinstance(fl.get("value"), int) and float(fl.get("until") or 0) > now and window < fl["value"]:
+    fl = h.get("floor") or {}
+    if fl and fl["until"] > now and window < fl["value"]:
         why.append(f"not lower than {pc.fmt_k(fl['value'])} until {time.strftime('%Y-%m-%d', time.gmtime(fl['until']))} "
                    f"(an earlier lowering was undone)")
         window = fl["value"]

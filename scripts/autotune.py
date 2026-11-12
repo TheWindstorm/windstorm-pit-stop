@@ -60,9 +60,9 @@ def history_path(project):
 def record(hist, was, rec, now):
     """The folder's tune history after this run: a window move is added (the
     newest KEEP_MOVES kept), and a floor set by an undo is kept. Pure."""
-    hist = dict(hist or {})
-    moves = list(hist.get("moves") or [])
-    if was and rec["window"] != was:
+    hist = op.clean_history(hist)
+    moves = hist["moves"]
+    if rec["window"] != was:     # a first move (no window set before) is recorded too: it is measured like any other
         moves.append({"at": int(now), "from": was, "to": rec["window"]})
     hist["moves"] = moves[-KEEP_MOVES:]
     if rec.get("floor_set"):
@@ -97,8 +97,7 @@ def main():
         if not m["transcripts"]:
             pc.append_log(LOG, f"{project}: no history in {a.days} days; nothing to tune")
             return 0
-        hist = pc.read_json(history_path(project), {}) or {}
-        hist = hist if isinstance(hist, dict) else {}
+        hist = op.clean_history(pc.read_json(history_path(project), {}))
         rec = op.recommend(m, max_steps=1, history=hist, now=now)
         several = len(pc.transcripts(project, 3)) > 1
         lanes = op.lane_recs(project, a.days, max_steps=1) if several else {}

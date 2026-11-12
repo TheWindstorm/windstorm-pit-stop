@@ -575,8 +575,8 @@ def ask_note(newest, ver, okf, days=0):
     short form. DAYS (from escalate_days): the session has been behind that long
     because of its jobs, so the ask is to stop everything that can be restarted."""
     if days:
-        text = (f"[AUTOMATED pit-stop restart, not your user] Claude Code {newest} is in; you have run {ver} for {days} "
-                f"days because your background jobs never stop. At the next point where nothing is lost, stop ALL of "
+        text = (f"[AUTOMATED pit-stop restart, not your user] Claude Code {newest} is in (you run {ver}); for {days} "
+                f"days your background jobs have kept you from restarting. At the next point where nothing is lost, stop ALL of "
                 f"them, real work too if it can be restarted: (1) one line per job, with how to start it again, into "
                 f"{okf}; (2) stop them. The helper restarts you, then says to start them again. Only if a job cannot "
                 f"stop without losing work, do nothing. No reply needed.")
@@ -594,14 +594,17 @@ def ask_note(newest, ver, okf, days=0):
             f"and stop them; the helper restarts you, then says to start them again. No reply needed.")
 
 
-def escalate_days(ver, now, cfg=None):
-    """Whole days a session on VER has been behind (since a newer Claude Code was
-    installed here), once that is jobs_escalate_days or more; else 0."""
+def escalate_days(first, now, cfg=None):
+    """Whole days since this session was FIRST asked about its background jobs
+    (for the version it still runs), once that is jobs_escalate_days or more;
+    else 0. Counted from the first ask, not from when it fell behind: a session
+    that was simply busy for days has not been blocked by its jobs."""
     esc = (CFG if cfg is None else cfg).get("jobs_escalate_days")
-    if not isinstance(esc, int) or isinstance(esc, bool) or esc <= 0 or not ver:
+    if not isinstance(esc, (int, float)) or isinstance(esc, bool) or esc <= 0:
         return 0
-    since = pc.behind_since(ver)
-    days = max(0, int((now - since) // 86400)) if since else 0
+    if not isinstance(first, (int, float)) or isinstance(first, bool) or first > now:
+        return 0
+    days = int((now - first) // 86400)
     return days if days >= esc else 0
 
 
@@ -614,12 +617,15 @@ def handle_ask(s, key, target, ver, newest, okf, l, now):
     typedf = os.path.join(BASE, "state", key + ".asked")
     a = pc.read_json(askf, None)
     a = a if isinstance(a, dict) else None
+    # the first ask for the version it still runs: how long its jobs have been in the way
+    first = a.get("first", a.get("at")) if a and a.get("ver") == ver else None
+    first = float(first) if isinstance(first, (int, float)) and not isinstance(first, bool) else now
     if a and (a.get("newest") != newest or now - float(a.get("at") or 0) >= CFG["ask_again"]):
         a = None  # a newer version, or the last ask is old: ask afresh
     if a is None:
         if LIVE:
             pc.write_json_atomic(askf, {"newest": newest, "ver": ver, "okf": okf, "at": now, "delivered": None,
-                                        "days": escalate_days(ver, now)})
+                                        "first": first, "days": escalate_days(first, now)})
         log(f"{name}: {ver}->{newest} background jobs: ask left for its Stop hook" + ("" if LIVE else " (DRY)"))
         return
     if a.get("delivered"):
@@ -648,7 +654,7 @@ def handle_ask(s, key, target, ver, newest, okf, l, now):
     if not input_empty(target) or screen_busy(target):
         log(f"{name}: {ver}->{newest} skip: text in the input box or a dialog on screen")
         return
-    sent, how = type_line(target, ask_note(newest, ver, okf, escalate_days(ver, now)))
+    sent, how = type_line(target, ask_note(newest, ver, okf, escalate_days(first, now)))
     note_typing(os.path.join(BASE, "state", key + ".mismatch"), sent, how, now)
     if sent and LIVE:
         stamp(typedf, now)
@@ -1035,7 +1041,7 @@ def plugin_update_targets(scope, installed=None):
     rows = rows if isinstance(rows, dict) else {}
     plugins = []
     for key, v in sorted(rows.items()):
-        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9._-]+@[A-Za-z0-9._-]+", key):
+        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*", key):
             continue
         if not any(isinstance(r, dict) and r.get("scope", "user") == "user" for r in (v if isinstance(v, list) else [])):
             continue
@@ -1076,11 +1082,12 @@ def update_plugins(now, behind_sessions, run=None):
     start, out = time.time(), []
     for cmd in [["claude", "plugin", "marketplace", "update", m] for m in markets] + \
                [["claude", "plugin", "update", p] for p in plugins]:
-        if time.time() - start > UPDATE_BUDGET:
+        left = UPDATE_BUDGET - (time.time() - start)
+        if left < 15:
             log(f"plugin update: time budget used; the rest next time ({' '.join(cmd[2:])} and after)")
             break
         try:
-            r = run(cmd, 180)
+            r = run(cmd, min(180, left))
             ok, first = r.returncode == 0, ((r.stdout or r.stderr or "").strip().splitlines() or [""])[-1][:200]
         except Exception as e:
             ok, first = False, f"{type(e).__name__}: {str(e)[:120]}"

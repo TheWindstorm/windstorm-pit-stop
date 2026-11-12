@@ -37,8 +37,8 @@ def ask_text(a):
     days = a.get("days") or 0
     if days:  # behind for days because the jobs never stop: the helper asks for everything that can be restarted
         return (f"Pit Stop (this plugin's own hook, set up by your user): Claude Code {a.get('newest')} is installed and "
-                f"this session has run {a.get('ver')} for {days} days, because its background jobs never stop and Claude "
-                f"Code will not restart a session while they run. It has waited long enough. At the next point where "
+                f"this session runs {a.get('ver')}. For {days} days its background jobs have kept it from restarting "
+                f"(Claude Code will not restart a session while they run). It has waited long enough. At the next point where "
                 f"nothing is lost (a run has finished, work is saved, a job can pick up where it stopped), stop ALL your "
                 f"background jobs, real work too if it can be started again: (1) write one line per job, with how to "
                 f"start it again, into {okf}; (2) stop them yourself; (3) end your turn. The restart helper then restarts "

@@ -1978,7 +1978,7 @@ def test_fleet_tune_runs_only_when_weekly_tuning_is_on(tmp_path, monkeypatch):
 
 # ---- 0.4.0: daily tuning that checks its own last move
 
-def test_analyze_keeps_each_compaction_and_tells_the_points_apart(tmp_path, monkeypatch):
+def test_analyze_keeps_each_compaction_with_its_time_size_and_re_reads(tmp_path, monkeypatch):
     import pitstop_common as pc
     import optimize as op
     monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
@@ -1996,61 +1996,98 @@ def test_analyze_keeps_each_compaction_and_tells_the_points_apart(tmp_path, monk
             ents.append({"type": "assistant", "timestamp": ts, "message": {"id": f"m{n}", "content": [
                 {"type": "tool_use", "name": "Read", "input": {"file_path": f}}], "usage": usage(300_000)}})
 
-    def boundary(pre, trigger="auto"):
-        ents.append({"type": "system", "subtype": "compact_boundary", "timestamp": "2026-11-10T12:00:00Z",
+    def boundary(pre, hhmm, trigger="auto"):
+        ents.append({"type": "system", "subtype": "compact_boundary", "timestamp": f"2026-11-10T{hhmm}:00Z",
                      "compactMetadata": {"trigger": trigger, "preTokens": pre}})
     old = [f"/w/f{i}.py" for i in range(6)]
     reads(old)
-    boundary(467_000)                          # at a 500K window: then the same files again (all re-reads)
+    boundary(467_000, "12:00")                 # then the same files again (all re-reads)
     reads(old)
-    boundary(366_000)                          # at a 400K window: then new files only
+    boundary(366_000, "13:00")                 # then new files only
     reads([f"/w/g{i}.py" for i in range(6)])
-    boundary(300_000, trigger="manual")        # a /compact by hand is not a point's result
+    boundary(300_000, "14:00", trigger="manual")   # a /compact by hand is not a point's result
     reads(old)
     (d / "s1.jsonl").write_text("\n".join(json.dumps(e) for e in ents) + "\n")
     m = op.analyze(str(proj), None)
-    assert [r[0] for r in m["compaction_rereads"]] == [467_000, 366_000]
-    assert op.at_point(m, 500_000) == (1, 6, 1.0) and op.at_point(m, 400_000) == (1, 6, 0.0)
-    assert op.at_point(m, 600_000) == (0, 0, None) and op.at_point(m, None) == (0, 0, None)
-    # a hold can carry a compaction past where the window starts it: still that window's, never the next one's
-    held = {"compaction_rereads": [[520_000, 10, 1], [420_000, 10, 2]]}
-    assert op.at_point(held, 500_000)[0] == 1 and op.at_point(held, 400_000)[0] == 1
+    t12, t13 = pc.parse_ts("2026-11-10T12:00:00Z"), pc.parse_ts("2026-11-10T13:00:00Z")
+    assert m["compaction_rereads"] == [[t12, 467_000, 6, 6], [t13, 366_000, 6, 0]]
+    assert op.at_point(m) == (2, 12, 0.5)
+    assert op.at_point(m, lo=400_000) == (1, 6, 1.0) and op.at_point(m, hi=400_000) == (1, 6, 0.0)
+    assert op.at_point(m, since=t13) == (1, 6, 0.0) and op.at_point(m, until=t13) == (1, 6, 1.0)
+    assert op.at_point({"compaction_rereads": [[1, 2], "x", None]}) == (0, 0, None)    # odd rows are skipped
 
 
 def _hist_m(rows, current=400_000):
     return _m(current_window=current, compaction_rereads=rows)
 
 
-def test_tuner_waits_for_evidence_undoes_a_lowering_that_cost_context_and_keeps_a_floor():
+def test_tuner_counts_only_what_the_new_window_alone_can_have_produced():
+    """Independent review of 0.4.0: a hold carries a compaction past where its window starts it, and a
+    session keeps its old window until its restart, so size alone misattributes compactions."""
     import optimize as op
     now = 2_000_000_000
-    moved = {"moves": [{"at": now - 86400, "from": 500_000, "to": 400_000}]}
-    at500, at400 = [467_000, 10, 1], [367_000, 10, 1]
-    # 1. too little evidence at the new point: stay, whatever the signals now say
-    w, why, floor = op.check_last_move(_hist_m([at500] * 3 + [at400] * 2), moved, 300_000, now)
-    assert (w, floor) == (400_000, None) and why[0].startswith("waiting for evidence: 2 automatic")
-    # ...unless the evidence never came within 14 days (a quiet folder): then the usual recommendation goes ahead
+    t = now - 86400                                       # the move: 500K -> 400K, a day ago
+    moved = {"moves": [{"at": t, "from": 500_000, "to": 400_000}]}
+    before = [[t - 3600 * i, 470_000 + i, 10, 1] for i in range(1, 4)]          # the old point's record
+    # after the move: held compactions of a session still on 500K (480K) do NOT count for 400K;
+    # a 400K compaction held to 440K does (under where 500K would start one, 467K x 0.95)
+    after_old = [[t + 60 * i, 480_000, 10, 9] for i in range(1, 4)]
+    after_new = [[t + 600 * i, 367_000 + 20_000 * (i % 2), 10, 1] for i in range(1, 4)]
+    w, why, _ = op.check_last_move(_hist_m(before + after_old + after_new[:2]), moved, 300_000, now)
+    assert w == 400_000 and why[0].startswith("waiting for evidence: 2 automatic")
+    w, why, _ = op.check_last_move(_hist_m(before + after_old + after_new), moved, 300_000, now)
+    assert w == 300_000 and why[0].startswith("the last move (500K -> 400K) held up: 3 compactions there, 10% re-reads")
+    # compactions from before the move never count for the new point
+    early = [[t - 60 * i, 367_000, 10, 1] for i in range(1, 6)]
+    assert op.check_last_move(_hist_m(early), moved, 300_000, now)[0] == 400_000
+    # a raise (400K -> 500K): a 400K session held to 470K before the move is not evidence for 500K
+    raised = {"moves": [{"at": t, "from": 400_000, "to": 500_000}]}
+    assert op.check_last_move(_hist_m([[t - 60, 470_000, 10, 1]] * 4, current=500_000), raised, 600_000, now)[0] == 500_000
+    # 200K-context steps of 20K: the old point's record is by time, so no compaction counts for both
+    small = {"moves": [{"at": t, "from": 170_000, "to": 150_000}]}
+    rows = [[t - 60 * i, 140_000, 10, 1] for i in range(1, 4)] + [[t + 60 * i, 120_000, 10, 5] for i in range(1, 4)]
+    w, why, floor = op.check_last_move(_hist_m(rows, current=150_000), small, 130_000, now)
+    assert w == 170_000 and floor["value"] == 170_000 and "(10% at 170K)" in why[0]
+
+
+def test_tuner_waits_undoes_a_lowering_that_cost_context_and_keeps_a_floor():
+    import optimize as op
+    now = 2_000_000_000
+    t = now - 86400
+    moved = {"moves": [{"at": t, "from": 500_000, "to": 400_000}]}
+    at500 = [[t - 60 * i, 467_000, 10, 1] for i in range(1, 4)]
+    new = lambda rr, k=3: [[t + 60 * i, 367_000, 10, rr] for i in range(1, k + 1)]   # noqa: E731
     stale = {"moves": [dict(moved["moves"][0], at=now - 15 * 86400)]}
-    assert op.check_last_move(_hist_m([at400] * 2), stale, 300_000, now)[0] == 300_000
-    # 2. enough evidence, re-reads went from 10% to 40%: undo, and a floor for 14 days
-    bad = [[367_000, 10, 4]] * 3
-    w, why, floor = op.check_last_move(_hist_m([at500] * 3 + bad), moved, 300_000, now)
+    assert op.check_last_move(_hist_m(new(1, 2)), stale, 300_000, now)[0] == 300_000   # no evidence in 14 days: go on
+    w, why, floor = op.check_last_move(_hist_m(at500 + new(4)), moved, 300_000, now)
     assert w == 500_000 and floor == {"value": 500_000, "until": now + 14 * 86400}
     assert why[0].startswith("undo: at 400K, 40% of early reads") and "(10% at 500K)" in why[0]
-    # a smaller rise (10% -> 20%), or a high rate that was high before too, is not an undo
-    assert op.check_last_move(_hist_m([at500] * 3 + [[367_000, 10, 2]] * 3), moved, 300_000, now)[0] == 300_000
-    assert op.check_last_move(_hist_m([[467_000, 10, 3]] * 3 + bad), moved, 300_000, now)[0] == 300_000
-    # 3. it held up: the next step goes ahead, and the reason says so
-    w, why, _ = op.check_last_move(_hist_m([at500] * 3 + [at400] * 3), moved, 300_000, now)
-    assert w == 300_000 and why[0].startswith("the last move (500K -> 400K) held up: 3 compactions")
-    # 4. the user moved the window since: the tuner's move is not judged
-    assert op.check_last_move(_hist_m(bad, current=600_000), moved, 300_000, now) == (300_000, [], None)
-    # 5. a floor from an earlier undo holds the window up until it runs out
+    assert op.check_last_move(_hist_m(at500 + new(2)), moved, 300_000, now)[0] == 300_000      # 10% -> 20%: kept
+    high_before = [[t - 60 * i, 467_000, 10, 3] for i in range(1, 4)]
+    assert op.check_last_move(_hist_m(high_before + new(4)), moved, 300_000, now)[0] == 300_000   # it was high before too
+    assert op.check_last_move(_hist_m(new(4)), moved, 300_000, now)[0] == 500_000              # no old record: 40% alone
+    assert op.check_last_move(_hist_m(new(4), current=600_000), moved, 300_000, now) == (300_000, [], None)  # overridden
     floored = {"moves": [], "floor": {"value": 500_000, "until": now + 86400}}
     w, why, _ = op.check_last_move(_hist_m([]), floored, 400_000, now)
     assert w == 500_000 and why[0].startswith("not lower than 500K until")
     assert op.check_last_move(_hist_m([]), dict(floored, floor={"value": 500_000, "until": now - 1}), 400_000, now)[0] == 400_000
     assert op.check_last_move(_hist_m([]), {}, 400_000, now) == (400_000, [], None)
+    # a first move (no window was set) is measured too: it waits for evidence, and is never "undone" to nothing
+    first = {"moves": [{"at": t, "from": None, "to": 400_000}]}
+    w, why, _ = op.check_last_move(_hist_m(new(9, 1)), first, 300_000, now)
+    assert w == 400_000 and why[0].startswith("waiting")
+    assert op.check_last_move(_hist_m(new(9)), first, 300_000, now)[0] == 300_000
+
+
+def test_a_damaged_tune_history_never_stops_a_folder_being_tuned():
+    import optimize as op
+    now = 2_000_000_000
+    for bad in ({"moves": ["x"]}, {"moves": [{"at": "yesterday", "from": 1, "to": 2}]}, {"floor": 5}, {"moves": {}},
+                {"moves": [{"at": 1, "from": True, "to": 400_000}]}, {"floor": {"value": "500K", "until": now + 9}},
+                [], "x", None, {"moves": [{"at": 1, "to": -5}]}):
+        assert op.check_last_move(_hist_m([]), bad, 300_000, now) == (300_000, [], None), bad
+    assert op.clean_history({"moves": [{"at": 1, "from": None, "to": 400_000}, "x"], "floor": {"value": 5, "until": 2}}) == {
+        "moves": [{"at": 1, "from": None, "to": 400_000}], "floor": {"value": 5, "until": 2}}
 
 
 def test_recommend_and_autotune_record_the_feedback_loop(tmp_path, monkeypatch):
@@ -2059,20 +2096,23 @@ def test_recommend_and_autotune_record_the_feedback_loop(tmp_path, monkeypatch):
     import autotune as at
     monkeypatch.setattr(pc, "CONFIG", str(tmp_path / "config.json"))
     now = 2_000_000_000
-    moved = {"moves": [{"at": now - 86400, "from": 500_000, "to": 400_000}]}
-    bad = _hist_m([[467_000, 10, 1]] * 3 + [[367_000, 10, 4]] * 3)
+    t = now - 86400
+    moved = {"moves": [{"at": t, "from": 500_000, "to": 400_000}]}
+    bad = _hist_m([[t - 60 * i, 467_000, 10, 1] for i in range(1, 4)] + [[t + 60 * i, 367_000, 10, 4] for i in range(1, 4)])
     rec = op.recommend(bad, max_steps=1, history=moved, now=now)
     assert rec["window"] == 500_000 and rec["floor_set"]["value"] == 500_000 and rec["why"][1].startswith("undo")
     assert rec["ceiling"] >= rec["window"] and rec["idle_point"] < rec["window"]
     hist = at.record(moved, 400_000, rec, now)
     assert hist["moves"][-1] == {"at": now, "from": 400_000, "to": 500_000} and hist["floor"]["value"] == 500_000
-    waiting = op.recommend(_hist_m([[367_000, 10, 1]]), max_steps=1, history=moved, now=now)
+    waiting = op.recommend(_hist_m([[t + 60, 367_000, 10, 1]]), max_steps=1, history=moved, now=now)
     assert waiting["window"] == 400_000 and waiting["floor_set"] is None and waiting["why"][1].startswith("waiting")
-    assert at.record(moved, 400_000, waiting, now) == dict(moved)                     # no move: nothing added
+    assert at.record(moved, 400_000, waiting, now) == moved                            # no move: nothing added
+    first = at.record({}, None, dict(waiting, window=500_000), now)                    # a first move is kept too
+    assert first["moves"] == [{"at": now, "from": None, "to": 500_000}]
+    assert at.record({"moves": "x", "floor": 3}, 400_000, waiting, now) == {"moves": []}   # damaged: cleaned
     assert op.recommend(bad, max_steps=1)["floor_set"] is None                        # no history: as in 0.3.x
     many = {"moves": [{"at": i, "from": 1, "to": 2} for i in range(30)]}
     assert len(at.record(many, 400_000, rec, now)["moves"]) == at.KEEP_MOVES
-    # the cadence: daily by default, 1 to 30 days when set
     assert at.every({}) == 86400 and at.every({"tune_every_days": 7}) == 7 * 86400
     assert at.every({"tune_every_days": 0}) == 86400 and at.every({"tune_every_days": 99}) == 30 * 86400
     assert at.every({"tune_every_days": True}) == 86400 and at.every({"tune_every_days": "3"}) == 86400
@@ -2080,46 +2120,47 @@ def test_recommend_and_autotune_record_the_feedback_loop(tmp_path, monkeypatch):
 
 # ---- 0.4.0: jobs that block an update for days
 
-def test_escalation_after_days_behind_in_the_helper_and_the_stop_hook(tmp_path, monkeypatch):
+def test_escalation_counts_from_the_first_ask_in_the_helper_and_the_stop_hook(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     import pitstop_common as pc
     now = time.time()
-    vdir = tmp_path / "versions"
-    vdir.mkdir()
-    monkeypatch.setattr(pc, "VERSIONS", str(vdir))
-    for v, age in (("2.1.319", 30 * 86400), ("2.1.320", 4 * 86400 + 60), ("2.1.322", 3600)):
-        (vdir / v).write_text("x")
-        os.utime(vdir / v, (now - age, now - age))
     cfg = dict(rab.CFG)
     assert cfg["jobs_escalate_days"] == 3
-    assert rab.escalate_days("2.1.319", now, cfg) == 4                  # behind since 2.1.320 came, 4 days ago
-    assert rab.escalate_days("2.1.320", now, cfg) == 0                  # behind an hour: not yet
-    assert rab.escalate_days("2.1.319", now, dict(cfg, jobs_escalate_days=5)) == 0
-    assert rab.escalate_days("2.1.319", now, dict(cfg, jobs_escalate_days=0)) == 0   # 0 = never
-    assert rab.escalate_days("2.1.319", now, dict(cfg, jobs_escalate_days=True)) == 0
-    assert rab.escalate_days(None, now, cfg) == 0
+    assert rab.escalate_days(now - 4 * 86400 - 60, now, cfg) == 4
+    assert rab.escalate_days(now - 2 * 86400, now, cfg) == 0                          # asked 2 days ago: not yet
+    assert rab.escalate_days(now - 4 * 86400, now, dict(cfg, jobs_escalate_days=5)) == 0
+    assert rab.escalate_days(now - 4 * 86400, now, dict(cfg, jobs_escalate_days=2.5)) == 4   # a decimal works
+    for off in (0, True, "3", None):
+        assert rab.escalate_days(now - 9 * 86400, now, dict(cfg, jobs_escalate_days=off)) == 0
+    assert rab.escalate_days(None, now, cfg) == 0 and rab.escalate_days(now + 99, now, cfg) == 0
     okf = "/home/user1-gpu/.claude/pit-stop/restart/ok/" + "x" * 40 + "-abcdef12"
     esc = rab.ask_note("2.1.322", "2.1.319", okf, 4)
-    assert "for 4 days" in esc and "stop ALL of them, real work too" in esc and okf in esc and len(esc) <= rab.NOTE_MAX
-    assert "never stop" not in rab.ask_note("2.1.322", "2.1.319", okf, 0)
-    # the helper's ask file carries the days; the Stop hook turns them into the stronger ask
+    assert "for 4 days your background jobs have kept you" in esc and "stop ALL of them" in esc and okf in esc
+    assert len(esc) <= rab.NOTE_MAX and "kept you" not in rab.ask_note("2.1.322", "2.1.319", okf, 0)
+    # the helper carries the first ask over each re-ask for the same version; a new version it still runs counts on
     sid = "abcd1234-0000"
     os.makedirs(pc.ASKS, exist_ok=True)
+    askf = os.path.join(pc.ASKS, sid + ".json")
     monkeypatch.setattr(rab, "LIVE", True)
-    rab.handle_ask({"sessionId": sid, "name": "Lane One"}, "lane-one-abcd1234", "pane", "2.1.319", "2.1.322", okf,
-                   {"ctx": 50_000, "idle": 600}, now)
-    ask = json.load(open(os.path.join(pc.ASKS, sid + ".json")))
-    assert ask["days"] == 4
+    s = {"sessionId": sid, "name": "Lane One"}
+    rab.handle_ask(s, "lane-one-abcd1234", "pane", "2.1.319", "2.1.322", okf, {"ctx": 50_000, "idle": 600}, now)
+    assert json.load(open(askf))["days"] == 0 and json.load(open(askf))["first"] == now     # a first ask: gentle
+    json.dump(dict(json.load(open(askf)), first=now - 4 * 86400, at=now - 13 * 3600, newest="2.1.321"), open(askf, "w"))
+    rab.handle_ask(s, "lane-one-abcd1234", "pane", "2.1.319", "2.1.322", okf, {"ctx": 50_000, "idle": 600}, now)
+    ask = json.load(open(askf))
+    assert (ask["days"], ask["first"], ask["at"]) == (4, now - 4 * 86400, now)
+    json.dump(dict(ask, ver="2.1.318", at=now - 13 * 3600), open(askf, "w"))         # a different version: count anew
+    rab.handle_ask(s, "lane-one-abcd1234", "pane", "2.1.319", "2.1.322", okf, {"ctx": 50_000, "idle": 600}, now)
+    assert json.load(open(askf))["days"] == 0
     asks = tmp_path / "cfg2" / "pit-stop" / "asks"
     asks.mkdir(parents=True)
     ok = str(tmp_path / "cfg2" / "pit-stop" / "restart" / "ok" / "lane-1a2b3c4d")
-    for days, want in ((4, "has run 2.1.319 for 4 days"), (0, "Sort them now"), (None, "Sort them now")):
+    for days, want in ((4, "For 4 days its background jobs have kept it from restarting"), (0, "Sort them now"),
+                       (None, "Sort them now")):
         (asks / "s.json").write_text(json.dumps({"newest": "2.1.322", "ver": "2.1.319", "okf": ok, "at": 1,
                                                  "delivered": None, "days": days}))
         code, out, err = _run("stop_pit_stop.py", {"session_id": "s"}, tmp_path, {"CLAUDE_CONFIG_DIR": str(tmp_path / "cfg2")})
         assert code == 2 and want in err and ok in err, (days, err)
-    assert "real work too if it can be started again" not in err
-
 
 
 # ---- 0.4.0: plugins kept up to date by the helper, before its restarts
@@ -2132,6 +2173,7 @@ def test_plugin_update_targets_and_when_they_are_due(tmp_path, monkeypatch):
         "teamtool@acme": [{"scope": "project", "projectPath": "/p"}],     # a project's own: not ours to update
         "old@other": [{}],                                                # no scope recorded: a user install
         "bad name; rm -rf ~@acme": [{"scope": "user"}],                   # never passed to a command
+        "x@--flag": [{"scope": "user"}], "-x@acme": [{"scope": "user"}],  # nor anything that reads as an option
         "noat": [{"scope": "user"}]}}
     assert rab.plugin_update_targets("off", inst) == ([], [])
     assert rab.plugin_update_targets("pit-stop", inst) == (["thewindstorm"], ["windstorm-pit-stop@thewindstorm"])
@@ -2165,6 +2207,7 @@ def test_update_plugins_runs_claude_codes_commands_once_and_says_what_happened(t
             self.returncode, self.stdout, self.stderr = rc, out, ""
 
     def run(cmd, t):
+        assert 15 <= t <= 180                                             # never past the run's time budget
         ran.append(cmd)
         return R(1, "Failed to update plugin formatter") if cmd[-1] == "formatter@acme" else R(0, "done")
     now = time.time()
