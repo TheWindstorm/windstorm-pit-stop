@@ -212,7 +212,9 @@ def main():
                   f"{pc.fmt_k(rec['idle_point'])}, window {pc.fmt_k(m['current_window'])} -> {pc.fmt_k(rec['window'])}"
                   f"  ({m['compactions']} compactions, {m['compactions_when']['mid_task']} mid-task"
                   + (f"; {rec['usage_class']} use" if rec.get("usage_class") in ("heavy", "very heavy") else "")
-                  + (f"; about {int(rec['est_read_saving'] * 100)}% fewer cache reads" if rec.get("est_read_saving", 0) >= 0.05 else "")
+                  + (f"; about {int(rec['est_read_saving'] * 100)}% fewer cache reads" if rec.get("est_read_saving", 0) >= 0.05
+                     else f"; about {int(-rec['est_read_saving'] * 100)}% more cache reads" if rec.get("est_read_saving", 0) <= -0.05
+                     else "")
                   + ")")
             if a.apply:
                 try:

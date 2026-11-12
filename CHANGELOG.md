@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 (2026-11-12)
+From a read of one machine's whole fleet 37 hours after install (95 sessions, 163 automatic compactions). Where the hook was loaded, 65 of 81 compactions landed at a break; the misses were mostly forced cuts in turns that run for hours.
+
+- **Checkpoint break** (PreCompact hook). Once a hold has used half of its room (from the first hold up to the ceiling), a `git commit` or `git push` that just finished without failing counts as a break, if no other tool call is still running. Every forced cut in the read was a turn that ran on for 0.5 to 2.5 hours and 300K+ tokens after it, so more room alone would not have saved it; 6 of the 8 had a commit or push inside the hold. Replayed against that machine's real holds: 6 of 8 forced cuts become a cut at a commit, 37 of the 40 holds that reached a real break are unchanged, and 3 are cut a little earlier. The summary is told the turn is still in progress. The command is matched, never logged; the log line reads `checkpoint:git-commit` or `checkpoint:git-push`. `"checkpoint_break": false` in `~/.claude/pit-stop/config.json` switches it off. Same hook generation: a session running the 0.2.x or 0.3.0 hook still works properly and gets the rule at its next start.
+- **Fleet-wide weekly tune** (fleet mode). Weekly tuning used to look at a folder only when a session started there, so a session that runs for weeks was never tuned again; on that machine no large session had a point of its own. With weekly tuning on, the helper now starts at most one tune per run for the folder tuned longest ago, among the running sessions it may touch: in the background, lowest priority, not while the last one still runs, and not while the machine's 1-minute load is above one per processor. `"fleet_tune": false` in `restart.json` switches it off. As before, a tune moves each point one step at most; the ceiling works at once, the two points from the session's next start.
+- **A raised window shows its cost.** `est_read_saving` is now negative when the recommended window is higher than the current one, and the reasons and `/pit-stop setup` say "about N% more cache reads". Before, a raise showed 0.
+
 ## 0.3.0 (2026-11-11)
 Three things the first fleet read asked for. Usage, because the account the fleet runs on hit its limit that day; a list for the person, because stuck sessions were silent; and the quiet-session pit stop, because cold wake-ups were re-paying for whole contexts.
 
