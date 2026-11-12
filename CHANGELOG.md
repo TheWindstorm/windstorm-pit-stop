@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.1 (2026-11-11)
+From a read of the first 31 hours of 0.1.4 on a 95-session machine (its hook log, its restart log, and 7 days of session history), and from the reviewer's notes on 0.2.0.
+
+Fixed:
+- **The hour-idle rule never applied.** The restart helper took a session's idle time from its transcript file's modification time. On quiet sessions that time was seen moving about once an hour with nothing appended, so the clock went back to zero before it reached `cold_idle` (3600): in 31 hours no session ever got there, and one sat quiet for 7 hours on an old version with 374K of context. Idle is now counted from the newest transcript entry that carries a time. The same clock decides whether the cache is still warm before `/compact` is typed, so on 0.2.0 keep `"compact_before_restart": false`.
+- **The Stop hook checks the ask before it prints it.** The ask's text goes to Claude as an instruction. Its fields must now be what the helper writes: two plain version numbers, and a re-arm list path directly inside `~/.claude/pit-stop/restart/ok/`. Anything else is put aside as `<file>.refused`, logged, and not passed on.
+- **Compactions swapped in instantly are counted as what they are.** Claude Code can prepare the summary ahead of time (it asks the PreCompact hook then, at about 82% of the window) and swap it in later in milliseconds, in the middle of a tool call, keeping the newest messages word for word, with no second hook call. The optimizer counted these as mid-task compactions; they are now their own count ("swapped in instantly"). When this is on, Pit Stop's hold picks where the summary ends; the swap itself is not held and does not need to be.
+
+New:
+- `restart_at_break.py --not-before 2026-11-11T20:45:00Z`: a run does nothing before that time (for a booked test window). A time it cannot read also means nothing is done.
+- `~/.claude/pit-stop/restart/events.log`: only what was done, typed, refused or asked. `restart.log` gets a line per session every run and rotates within days on a big machine, taking the restarts with it.
+- `.gitattributes`: LF line endings on checkout, so a Windows clone has the same bytes as everyone else's.
+- README: an hour-idle restart types no note.
+
+Tested: the hook smoke test on a real Windows machine, for 0.2.0 and 0.1.4 (see README, Tested). 56 tests.
+
 ## 0.2.0 (2026-11-10)
 From a review of 0.1.3 against a fleet of 94 sessions and Claude Code 2.1.322. In 4 days that fleet compacted 275 times: 39% by Claude Code's own idle compaction, 33% as a prompt arrived, 29% mid-task. 46 sessions sat on an old version, 34 of them for one reason: a big context and no compaction in the last 30 minutes.
 

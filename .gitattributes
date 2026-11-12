@@ -1,0 +1,6 @@
+# Scripts run under sh, Git Bash and Python on every system: keep line endings LF on checkout,
+# so a Windows clone with core.autocrlf=true gets the same bytes as everyone else.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary

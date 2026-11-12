@@ -22,6 +22,7 @@ is loaded there. Reads and writes only under ~/.claude/pit-stop/.
 """
 import json
 import os
+import re
 import sys
 import time
 
@@ -41,6 +42,28 @@ def ask_text(a):
             f"again into {okf} (an empty file if none); (2) stop those jobs yourself; (3) end your turn. The restart helper "
             f"then restarts this session within a few minutes, same conversation, and tells you to start your jobs again. "
             f"Do not type /restart yourself. No reply to the user is needed for this.")
+
+
+VERSION = re.compile(r"\d{1,4}\.\d{1,4}\.\d{1,6}")
+OK_DIR = os.path.join(pc.STATE_DIR, "restart", "ok")
+
+
+def ask_ok(a):
+    """True when every field the ask prints is what the restart helper writes:
+    two plain version numbers, and a re-arm list path directly inside
+    ~/.claude/pit-stop/restart/ok/ made of letters, digits, '.', '_' and '-'.
+    The text goes to Claude as an instruction, so a file with anything else in
+    it (someone else's writing, a path elsewhere, a line break) is not passed on."""
+    if not all(isinstance(a.get(k), str) and VERSION.fullmatch(a[k]) for k in ("newest", "ver")):
+        return False
+    okf = a.get("okf")
+    if not isinstance(okf, str) or len(okf) > 400:
+        return False
+    name = os.path.basename(okf)
+    if not re.fullmatch(r"[A-Za-z0-9._-]{1,120}", name) or name in (".", ".."):
+        return False
+    norm = lambda x: os.path.normcase(os.path.normpath(x))  # noqa: E731
+    return norm(okf) == norm(os.path.join(OK_DIR, name))
 
 
 def touch(path):
@@ -69,6 +92,13 @@ def main():
         if ver and pc.vkey(ver) >= pc.vkey(a.get("newest")):
             try:  # the session already runs that version: the ask is stale
                 os.remove(askf)
+            except OSError:
+                pass
+            return 0
+        if not ask_ok(a):
+            pc.append_log(LOG, f"session={key[:8]} ASK not passed on: a field is not what the helper writes")
+            try:
+                os.replace(askf, askf + ".refused")
             except OSError:
                 pass
             return 0
