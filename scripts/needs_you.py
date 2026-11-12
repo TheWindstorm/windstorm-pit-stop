@@ -32,6 +32,7 @@ NOT_LISTED = "not on the list the helper may touch"
 WAITING_AFTER = 2 * 3600
 STUCK_AFTER = 24 * 3600
 EVERY = 3600
+OFF_LIST_AFTER = 7 * 86400
 
 
 def _rab():
@@ -180,7 +181,25 @@ def refresh(sessions, newest, now, force=False, panes=None):
             f.write("\n".join(names))
         if set(names) - set(before) and headline(d):
             rab.notify(headline(d))
+    # Sessions kept off the helper's list are never restarted by it, so they can sit on an old Claude Code
+    # for weeks. Once a week, those behind for a week or more are named, so the choice stays a choice.
+    off = sorted(n for n, _, a, why in d["stuck"] if why == NOT_LISTED and a >= OFF_LIST_AFTER)
+    offf = os.path.join(rab.BASE, "state", "needs-you.offlist")
+    if off and (age(offf, now) is None or age(offf, now) >= OFF_LIST_AFTER):
+        os.makedirs(os.path.dirname(offf), exist_ok=True)
+        with open(offf, "w") as f:
+            f.write("\n".join(off))
+        rab.notify(f"pit-stop: {len(off)} session(s) behind the newest Claude Code for a week or more are off the "
+                   f"helper's list, so it never restarts them: {', '.join(off[:8])}{', ...' if len(off) > 8 else ''}; "
+                   f"add them to allow_names in restart.json, or close them")
     return d
+
+
+def age(path, now):
+    try:
+        return now - os.path.getmtime(path)
+    except OSError:
+        return None
 
 
 def main():

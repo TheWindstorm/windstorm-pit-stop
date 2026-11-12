@@ -2231,3 +2231,23 @@ def test_update_plugins_runs_claude_codes_commands_once_and_says_what_happened(t
         raise subprocess.TimeoutExpired(cmd, t)
     os.remove(os.path.join(rab.BASE, "state", "plugin-update"))
     assert all(not ok for _, ok, _ in rab.update_plugins(now + 9000, 0, boom))
+
+
+def test_needs_you_names_sessions_kept_off_the_list_once_a_week_when_behind_a_week(tmp_path, monkeypatch):
+    """Grant, 2026-11-12: a session left for weeks on an old Claude Code (Contabo Server Admin, on 2.1.318) was off
+    the helper's list, so nothing ever restarted it and nobody was told."""
+    pc, rab, ny = _needs(tmp_path, monkeypatch, {"allow_names": ["A"]})
+    now = time.time()
+    os.utime(os.path.join(pc.VERSIONS, "2.1.322"), (now - 9 * 86400, now - 9 * 86400))   # 9 days behind
+    told = []
+    monkeypatch.setattr(rab, "notify", lambda msg: told.append(msg))
+    monkeypatch.setattr(rab, "LIVE", True)
+    off = [_s("Contabo", version="2.1.318", now=now), _s("Ghost", version="2.1.318", now=now)]
+    ny.refresh([_s("A", now=now)] + off, "2.1.322", now, force=True)
+    assert len(told) == 1 and "2 session(s) behind the newest Claude Code for a week or more are off the helper's list" in told[0]
+    assert "Contabo, Ghost" in told[0] and "allow_names" in told[0]
+    ny.refresh([_s("A", now=now)] + off, "2.1.322", now + 3600, force=True)
+    assert len(told) == 1                                                            # once a week, not every hour
+    os.utime(os.path.join(rab.BASE, "state", "needs-you.offlist"), (now - 8 * 86400, now - 8 * 86400))
+    ny.refresh([_s("A", now=now)] + off, "2.1.322", now + 7200, force=True)
+    assert len(told) == 2
