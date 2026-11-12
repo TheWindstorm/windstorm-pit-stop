@@ -164,6 +164,7 @@ WARM_SHARE = 0.8        # the cache counts as warm for this share of cache_ttl
 COMPACT_WAIT = 600      # after typing /compact, give the summary this long before doing anything else
 NOTE_MAX = 560          # the longest note ever typed: Claude Code folds longer typed text into a "[Pasted text]"
                         # block, the box then no longer shows our text, and the note is (safely) never sent
+KEY_NAME_MAX = 40       # letters of a session's name kept in its state key (the key is in a path that is typed)
 REARM_MAX_AGE = 7200    # a re-arm list older than this is history, not a session waiting to be told
 DIALOG = re.compile(r"Do you want|" + PROMPT + r" \d+\.|Enter to confirm|\(y/n\)")
 
@@ -512,8 +513,9 @@ def allowed(name, cwd, cfg):
 def lane_key(name, session_id):
     """A file-safe key for one session's state: its name plus the start of its
     session id, so two names that reduce to the same letters (or to none) never
-    share state. The session id stays the same across /restart."""
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "session"
+    share state. The session id stays the same across /restart. The name part
+    is cut at KEY_NAME_MAX letters: the key is part of a path typed in a note."""
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:KEY_NAME_MAX].strip("-") or "session"
     return f"{slug}-{pc.safe_id(session_id)[:8]}"
 
 
@@ -563,11 +565,17 @@ def consent_state(okf, asked_at, now):
 
 
 def ask_note(newest, ver, okf):
-    return (f"[AUTOMATED pit-stop restart, not your user] Claude Code {newest} is installed; you run {ver}, and /restart "
+    """The background-jobs ask. A long path (a long home folder) gets the short form."""
+    text = (f"[AUTOMATED pit-stop restart, not your user] Claude Code {newest} is installed; you run {ver}, and /restart "
             f"is refused while background jobs run. If any is real work (a build, a test, a deploy), do nothing: "
             f"you will be asked again. If all are watchers or loops you can start again: (1) write one line per job "
             f"into {okf} (an empty file if none); (2) stop them. The helper restarts you once you are idle, then "
             f"tells you to start them again. No reply needed.")
+    if len(text) <= NOTE_MAX:
+        return text
+    return (f"[AUTOMATED pit-stop restart, not your user] Claude Code {newest} is in (you run {ver}); /restart waits "
+            f"for background jobs. Real work running: do nothing. Else list them, one a line, in {okf} (empty if none), "
+            f"and stop them; the helper restarts you, then says to start them again. No reply needed.")
 
 
 def handle_ask(s, key, target, ver, newest, okf, l, now):
@@ -656,7 +664,11 @@ def rearm_note(head, jobs, tail, where, inline=True):
     text = f"{head} (your list: {'; '.join(jobs)}){tail}"
     if inline and len(text) <= NOTE_MAX:
         return text
-    return f"{head}: your list of {len(jobs)} is in the file {where} (read it){tail}"
+    text = f"{head}: your list of {len(jobs)} is in the file {where} (read it){tail}"
+    if len(text) <= NOTE_MAX:
+        return text
+    return (f"[AUTOMATED pit-stop restart, not your user] Start again the background jobs you stopped: the list is "
+            f"in {where}. No reply needed.")   # a very long path: the short form (over the limit, type_line refuses it)
 
 
 def tell_rearm(target, okf, mmf, head, tail, now):
