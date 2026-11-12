@@ -288,8 +288,9 @@ def usage_cap(m, budget, big, rr):
 def read_saving(old, new):
     """Rough share of cache reads saved by moving the window from OLD to NEW:
     between compactions the context runs from what a summary keeps up to the
-    window, so the average context is about halfway."""
-    if not old or not new or new >= old:
+    window, so the average context is about halfway. Negative when the window
+    goes UP: a raise costs reads, and the answer says how much."""
+    if not old or not new or new == old or old <= WINDOW_MARGIN or new <= WINDOW_MARGIN:
         return 0.0
     return round(1 - (SUMMARY_KEEPS + new - WINDOW_MARGIN) / (SUMMARY_KEEPS + old - WINDOW_MARGIN), 2)
 
@@ -359,6 +360,9 @@ def recommend(m, context_limit=None, max_steps=None, budget=None):
     if saving >= 0.05:
         why.append(f"a window of {pc.fmt_k(window)} instead of {pc.fmt_k(m['current_window'])} should cut this folder's "
                    f"cache reads by roughly {int(saving * 100)}% (an estimate), for more frequent compactions")
+    elif saving <= -0.05:
+        why.append(f"a window of {pc.fmt_k(window)} instead of {pc.fmt_k(m['current_window'])} should raise this folder's "
+                   f"cache reads by roughly {int(-saving * 100)}% (an estimate), for fewer compactions")
 
     # The idle point: where a session that has gone quiet compacts by itself.
     istep = 50_000

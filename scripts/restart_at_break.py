@@ -95,6 +95,9 @@ Config (optional) ~/.claude/pit-stop/restart.json:
    "reload_plugins": false, "reload_only_names": [], "reload_warm": false,
    "reload_retry": 21600,
    "needs_you": true,              # keep ~/.claude/pit-stop/needs-you.md (hourly) and tell notify_command when it changes
+   "fleet_tune": true,             # when weekly tuning is on (config.json "auto_tune"): tune the folder of every
+                                   # running session the helper may touch once a week, one folder per run, in the
+                                   # background, and not while the machine is busy (see start_tune)
    "mismatch_backoff": 1800, "mismatch_backoff_max": 43200,
    "notify_command": null}         # e.g. ["notify-send", "pit-stop"]; gets the message as last arg
 Sessions come from Claude Code's local registry (~/.claude/sessions/*.json,
@@ -127,7 +130,7 @@ CFG = {"tmux_socket": None, "allow_names": [], "deny_names": [], "deny_name_glob
        "compact_retry": 21600, "idle_compact_after": None,
        "ask_again": 43200, "ask_fallback_after": 1800, "consent_timeout": 1800, "restart_cooldown": 21600,
        "reload_plugins": False, "reload_only_names": [], "reload_warm": False, "reload_retry": 21600,
-       "needs_you": True,
+       "needs_you": True, "fleet_tune": True,
        "mismatch_backoff": 1800, "mismatch_backoff_max": 43200}
 _DEFAULTS = dict(CFG)
 _user = pc.read_json(os.path.join(pc.STATE_DIR, "restart.json"), {})
@@ -958,6 +961,61 @@ def handle(s, newest, target, now, counts):
             os.remove(f)
 
 
+def tune_due(sessions, now, cfg, tuned_dir=None, week=7 * 86400):
+    """The folder whose weekly tune is due, or None: among the running sessions
+    the helper may touch, the folder tuned longest ago (never tuned first).
+    Pure but for the stats of the stamp files autotune.py leaves."""
+    tuned_dir = tuned_dir or os.path.join(pc.STATE_DIR, "tuned")
+    best = None
+    for s in sessions:
+        cwd = s.get("cwd")
+        if not cwd or not s.get("name") or not allowed(s["name"], cwd, cfg) or not os.path.isdir(cwd):
+            continue
+        folder = os.path.abspath(cwd)
+        try:
+            at = os.path.getmtime(os.path.join(tuned_dir, pc.project_key(folder)))
+        except OSError:
+            at = 0
+        if now - at >= week and (best is None or (at, folder) < best):
+            best = (at, folder)
+    return best[1] if best else None
+
+
+def machine_busy():
+    """True when the 1-minute load is above one per processor (a tune can wait). Unknown = not busy."""
+    try:
+        return os.getloadavg()[0] > (os.cpu_count() or 1)
+    except (AttributeError, OSError):
+        return False
+
+
+def start_tune(sessions, now):
+    """Fleet-wide weekly tune. A session's folder used to be tuned only when a
+    session started there, so a session that runs for weeks was never looked at
+    again. Each run of the helper starts at most ONE tune (scripts/autotune.py,
+    in the background, lowest priority): never while the last one still runs,
+    never while the machine is busy. Autotune moves each point one step at most
+    and writes its own log line; the ceiling works at once (the hook reads the
+    profile every time), the two points from the session's next start."""
+    runf = os.path.join(BASE, "state", "tune.pid")
+    try:   # a tune still running (a number older than an hour is some other process by now)
+        with open(runf) as f:
+            if now - os.path.getmtime(runf) < 3600 and pc.pid_alive(int(f.read().strip())):
+                return None
+    except (OSError, ValueError):
+        pass
+    folder = tune_due(sessions, now, CFG)
+    if not folder or machine_busy():
+        return None
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "autotune.py")
+    p = subprocess.Popen([sys.executable, "-I", script, "--project", folder], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+    with open(runf, "w") as f:
+        f.write(str(p.pid))
+    log(f"weekly tune started for {folder.replace(pc.HOME, '~')} (in the background; result in autotune.log)")
+    return folder
+
+
 KNOWN_OPTIONS = ("--live", "--only", "--not-before")
 
 
@@ -1049,6 +1107,11 @@ def main():
             needs_you.refresh(sessions, newest, time.time(), panes=tty_map)
         except Exception as e:
             log(f"needs-you list: skip: error {type(e).__name__}: {str(e)[:120]}")
+    if LIVE and ONLY is None and CFG.get("fleet_tune", True) and pc.config().get("auto_tune") is True:
+        try:
+            start_tune(sessions, time.time())
+        except Exception as e:
+            log(f"weekly tune: skip: error {type(e).__name__}: {str(e)[:120]}")
 
 
 if __name__ == "__main__":

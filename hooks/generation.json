@@ -1,5 +1,5 @@
 {
   "generation": 2,
-  "hook_files_sha256": "173e19a051f12876f59471c49a0ee89d66960ff48ea890c2e41d6fc3da6d700f",
+  "hook_files_sha256": "82c211acc3d4282c1ef705e0d92563ba202d50e9f1be9b8034835dce2d1946fe",
   "note": "Raise 'generation' only when a session that is already running must reload to work properly with this release (a hook added or removed, or a change an older running hook cannot live with). After any change to hooks/hooks.json or hooks/*.py, re-record hook_files_sha256 here (tests/test_pitstop.py prints the new value) and decide: same generation, or the next one. 0.1.x had no such file and counts as generation 1."
 }

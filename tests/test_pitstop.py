@@ -1461,8 +1461,14 @@ def test_budget_limits_hold_at_the_edges(tmp_path, monkeypatch):
     reading = {"edit": 0.0, "shell": 0.1, "read": 0.4, "msg": 0.5, "web": 0.0, "other": 0.0}
     assert op.recommend(_m(work_mix=reading, **none), budget="economy")["window"] == 400_000
     assert op.recommend(_m(work_mix=reading, **none), budget="balanced")["window"] > 400_000
-    for old, new in ((600_000, 400_000), (400_000, 300_000), (300_000, 300_000), (None, 400_000), (400_000, 600_000)):
+    for old, new in ((600_000, 400_000), (400_000, 300_000), (300_000, 300_000), (None, 400_000)):
         assert 0 <= op.read_saving(old, new) < 1
+    # a raise is a cost, and says so (0.3.1): 400K -> 600K reads about half as much again
+    assert op.read_saving(400_000, 600_000) == -0.52 and op.read_saving(600_000, 400_000) == 0.34
+    assert op.read_saving(30_000, 600_000) == 0.0                       # a window under the margin: no estimate
+    light = dict(busiest_session_read_per_day=1_000_000, current_window=400_000)
+    r = op.recommend(_m(work_mix=reading, **light), budget="balanced")
+    assert r["window"] > 400_000 and r["est_read_saving"] < 0 and any("raise this folder's cache reads" in w for w in r["why"])
 
 
 def test_analyze_survives_odd_transcript_rows(tmp_path, monkeypatch):
@@ -1659,3 +1665,166 @@ def test_no_tmux_on_path_is_one_plain_line_not_a_traceback(tmp_path, monkeypatch
     monkeypatch.setattr(rab.subprocess, "run", no_tmux)
     monkeypatch.setattr(rab, "handle", lambda *a: (_ for _ in ()).throw(AssertionError("looked at a session")))
     rab.main()                                                           # returns; no exception
+
+
+# ---- 0.3.1: the checkpoint break, and the fleet-wide weekly tune
+
+def _step(cmd, n, err=False, name="Bash", extra_use=None, mid="m1"):
+    """One finished tool step: the model's call (CMD) and its result, at N tokens of context."""
+    uses = [{"type": "tool_use", "id": "t1", "name": name, "input": {"command": cmd}}] + ([extra_use] if extra_use else [])
+    return [{"type": "assistant", "message": {"id": mid, "content": [{"type": "text", "text": "x"}], "usage": usage(n)}},
+            {"type": "assistant", "message": {"id": mid, "content": uses, "usage": usage(n)}},
+            {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1", "is_error": err}]}}]
+
+
+def _held(tmp_path, sid, entries, first=200_000):
+    """Exit code and stdout for ENTRIES in a session whose hold began at FIRST (ceiling = 110% of it)."""
+    p0 = transcript(tmp_path, sid + "-0", [a("tool_use", first)])
+    assert run_hook({"trigger": "auto", "transcript_path": p0, "session_id": sid}, tmp_path)[0] == 2
+    return run_hook({"trigger": "auto", "transcript_path": transcript(tmp_path, sid, entries), "session_id": sid}, tmp_path)
+
+
+def test_hook_checkpoint_break_after_half_the_room(tmp_path):
+    log = tmp_path / "cfg" / "pit-stop" / "precompact.log"
+    # the hold began at 200K, so the ceiling is 220K and half the room is used at 210K
+    code, out = _held(tmp_path, "cp-early", _step("git commit -m x", 205_000))
+    assert code == 2 and out == ""                                    # a commit, but too early: wait for a real break
+    code, out = _held(tmp_path, "cp-go", _step("git commit -m 'done'", 212_000))
+    assert code == 0 and "middle of a task" in out                     # still mid-turn: the summary is told so
+    assert "checkpoint:git-commit" in log.read_text().splitlines()[-1]
+    assert not (tmp_path / "cfg" / "pit-stop" / "holds" / "cp-go").exists()   # the hold is over
+    assert "git commit" not in log.read_text() and "done" not in log.read_text()   # the command is never logged
+    for i, (cmd, want) in enumerate((
+            ("cd /r && git add -A && git commit -q -m x && git push origin main", "git-push"),
+            ("git -C /srv/repo -c user.name=x commit --amend --no-edit", "git-commit"),
+            ("(git push)", "git-push"))):
+        code, _ = _held(tmp_path, f"cp-v{i}", _step(cmd, 212_000))
+        assert code == 0 and f"checkpoint:{want}" in log.read_text().splitlines()[-1], cmd
+    for i, cmd in enumerate(("ls -la", "git log --grep commit", "git stash push", "legit commit now", "git status # commit later")):
+        assert _held(tmp_path, f"cp-n{i}", _step(cmd, 212_000))[0] == 2, cmd
+
+
+def test_hook_checkpoint_needs_a_finished_step_that_did_not_fail(tmp_path):
+    assert _held(tmp_path, "cp-fail", _step("git commit -m x", 212_000, err=True))[0] == 2      # nothing to commit, or a hook said no
+    other = {"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": "pytest -q"}}
+    assert _held(tmp_path, "cp-run", _step("git commit -m x", 212_000, extra_use=other))[0] == 2  # a second call still runs
+    assert _held(tmp_path, "cp-edit", _step("git commit -m x", 212_000, name="Edit"))[0] == 2    # not a shell command
+    # the commit was an earlier step; the newest step is something else
+    later = _step("git commit -m x", 211_000, mid="m1") + _step("npm test", 212_000, mid="m2")
+    assert _held(tmp_path, "cp-old", later)[0] == 2
+    # a call that is still running (no result yet)
+    assert _held(tmp_path, "cp-wait", _step("git commit -m x", 212_000)[:2])[0] == 2
+    # only the newest model answer's calls count: an older answer's commit next to it is not this step
+    stray = [{"type": "assistant", "message": {"id": "m0", "content": [
+                 {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "git commit -m x"}}], "usage": usage(212_000)}},
+             {"type": "assistant", "message": {"id": "m1", "content": [{"type": "text", "text": "x"}], "usage": usage(212_000)}},
+             {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1"}]}}]
+    assert _held(tmp_path, "cp-stray", stray)[0] == 2
+    # odd rows never break the hook: it holds as before
+    odd = [{"type": "assistant", "message": {"id": "m1", "content": [{"type": "tool_use", "id": "t1", "name": "Bash", "input": "x"}],
+                                              "usage": usage(212_000)}},
+           {"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "t1"}]}}]
+    assert _held(tmp_path, "cp-odd", odd)[0] == 2
+
+
+def test_hook_checkpoint_can_be_switched_off_and_respects_a_wide_profile_ceiling(tmp_path):
+    state = tmp_path / "cfg" / "pit-stop"
+    state.mkdir(parents=True)
+    (state / "config.json").write_text(json.dumps({"checkpoint_break": False}))
+    assert _held(tmp_path, "cp-off", _step("git commit -m x", 212_000))[0] == 2
+    (state / "config.json").write_text(json.dumps({"checkpoint_break": True}))
+    assert _held(tmp_path, "cp-on", _step("git commit -m x", 212_000))[0] == 0
+    # a tuned folder has more room (ceiling 300K from a 200K hold): the checkpoint waits for half of THAT room
+    key = "".join(c if c.isalnum() else "-" for c in str(tmp_path))
+    (state / "folders").mkdir()
+    (state / "folders" / (key + ".json")).write_text(json.dumps({"ceiling": 300_000}))
+    def held(sid, n):
+        p0 = transcript(tmp_path, sid + "-0", [a("tool_use", 200_000)])
+        pay = {"trigger": "auto", "session_id": sid, "cwd": str(tmp_path)}
+        assert run_hook(dict(pay, transcript_path=p0), tmp_path)[0] == 2
+        return run_hook(dict(pay, transcript_path=transcript(tmp_path, sid, _step("git commit -m x", n))), tmp_path)[0]
+    assert held("cp-wide-early", 230_000) == 2 and held("cp-wide-go", 251_000) == 0
+
+
+def test_fleet_tune_picks_the_folder_tuned_longest_ago(tmp_path, monkeypatch):
+    import time
+    rab = _rab(tmp_path, monkeypatch)
+    import pitstop_common as pc
+    now = time.time()
+    tuned = tmp_path / "tuned"
+    tuned.mkdir()
+    dirs = {}
+    for n in ("a", "b", "c", "d"):
+        (tmp_path / n).mkdir()
+        dirs[n] = str(tmp_path / n)
+    def stamp(n, age):
+        f = tuned / pc.project_key(dirs[n])
+        f.write_text("x")
+        os.utime(f, (now - age, now - age))
+    sess = [{"name": "A", "cwd": dirs["a"]}, {"name": "B", "cwd": dirs["b"]}, {"name": "C", "cwd": dirs["c"]},
+            {"name": "A2", "cwd": dirs["a"]}, {"name": "Gone", "cwd": str(tmp_path / "nowhere")}, {"name": "", "cwd": dirs["d"]}]
+    cfg = dict(rab.CFG)
+    stamp("a", 3 * 86400), stamp("b", 9 * 86400), stamp("c", 8 * 86400)
+    assert rab.tune_due(sess, now, cfg, str(tuned)) == dirs["b"]                 # the oldest one over a week
+    stamp("b", 60)
+    assert rab.tune_due(sess, now, cfg, str(tuned)) == dirs["c"]
+    stamp("c", 60)
+    assert rab.tune_due(sess, now, cfg, str(tuned)) is None                      # a: 3 days ago, not due; no name, no folder: never
+    os.remove(tuned / pc.project_key(dirs["a"]))
+    assert rab.tune_due(sess, now, cfg, str(tuned)) == dirs["a"]                 # never tuned: first
+    assert rab.tune_due(sess, now, dict(cfg, allow_names=["B"]), str(tuned)) is None   # only sessions the helper may touch
+    assert rab.tune_due(sess, now, dict(cfg, deny_paths=[dirs["a"]]), str(tuned)) is None
+
+
+def test_fleet_tune_starts_one_at_a_time_and_not_on_a_busy_machine(tmp_path, monkeypatch):
+    import time
+    rab, _ = _live(tmp_path, monkeypatch)
+    started = []
+
+    class P:
+        pid = os.getpid()
+
+    monkeypatch.setattr(rab.subprocess, "Popen", lambda cmd, **kw: (started.append((cmd, kw)), P())[1])
+    monkeypatch.setattr(rab, "tune_due", lambda sessions, now, cfg, tuned_dir=None, week=0: "/work/one")
+    monkeypatch.setattr(rab, "machine_busy", lambda: True)
+    now = time.time()
+    assert rab.start_tune([], now) is None and not started                         # busy: wait for a later run
+    monkeypatch.setattr(rab, "machine_busy", lambda: False)
+    assert rab.start_tune([], now) == "/work/one" and len(started) == 1
+    cmd, kw = started[0]
+    assert cmd[-3:] == [os.path.join(ROOT, "scripts", "autotune.py"), "--project", "/work/one"] and "--force" not in cmd
+    assert kw.get("start_new_session") is True                                     # it outlives the helper's run
+    assert rab.start_tune([], now + 120) is None and len(started) == 1             # the last one still runs
+    runf = os.path.join(rab.BASE, "state", "tune.pid")
+    os.utime(runf, (now - 4000, now - 4000))
+    assert rab.start_tune([], now) == "/work/one" and len(started) == 2            # a number older than an hour is not trusted
+    monkeypatch.setattr(rab, "tune_due", lambda sessions, now, cfg, tuned_dir=None, week=0: None)
+    os.remove(runf)
+    assert rab.start_tune([], now) is None and len(started) == 2                   # nothing due
+
+
+def test_fleet_tune_runs_only_when_weekly_tuning_is_on(tmp_path, monkeypatch):
+    rab, _ = _live(tmp_path, monkeypatch)
+    import pitstop_common as pc
+    calls = []
+    monkeypatch.setattr(rab, "start_tune", lambda sessions, now: calls.append(1))
+    monkeypatch.setattr(rab, "panes", lambda: {})
+    monkeypatch.setattr(rab.pc, "live_sessions", lambda: ([_sess()], "registry"))
+    monkeypatch.setattr(rab.pc, "newest_installed_version", lambda: "2.1.322")
+    monkeypatch.setattr(rab, "unknown_options", lambda argv=None: [])
+    monkeypatch.setattr(rab, "too_early", lambda: 0)
+    monkeypatch.setitem(rab.CFG, "needs_you", False)
+    rab.main()
+    assert calls == []                                                             # auto_tune not set: never
+    os.makedirs(pc.STATE_DIR, exist_ok=True)
+    with open(pc.CONFIG, "w") as f:
+        json.dump({"auto_tune": True}, f)
+    rab.main()
+    assert calls == [1]
+    monkeypatch.setitem(rab.CFG, "fleet_tune", False)
+    rab.main()
+    assert calls == [1]                                                            # the helper's own switch
+    monkeypatch.setitem(rab.CFG, "fleet_tune", True)
+    monkeypatch.setattr(rab, "LIVE", False)
+    rab.main()
+    assert calls == [1]                                                            # a dry run starts nothing

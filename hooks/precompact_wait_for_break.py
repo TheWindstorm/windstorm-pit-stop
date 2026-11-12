@@ -15,6 +15,13 @@ Rules:
     transcript entry is a new prompt, or Claude's turn ended with plain text.
   - MID-ACTION (newest entry is a tool call or a tool result, or thinking)
                                              -> hold
+  - CHECKPOINT (0.3.1)                       -> go ahead, once the hold has used
+    half of its room (the room = from the first hold up to the ceiling). A
+    checkpoint = the step that just finished was a `git commit` or `git push`
+    that did not fail, and nothing else is running. Some turns run for hours
+    and never reach a break before the ceiling; a commit is the cleanest place
+    inside such a turn. Before half the room is used the hook keeps waiting
+    for a real break. "checkpoint_break": false in config.json switches it off.
   - CEILING reached                          -> go ahead anyway. The ceiling is,
     in order: env PIT_STOP_CEILING; "ceiling" in the folder's profile
     (~/.claude/pit-stop/folders/, written by /pit-stop optimize; the 0.1.x
@@ -25,7 +32,7 @@ Rules:
     a project file shipped in a cloned repo can never hold compaction until the
     context overflows.
   - anything unexpected (no transcript, bad JSON, any error) -> go ahead
-When an automatic compaction goes ahead at a break or at the ceiling, the hook
+When an automatic compaction goes ahead at a break, a checkpoint or the ceiling, the hook
 prints a short list of what the summary must keep (the task in progress, open
 to-dos, background jobs and how to start them again, files being changed,
 decisions). ~/.claude/pit-stop/config.json can switch that off
@@ -63,15 +70,23 @@ KEEP = ("Pit Stop notes for this summary. Keep, in this order: "
 KEEP_MID = (" This compaction comes in the middle of a task: say which step was in flight and what the last "
             "tool call was doing, so the work can be picked up exactly there.")
 EXTRA_MAX = 4000
+CHECKPOINT_AFTER = 0.5  # share of the hold's room that must be used before a checkpoint counts
+# git, any options of git itself (-C dir, -c k=v, --git-dir=...), then the subcommand commit or push
+GIT_STEP = re.compile(r"(?:^|[\s;&|(])git(?:\s+(?:-[Cc]\s+\S+|--?[\w-]+(?:=\S+)?))*\s+(commit|push)\b")
+
+
+def user_config():
+    try:
+        with open(os.path.join(STATE, "config.json")) as f:
+            c = json.load(f)
+        return c if isinstance(c, dict) else {}
+    except Exception:
+        return {}
 
 
 def instructions(mid):
     """Text for stdout when an automatic compaction goes ahead; '' when switched off."""
-    try:
-        with open(os.path.join(STATE, "config.json")) as f:
-            v = json.load(f).get("compact_instructions", True)
-    except Exception:
-        v = True
+    v = user_config().get("compact_instructions", True)
     if v is False:
         return ""
     out = KEEP + (KEEP_MID if mid else "")
@@ -132,6 +147,48 @@ def context_tokens(msgs):
             if t > 0:
                 return t
     return None
+
+
+def blocks(entry, kind):
+    m = entry.get("message")
+    c = m.get("content") if isinstance(m, dict) else None
+    return [x for x in c if isinstance(x, dict) and x.get("type") == kind] if isinstance(c, list) else []
+
+
+def checkpoint(msgs):
+    """'git-commit' or 'git-push' when the step that just finished was one that
+    did not fail and no tool call is still running; else None. Looks only at
+    the newest step: the tool results at the very end of the transcript and
+    the tool calls of the one model answer they belong to. The command text is
+    matched, never logged."""
+    results, i = {}, len(msgs) - 1
+    while i >= 0 and msgs[i].get("type") == "user":
+        got = blocks(msgs[i], "tool_result")
+        if not got:
+            return None                      # a prompt, not a result: that is a break, not a checkpoint
+        for r in got:
+            results[r.get("tool_use_id")] = bool(r.get("is_error"))
+        i -= 1
+    if not results or i < 0:
+        return None
+    mid = (msgs[i].get("message") or {}).get("id") if isinstance(msgs[i].get("message"), dict) else None
+    uses = []
+    while i >= 0 and msgs[i].get("type") == "assistant":
+        m = msgs[i].get("message")
+        if (m.get("id") if isinstance(m, dict) else None) != mid:
+            break
+        uses += blocks(msgs[i], "tool_use")
+        i -= 1
+    if not uses or any(u.get("id") not in results for u in uses) or any(results.values()):
+        return None                          # something still runs, or something failed
+    found = None
+    for u in uses:
+        inp = u.get("input")
+        cmd = inp.get("command") if isinstance(inp, dict) else None
+        if u.get("name") == "Bash" and isinstance(cmd, str):
+            for hit in GIT_STEP.finditer(cmd[:4000]):
+                found = "git-push" if hit.group(1) == "push" or found == "git-push" else "git-commit"
+    return found
 
 
 def hold_state_path(session):
@@ -228,6 +285,12 @@ def decide(payload):
     ceiling, src = ceiling_for(payload, tokens)
     if tokens >= ceiling:
         return 0, trigger, tokens, f"ceiling>={ceiling}({src})"
+    first = first_hold(payload, tokens)
+    if (first is not None and ceiling > first and tokens >= first + (ceiling - first) * CHECKPOINT_AFTER
+            and user_config().get("checkpoint_break", True) is not False):
+        cp = checkpoint(msgs)
+        if cp:
+            return 0, trigger, tokens, f"checkpoint:{cp}"
     return 2, trigger, tokens, f"{why} ceiling={ceiling}({src})"
 
 
@@ -249,8 +312,8 @@ def main():
     log(payload.get("session_id"), trigger, tokens, "HOLD" if code == 2 else "ALLOW", why)
     if code == 2:
         sys.stderr.write(f"pit-stop: holding auto-compact until a break (context ~{tokens} tokens)\n")
-    elif trigger == "auto" and why.startswith(("break:", "ceiling")):
-        sys.stdout.write(instructions(mid=why.startswith("ceiling")))
+    elif trigger == "auto" and why.startswith(("break:", "ceiling", "checkpoint:")):
+        sys.stdout.write(instructions(mid=not why.startswith("break:")))
     return code
 
 

@@ -210,6 +210,7 @@ def config():
     """User-level switches in ~/.claude/pit-stop/config.json (all optional):
       auto_tune            true = re-tune each folder weekly in the background (set by /pit-stop setup)
       compact_instructions true (default), false, or a string of extra notes for the summary
+      checkpoint_break     false = during a hold, a finished git commit or push does not count as a break
       nudge                false = never show the "an update is waiting" line
       budget               "economy", "balanced" (default) or "roomy": how hard tuning holds down usage
     """
