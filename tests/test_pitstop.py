@@ -863,6 +863,86 @@ def test_live_background_jobs_ask_then_restart_then_rearm_note(tmp_path, monkeyp
     assert not os.path.exists(ask["okf"]) and not os.path.exists(askf)   # list put away only after the note went
 
 
+def test_every_typed_note_stays_under_the_length_claude_code_folds_into_a_paste_block(tmp_path, monkeypatch):
+    """Found live on Veron, 2026-11-12: a start-your-jobs note of about 930 chars became a "[Pasted text]" block,
+    the box no longer showed the text, and the note was (safely) never sent: the session's watchers stayed down."""
+    rab = _rab(tmp_path, monkeypatch)
+    assert rab.NOTE_MAX <= 560
+    okf = "/home/a-long-user-name/.claude/pit-stop/restart/ok/" + "a-lane-with-a-long-name-" * 2 + "abcd1234"   # 107
+    assert len(okf) > 100 and len(rab.ask_note("2.1.9999", "2.1.9998", okf)) <= rab.NOTE_MAX
+    assert okf in rab.ask_note("2.1.322", "2.1.319", okf)
+    head, tail, where = "H" * 215, ". Scheduled session crons survive a restart. No reply needed.", okf + ".done-1794461903"
+    assert rab.rearm_note(head, [], tail, where) == head + tail
+    short = rab.rearm_note(head, ["inbox watcher: ./watch.sh", "heartbeat loop"], tail, where)
+    assert short == head + " (your list: inbox watcher: ./watch.sh; heartbeat loop)" + tail
+    jobs = ["waiter one: " + "x" * 280, "waiter two: " + "y" * 280]          # the size of the list that failed
+    long = rab.rearm_note(head, jobs, tail, where)
+    assert len(long) <= rab.NOTE_MAX and where in long and "of 2 " in long and "xxx" not in long   # never a cut list
+    assert long.startswith(head) and long.endswith(tail)
+    # one char decides: a note of exactly NOTE_MAX carries the list, one more names the file
+    fit = rab.NOTE_MAX - len(head) - len(tail) - len(" (your list: )")
+    assert "z" * fit in rab.rearm_note(head, ["z" * fit], tail, where)
+    assert len(rab.rearm_note(head, ["z" * fit], tail, where)) == rab.NOTE_MAX
+    assert "zzz" not in rab.rearm_note(head, ["z" * (fit + 1)], tail, where)
+    assert rab.rearm_note(head, ["heartbeat loop"], tail, where, inline=False) == (
+        head + ": your list of 1 is in the file " + where + " (read it)" + tail)
+
+
+def test_type_line_never_types_a_note_over_the_limit(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    sent = []
+    monkeypatch.setattr(rab, "LIVE", True)
+    monkeypatch.setattr(rab, "input_empty", lambda t: True)
+    monkeypatch.setattr(rab, "screen_busy", lambda t: False)
+    monkeypatch.setattr(rab, "tmux", lambda *a: sent.append(a))
+    monkeypatch.setattr(rab.time, "sleep", lambda n: None)
+    rab.TYPED.clear()
+    assert rab.type_line("pane-1", "n" * (rab.NOTE_MAX + 1)) == (False, "too-long")
+    assert sent == [] and "pane-1" not in rab.TYPED                     # no key at all went to the pane
+    monkeypatch.setattr(rab, "screen", lambda t, escapes=False: [rab.PROMPT + " " + "n" * rab.NOTE_MAX])
+    assert rab.type_line("pane-2", "n" * rab.NOTE_MAX) == (True, "")
+    assert ("send-keys", "-t", "pane-2", "Enter") in sent
+
+
+def test_live_restart_with_a_long_list_names_the_file_and_a_mismatch_stops_carrying_the_list(tmp_path, monkeypatch):
+    import re
+    import time
+    import pitstop_common as pc
+    rab, typed = _live(tmp_path, monkeypatch, ctx=60_000, idle=90)
+    now, counts = time.time(), {"restart": 0, "compact": 0}
+    key = rab.lane_key("Lane One", "abcd1234-0000")
+    okf, mmf = os.path.join(rab.BASE, "ok", key), os.path.join(rab.BASE, "state", key + ".mismatch")
+    os.makedirs(pc.ASKS)
+
+    def asked():
+        json.dump({"newest": "2.1.322", "ver": "2.1.319", "okf": okf, "at": time.time() - 600,
+                   "delivered": time.time() - 500}, open(os.path.join(pc.ASKS, "abcd1234-0000.json"), "w"))
+    asked()
+    listed = "waiter one: " + "x" * 280 + "\nwaiter two: " + "y" * 280 + "\n"
+    open(okf, "w").write(listed)
+    rab.handle(_sess(), "2.1.322", "pane", now, counts)
+    assert typed[0] == "/restart" and len(typed) == 2 and len(typed[1]) <= rab.NOTE_MAX and "xxx" not in typed[1]
+    named = re.search(r"in the file (\S+) \(read it\)", typed[1]).group(1)
+    assert named.startswith(okf + ".done-") and open(named).read() == listed and not os.path.exists(okf)
+    # a short list goes in the note itself; after a typing mismatch the next try names the file instead
+    typed.clear()
+    counts = {"restart": 0, "compact": 0}
+    key = rab.lane_key("Lane Two", "abcd1234-0000")                     # another session: no restart tried yet
+    okf, mmf = os.path.join(rab.BASE, "ok", key), os.path.join(rab.BASE, "state", key + ".mismatch")
+    asked()
+    open(okf, "w").write("heartbeat loop\n")
+    sends = iter([(True, ""), (False, "mismatch"), (True, "")])
+    monkeypatch.setattr(rab, "type_line", lambda t, text: (typed.append(text), next(sends))[1])
+    rab.handle(_sess(name="Lane Two"), "2.1.322", "pane", time.time(), counts)
+    assert len(typed) == 2 and "(your list: heartbeat loop)" in typed[1]
+    assert os.path.exists(okf) and os.path.exists(mmf)                  # not sent: the list stays, the miss is counted
+    json.dump({"n": 1, "at": 1}, open(mmf, "w"))                        # long ago: the back-off is over
+    rab.handle(_sess(version="2.1.322", started=(time.time() + 60) * 1000, name="Lane Two"), "2.1.322", "pane",
+               time.time() + 300, counts)
+    assert len(typed) == 3 and "heartbeat loop" not in typed[2] and "your list of 1 is in the file" in typed[2]
+    assert not os.path.exists(okf) and not os.path.exists(mmf)
+
+
 def test_live_late_restart_still_gets_the_rearm_note(tmp_path, monkeypatch):
     import time
     import pitstop_common as pc

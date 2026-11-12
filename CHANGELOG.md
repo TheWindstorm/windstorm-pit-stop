@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2 (2026-11-12)
+One fix, found on the first live restarts of 0.3.1.
+
+- **No typed note is longer than 560 characters.** Claude Code folds long typed text into a "[Pasted text]" block. The helper then no longer sees its own text in the input box, clears the box and presses no Enter. That is the safe way to fail, but the first session restarted with a two-job list (a note of about 930 characters) was never told to start its jobs again: its watchers stayed down until a person sent the note by hand, and every later try would have failed the same way. Now the "start your jobs again" note carries the list only when the whole note fits; otherwise it names the file the list is kept in (`restart/ok/<session>.done-<time>`) and the session reads it. A list is never cut short any more (0.3.1 cut it at 600 characters, possibly mid-job). After a typing mismatch the next try names the file instead of carrying the list. The typed background-jobs ask is shorter (about 530 characters, was 690). `type_line` refuses to type anything over the limit and logs it.
+- Hooks unchanged: same hook generation, no session needs a reload for this.
+
+Not proven live yet: a note that names the file, typed into a real session.
+
 ## 0.3.1 (2026-11-12)
 From a read of one machine's whole fleet 37 hours after install (95 sessions, 163 automatic compactions). Where the hook was loaded, 65 of 81 compactions landed at a break; the misses were mostly forced cuts in turns that run for hours.
 

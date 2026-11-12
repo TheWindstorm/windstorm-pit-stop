@@ -162,6 +162,8 @@ DIM_SEG = re.compile(r"\x1b\[2m.*?(?=\x1b\[(?:0|22)?m|$)")
 PROMPT = "❯"
 WARM_SHARE = 0.8        # the cache counts as warm for this share of cache_ttl
 COMPACT_WAIT = 600      # after typing /compact, give the summary this long before doing anything else
+NOTE_MAX = 560          # the longest note ever typed: Claude Code folds longer typed text into a "[Pasted text]"
+                        # block, the box then no longer shows our text, and the note is (safely) never sent
 REARM_MAX_AGE = 7200    # a re-arm list older than this is history, not a session waiting to be told
 DIALOG = re.compile(r"Do you want|" + PROMPT + r" \d+\.|Enter to confirm|\(y/n\)")
 
@@ -265,7 +267,11 @@ def screen_busy(target):
 def type_line(target, text):
     """Type TEXT and press Enter. Returns (sent, why): why is "busy" when the box
     was not empty or a dialog showed, "mismatch" when the box did not hold
-    exactly our text after typing (then it is cleared and no Enter is pressed)."""
+    exactly our text after typing (then it is cleared and no Enter is pressed),
+    "too-long" when TEXT is over NOTE_MAX (then nothing is typed at all)."""
+    if len(text) > NOTE_MAX:
+        log(f"{target}: a note of {len(text)} chars is over the {NOTE_MAX} that Claude Code shows as typed text; not typed")
+        return False, "too-long"
     if not input_empty(target) or screen_busy(target):
         log(f"{target}: input not empty or busy at send time; skipped")
         return False, "busy"
@@ -557,13 +563,11 @@ def consent_state(okf, asked_at, now):
 
 
 def ask_note(newest, ver, okf):
-    return (f"[AUTOMATED pit-stop restart, not your user] Claude Code {newest} is installed; you run {ver}. "
-            f"Claude Code will not /restart while background jobs run. Sort your background jobs: (A) watchers, "
-            f"monitors and loops you can simply start again; (B) real work in progress (a build, a test run, a deploy). "
-            f"If there is any B, do nothing: you will be asked again later. If there is only A: (1) write one line per "
-            f"job you will start again into {okf} (an empty file if none); (2) stop those jobs yourself. The helper "
-            f"restarts you within a few minutes once you are idle with no jobs, and tells you to start them again. "
-            f"No reply needed.")
+    return (f"[AUTOMATED pit-stop restart, not your user] Claude Code {newest} is installed; you run {ver}, and /restart "
+            f"is refused while background jobs run. If any is real work (a build, a test, a deploy), do nothing: "
+            f"you will be asked again. If all are watchers or loops you can start again: (1) write one line per job "
+            f"into {okf} (an empty file if none); (2) stop them. The helper restarts you once you are idle, then "
+            f"tells you to start them again. No reply needed.")
 
 
 def handle_ask(s, key, target, ver, newest, okf, l, now):
@@ -643,11 +647,26 @@ def archive(okf, word, now):
         os.replace(okf, f"{okf}.{word}-{int(now)}")
 
 
-def tell_rearm(target, okf, mmf, text, now):
+def rearm_note(head, jobs, tail, where, inline=True):
+    """The "start your jobs again" note, never over NOTE_MAX and never with a
+    cut list: the whole list in the note when it fits, else the name of the
+    file that holds it (WHERE: where the list is once the note was sent)."""
+    if not jobs:
+        return head + tail
+    text = f"{head} (your list: {'; '.join(jobs)}){tail}"
+    if inline and len(text) <= NOTE_MAX:
+        return text
+    return f"{head}: your list of {len(jobs)} is in the file {where} (read it){tail}"
+
+
+def tell_rearm(target, okf, mmf, head, tail, now):
     """Type the "start your jobs again" note. The list is put away ONLY once the
-    note was sent; otherwise it stays and the next run tries again."""
+    note was sent; otherwise it stays and the next run tries again. After a
+    typing mismatch the next try names the file instead of carrying the list
+    (a list can hold text the input box shows differently)."""
     if not input_empty(target) or screen_busy(target):
         return False
+    text = rearm_note(head, rearm_list(okf), tail, f"{okf}.done-{int(now)}", inline=not os.path.exists(mmf))
     sent, how = type_line(target, text)
     note_typing(mmf, sent, how, now)
     if sent:
@@ -844,8 +863,8 @@ def handle(s, newest, target, now, counts):
             else:
                 sent = tell_rearm(target, okf, mmf, (
                     f"[AUTOMATED pit-stop restart, not your user] You are now on Claude Code {ver}; same conversation. "
-                    f"The background jobs you stopped for the restart are down: start them again now (your list: "
-                    f"{'; '.join(jobs)[:600]}). Scheduled session crons survive a restart. No reply needed."), now)
+                    f"The background jobs you stopped for the restart are down: start them again now"),
+                    ". Scheduled session crons survive a restart. No reply needed.", now)
                 log(f"{tag} told to start its {len(jobs)} job(s) again" if sent else
                     f"{tag} skip: {len(jobs)} job(s) to start again, but its input box is not free; next run")
                 if not sent:
@@ -904,8 +923,7 @@ def handle(s, newest, target, now, counts):
         log(f"{tag} {why}: telling it to start its jobs again")
         tell_rearm(target, okf, mmf, (
             "[AUTOMATED pit-stop restart, not your user] The restart you listed your background jobs for is not "
-            "happening for now. Start again any you stopped"
-            + (f" (your list: {'; '.join(jobs)[:600]})" if jobs else "") + ". No reply needed."), now)
+            "happening for now. Start again any you stopped"), ". No reply needed.", now)
         return
     if action == "compact":
         if counts["compact"] >= CFG["max_per_run"]:
@@ -951,8 +969,7 @@ def handle(s, newest, target, now, counts):
         if not tell_rearm(target, okf, mmf, (
                 f"[AUTOMATED pit-stop restart, not your user] You were restarted at {ts()} onto Claude Code {newest} "
                 f"(was {ver}); same conversation. The background jobs you stopped for it are down: start them again "
-                f"now (your list: {'; '.join(jobs)[:600]}). Scheduled session crons survive a restart. "
-                f"No reply needed."), time.time()):
+                f"now"), ". Scheduled session crons survive a restart. No reply needed.", time.time()):
             log(f"{name}: its prompt was not ready for the start-your-jobs note; the next run sends it")
     else:
         archive(okf, "done", now)
