@@ -1,6 +1,6 @@
 ---
 name: pit-stop
-description: Windstorm Pit Stop, a context optimizer for Claude Code. Use when the user says "pit stop", "/pit-stop setup", "/pit-stop status", "/pit-stop report", "/pit-stop optimize", "/pit-stop reading" or "/pit-stop restart", or asks to tune when a session auto-compacts, set an idle point or a compaction window (300K/500K/700K), stop sessions compacting mid-task, check why sessions are not on the newest Claude Code, keep many sessions updated without watching them, check or trim MEMORY.md / CLAUDE.md so they load fully, or suggest a model and effort for a session's job.
+description: Windstorm Pit Stop, a context optimizer for Claude Code. Use when the user says "pit stop", "/pit-stop checkup", "/pit-stop setup", "/pit-stop status", "/pit-stop report", "/pit-stop optimize", "/pit-stop reading" or "/pit-stop restart", or asks to tune when a session auto-compacts, set an idle point or a compaction window (300K/500K/700K), stop sessions compacting mid-task, check why sessions are not on the newest Claude Code, keep many sessions updated without watching them, check or trim MEMORY.md / CLAUDE.md so they load fully, or suggest a model and effort for a session's job. Also use right after installing this plugin for the user: run the checkup first and show it.
 ---
 
 # Windstorm Pit Stop
@@ -17,7 +17,15 @@ Claude Code compacts in two ways, and each folder gets a point for each:
 
 ## Commands
 
+### `/pit-stop checkup` (read-only; the first thing after installing)
+1. Run `python3 -I <scripts>/checkup.py` (add `--share` if the user wants a page without project and session names to show others). It reads this computer's sessions and their history (counts and times only), calls no model, and sends nothing anywhere. On a big history it can take a minute or two.
+2. Show the user the report as it is, then sum it up in three or four plain lines: what needs them now (waiting, behind), how many refreshes landed mid-task, the modelled saving (always say "modelled", it is an estimate), and what Pit Stop will do about each. Give them the path of the page with charts it prints.
+3. If it shows "Since your first checkup", lead with that: it is this computer's own before and after.
+4. Then offer `/pit-stop setup` if it is not set up yet.
+If you just installed Pit Stop for your user, do this before anything else.
+
 ### `/pit-stop setup` (start here)
+0. If there is no checkup yet (`~/.claude/pit-stop/checkup/baseline.json` is missing), run `/pit-stop checkup` first and show it: it is the "before" picture.
 1. Run `scripts/setup.py` with no arguments. It prints a plan and changes nothing. Show the plan.
 2. If the user runs several sessions in tmux, run `scripts/setup.py --fleet` too and show that part. Then run `scripts/restart_at_break.py` (no `--live`) and show what the pit stop would do right now.
 3. Only after the user agrees, run it again with `--apply` (and `--fleet` if they want it). That switches daily tuning on, fits the folder of every running session, and for fleet mode copies the launcher and installs a timer. It never changes an existing `restart.json` and never adds a second timer.
@@ -54,7 +62,8 @@ Tell them plainly:
 - `hooks/precompact_wait_for_break.py` holds AUTOMATIC compaction while a tool call is in flight and lets it run at the next break. It never blocks a manual `/compact`, allows anything at or above the ceiling, and allows on any error. When an automatic compaction goes ahead it prints a keep-list for the summary. Log, counts only: `~/.claude/pit-stop/precompact.log`.
 - `hooks/session_start.py` adds a three-line checklist after a compaction, and starts the daily tune in the background when it is switched on.
 - `hooks/stop_pit_stop.py` hands over a waiting background-jobs ask once, or shows the user one line when an update is waiting and fleet mode is not running.
-- Switches, in `~/.claude/pit-stop/config.json`: `auto_tune`, `tune_folders` (a list of folders: tune only these), `compact_instructions` (false, or a string of extra notes), `after_compact_note`, `nudge`.
+- `hooks/stop_pit_stop.py` also shows the person one line, once, a week after the first checkup.
+- Switches, in `~/.claude/pit-stop/config.json`: `checkup_reminder` (false = no week-later line), `auto_tune`, `tune_folders` (a list of folders: tune only these), `compact_instructions` (false, or a string of extra notes), `after_compact_note`, `nudge`.
 
 ## If you are the session being asked
 A message that starts "Pit Stop (this plugin's own hook, set up by your user)" at the end of your turn comes from this plugin's Stop hook. Do what it says: sort your background jobs; if any is real work in progress, change nothing and end your turn; otherwise list the ones you will start again in the file it names, stop them, and end your turn. Do not type `/restart` yourself.

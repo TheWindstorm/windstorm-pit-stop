@@ -2361,3 +2361,115 @@ def test_update_plugins_never_runs_past_its_time_budget(tmp_path, monkeypatch):
     rab.update_plugins(clock[0], 0, run)
     assert given == [180, 100]                       # the second gets only what is left of the 300 s
     assert any("time budget used" in m for m in logged) and len(given) == 2   # the rest waits for the next run
+
+
+# ---------------------------------------------------------------- 0.5.0: /pit-stop checkup
+def _checkup(tmp_path, monkeypatch):
+    pc, op, proj = _history(tmp_path, monkeypatch)
+    import checkup as ck
+    vers = tmp_path / "versions"
+    vers.mkdir(exist_ok=True)
+    (vers / "2.1.322").write_text("")
+    monkeypatch.setattr(pc, "VERSIONS", str(vers))
+    monkeypatch.setattr(pc, "CONFIG", str(tmp_path / "config.json"))
+    monkeypatch.setattr(ck, "DIR", str(tmp_path / "state" / "checkup"))
+    monkeypatch.setattr(ck, "BASELINE", str(tmp_path / "state" / "checkup" / "baseline.json"))
+    monkeypatch.setattr(ck, "hookless", lambda sessions, now: ["Lane Two"])
+    return pc, ck, proj
+
+
+def test_checkup_reports_waiting_behind_and_mid_task_refreshes_from_local_history(tmp_path, monkeypatch):
+    pc, ck, proj = _checkup(tmp_path, monkeypatch)
+    now = time.time()
+    sessions = [{"name": "Lane One", "cwd": proj, "version": "2.1.319", "status": "waiting",
+                 "statusUpdatedAt": (now - 43 * 3600) * 1000},
+                {"name": "Lane Two", "cwd": proj, "version": "2.1.322", "status": "idle", "statusUpdatedAt": now * 1000}]
+    d = ck.collect(14, now, sessions)
+    t = d["totals"]
+    assert (t["sessions"], t["on_newest"], t["behind"], t["waiting"]) == (2, 1, 1, 1)
+    assert t["compactions"] == 4 and t["kinds"]["mid_task"] == 4 and t["mid_task_share"] == 1.0
+    txt = ck.render_text(d, [])
+    assert "Lane One: 43 hours" in txt and "Lane One: on 2.1.319" in txt and "in the middle of a task: 4 (100%" in txt
+    assert "Lane Two" in txt and "/reload-plugins" in txt                                  # not on this release's hooks yet
+    assert "daily tuning is OFF" in txt and "your sessions on this computer only" in txt
+    # only what it can judge: a window it does not know gives no saving, never a made-up one
+    assert t["saving_usd_month"] == 0 and "Modelled:" not in txt
+    page = ck.render_html(d, [])
+    assert "<script" not in page and "src=" not in page and "http://" not in page            # a page that loads nothing
+    assert "work" in page and "Lane One" in page
+    shared = ck.render_html(d, [], share=True)
+    assert "Lane One" not in shared and ">work<" not in shared and "Session 1" in shared and "Project 1" in shared
+    # a project's history that cannot be read never stops the report
+    monkeypatch.setattr(ck, "folder_stats", lambda *a, **k: (_ for _ in ()).throw(ValueError("bad")))
+    assert ck.collect(14, now, sessions)["totals"]["compactions"] == 0
+
+
+def test_checkup_modelled_saving_only_when_the_fitted_window_is_lower(tmp_path, monkeypatch):
+    pc, ck, proj = _checkup(tmp_path, monkeypatch)
+    import optimize as op
+    m = op.analyze(proj, 14)
+    monkeypatch.setattr(op, "analyze", lambda folder, days: dict(m, current_window=700_000, cache_read_per_day=100_000_000))
+    monkeypatch.setattr(op, "recommend", lambda m, **k: {"window": 300_000})
+    monkeypatch.setattr(ck, "last_model", lambda folder: "claude-opus-5-5")
+    s = ck.folder_stats(proj, 0, 14)
+    share = op.read_saving(700_000, 300_000)
+    assert s["saving_tokens_day"] == int(share * 100_000_000) and s["saving_usd_month"] == round(s["saving_tokens_day"] * 0.20 / 1e6 * 30)
+    monkeypatch.setattr(op, "recommend", lambda m, **k: {"window": 900_000})                 # a raise is not a saving
+    assert ck.folder_stats(proj, 0, 14)["saving_usd_month"] is None
+    monkeypatch.setattr(op, "recommend", lambda m, **k: {"window": 300_000})
+    monkeypatch.setattr(ck, "last_model", lambda folder: "some-other-model")
+    s = ck.folder_stats(proj, 0, 14)
+    assert s["saving_tokens_day"] and s["saving_usd_month"] is None                          # unknown price: tokens only
+    assert ck.tokens(1_638_000_000) == "1.6 billion" and ck.tokens(640_000_000) == "640 million"
+    assert ck.read_price("claude-sonnet-5-5") == 0.10 and ck.read_price("claude-opus-5") == 0.50 and ck.read_price(None) is None
+
+
+def test_checkup_keeps_its_first_baseline_and_shows_before_and_after_a_week_later(tmp_path, monkeypatch):
+    pc, ck, proj = _checkup(tmp_path, monkeypatch)
+    now = time.time()
+    d1 = {"at": now - 8 * 86400, "days": 14, "newest": "2.1.320",
+          "totals": {"mid_task_share": 0.52, "behind": 3, "waiting": 1}}
+    ck.save(d1, "<p>one</p>", None)
+    d2 = {"at": now, "days": 14, "newest": "2.1.322", "totals": {"mid_task_share": 0.11, "behind": 0, "waiting": 0}}
+    paths = ck.save(d2, "<p>two</p>", "<p>shared</p>")
+    base = json.load(open(ck.BASELINE))
+    assert base["at"] == d1["at"]                                                             # never overwritten
+    assert [os.path.basename(p) for p in paths] == ["checkup.html", "checkup-share.html"]
+    lines = ck.compare(base, d2)
+    assert lines[0] == "Since your first checkup 8 days ago:" and "52% then, 11% now" in lines[1]
+    assert "3 then, 0 now" in lines[2] and "1 then, 0 now" in lines[3]
+    assert ck.compare(dict(base, at=now - 2 * 86400), d2) == [] and ck.compare(None, d2) == []
+    page = ck.render_html(dict(ck.collect(14, now, []), at=now), lines)
+    assert "Since your first checkup" in page and "52% then, 11% now" in page
+
+
+def test_stop_hook_says_once_that_the_week_later_checkup_is_ready(tmp_path):
+    ck_dir = tmp_path / "cfg" / "pit-stop" / "checkup"
+    ck_dir.mkdir(parents=True)
+    (ck_dir / "baseline.json").write_text(json.dumps({"at": time.time() - 2 * 86400}))
+    assert _run("stop_pit_stop.py", {"session_id": "w-1"}, tmp_path)[:2] == (0, "")          # too early
+    (ck_dir / "baseline.json").write_text(json.dumps({"at": time.time() - 8 * 86400}))
+    (tmp_path / "cfg" / "pit-stop" / "config.json").write_text(json.dumps({"checkup_reminder": False}))
+    assert _run("stop_pit_stop.py", {"session_id": "w-1"}, tmp_path)[:2] == (0, "")          # switched off
+    (tmp_path / "cfg" / "pit-stop" / "config.json").write_text("{}")
+    code, out, _ = _run("stop_pit_stop.py", {"session_id": "w-1"}, tmp_path)
+    assert code == 0 and "/pit-stop checkup" in json.loads(out)["systemMessage"]
+    assert _run("stop_pit_stop.py", {"session_id": "w-2"}, tmp_path)[:2] == (0, "")          # once, machine-wide
+    (ck_dir / "baseline.json").write_text("not json")
+    os.remove(ck_dir / "week-told")
+    assert _run("stop_pit_stop.py", {"session_id": "w-3"}, tmp_path)[:2] == (0, "")          # a damaged file: nothing
+
+
+def test_checkup_counts_only_automatic_refreshes_in_its_window_and_waits_of_two_hours(tmp_path, monkeypatch):
+    pc, ck, proj = _checkup(tmp_path, monkeypatch)
+    import optimize as op
+    now = time.time()
+    m = op.analyze(proj, 14)
+    log = [[now - 3600, "mid_task", "auto"], [now - 7200, "prompt", "auto"], [now - 1800, "mid_task", "manual"],
+           [now - 30 * 86400, "mid_task", "auto"]]                                     # a manual one, and one too old
+    monkeypatch.setattr(op, "analyze", lambda folder, days: dict(m, compaction_log=log, compaction_rereads=[]))
+    s = ck.folder_stats(proj, now - 14 * 86400, 14)
+    assert s["compactions"] == 2 and s["kinds"] == {"mid_task": 1, "prompt": 1, "idle": 0, "instant": 0}
+    rows = ck.session_rows([{"name": "Q", "cwd": proj, "version": "2.1.322", "status": "waiting",
+                             "statusUpdatedAt": (now - 600) * 1000}], "2.1.322", now)
+    assert rows[0]["waiting_s"] is None                                                # 10 minutes is not "waiting on you"
