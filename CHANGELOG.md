@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4 (2026-11-12)
+- **A hook whose plugin folder is gone lets Claude Code go on.** Claude Code deletes an old version folder 14 days after an update (the `.orphaned_at` marker). A session that loaded its hooks from that folder keeps running the same command. Until now, python then exits 2 on the missing script, and for PreCompact exit 2 means "hold": that session could never auto-compact again. Each hook command now checks its file first and exits 0 (do nothing) if it is gone. Same hook generation. The fix reaches a session only once it loads this release's hooks (restart or `/reload-plugins`), so sessions still on hooks from a folder marked `.orphaned_at` should be moved before that folder is deleted.
+- **`/pit-stop status` tells "no hook" apart from "an older release's hooks".** It used to count both as "no working Pit Stop hook". On one machine that read 91, when 21 had none and 70 ran older hooks that still wait for breaks.
+
 ## 0.3.3 (2026-11-12)
 Closes the gap left in 0.3.2 (from the review of 0.3.2): the 560-character limit had no fallback of its own.
 
