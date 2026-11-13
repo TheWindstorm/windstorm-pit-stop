@@ -6,7 +6,7 @@ Free and open source. By [The Windstorm on GitHub](https://github.com/TheWindsto
 
 <img src=".claude-plugin/icon.png" width="120" alt="The Windstorm">
 
-A race car never stops mid-corner. It waits for the pit stop, then refuels, changes tires and goes back out. Pit Stop gives Claude Code sessions the same rhythm (the command is `/pit-stop`). At a break between tasks, and never in the middle of one, a session:
+A race car never stops mid-corner. It waits for the pit stop, then refuels, changes tires and goes back out. Pit Stop gives Claude Code sessions the same rhythm (the command is `/pit-stop`). At a break between tasks, not in the middle of one, whenever it can, a session:
 
 1. **Refuels.** It compacts its context at a break, at points fitted to that folder's own work.
 2. **Changes tires.** It moves onto the newest installed Claude Code. *(Fleet mode, for people who run sessions in tmux.)* Compaction alone never does this: a running session keeps its version until it restarts.
