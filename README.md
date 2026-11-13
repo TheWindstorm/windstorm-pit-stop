@@ -4,6 +4,8 @@
 
 Free and open source. By [The Windstorm on GitHub](https://github.com/TheWindstorm) (github.com/TheWindstorm). This page: [github.com/TheWindstorm/windstorm-pit-stop](https://github.com/TheWindstorm/windstorm-pit-stop).
 
+The full story with interactive charts: [thewindstorm.ai/plugins/pit-stop](https://thewindstorm.ai/plugins/pit-stop?utm_source=github&utm_medium=referral&utm_campaign=ecosystem).
+
 More from The Windstorm: [thewindstorm.ai](https://thewindstorm.ai) (the podcast) · [grantwhitmer.com](https://grantwhitmer.com) (Grant Whitmer, who built it).
 
 <img src=".claude-plugin/icon.png" width="120" alt="The Windstorm">
