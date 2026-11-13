@@ -2077,6 +2077,10 @@ def test_tuner_waits_undoes_a_lowering_that_cost_context_and_keeps_a_floor():
     w, why, _ = op.check_last_move(_hist_m(new(9, 1)), first, 300_000, now)
     assert w == 400_000 and why[0].startswith("waiting")
     assert op.check_last_move(_hist_m(new(9)), first, 300_000, now)[0] == 300_000
+    # three compactions but too few re-read checks after them (under 10) is not evidence yet: wait
+    thin = [[t + 60 * i, 367_000, 2, 2] for i in range(1, 4)]
+    w, why, _ = op.check_last_move(_hist_m(at500 + thin), moved, 300_000, now)
+    assert w == 400_000 and why[0].startswith("waiting")
 
 
 def test_a_damaged_tune_history_never_stops_a_folder_being_tuned():
@@ -2185,6 +2189,7 @@ def test_plugin_update_targets_and_when_they_are_due(tmp_path, monkeypatch):
     assert rab.plugin_update_due(None, 0, cfg)                                    # never done: now
     assert not rab.plugin_update_due(7200, 0, cfg) and rab.plugin_update_due(86400, 0, cfg)   # daily
     assert rab.plugin_update_due(3600, 2, cfg) and not rab.plugin_update_due(1800, 2, cfg)   # restarts coming: hourly
+    assert not rab.plugin_update_due(None, 5, dict(cfg, plugin_updates="yes"))   # anything but pit-stop/all: off
 
 
 def test_update_plugins_runs_claude_codes_commands_once_and_says_what_happened(tmp_path, monkeypatch):
@@ -2326,3 +2331,33 @@ def test_the_stop_hook_starts_the_daily_tune_and_autotune_honours_the_list(tmp_p
             break
         time.sleep(0.1)
     assert stamp.exists()                                                                        # the tune ran, in the background
+
+
+def test_update_plugins_never_runs_past_its_time_budget(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    import pitstop_common as pc
+    os.makedirs(os.path.join(rab.BASE, "state"), exist_ok=True)
+    d = tmp_path / "cfg" / "plugins"
+    d.mkdir(parents=True)
+    (d / "installed_plugins.json").write_text(json.dumps({"plugins": {
+        "a@m1": [{"scope": "user"}], "b@m2": [{"scope": "user"}]}}))
+    monkeypatch.setattr(pc, "CLAUDE_DIR", str(tmp_path / "cfg"))
+    rab.CFG.update(plugin_updates="all")
+    logged, given = [], []
+    monkeypatch.setattr(rab, "notify", lambda m: None)
+    monkeypatch.setattr(rab, "log", lambda m: logged.append(m))
+    monkeypatch.setattr(rab, "plugin_root_now", lambda: None)
+    monkeypatch.setattr(rab, "LIVE", True)
+    clock = [1_000_000.0]
+    monkeypatch.setattr(rab.time, "time", lambda: clock[0])
+
+    class R:
+        returncode, stdout, stderr = 0, "done", ""
+
+    def run(cmd, t):
+        given.append(t)
+        clock[0] += 200                              # each command is slow
+        return R()
+    rab.update_plugins(clock[0], 0, run)
+    assert given == [180, 100]                       # the second gets only what is left of the 300 s
+    assert any("time budget used" in m for m in logged) and len(given) == 2   # the rest waits for the next run
