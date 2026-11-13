@@ -2457,3 +2457,18 @@ def test_stop_hook_says_once_that_the_week_later_checkup_is_ready(tmp_path):
     (ck_dir / "baseline.json").write_text("not json")
     os.remove(ck_dir / "week-told")
     assert _run("stop_pit_stop.py", {"session_id": "w-3"}, tmp_path)[:2] == (0, "")          # a damaged file: nothing
+
+
+def test_checkup_counts_only_automatic_refreshes_in_its_window_and_waits_of_two_hours(tmp_path, monkeypatch):
+    pc, ck, proj = _checkup(tmp_path, monkeypatch)
+    import optimize as op
+    now = time.time()
+    m = op.analyze(proj, 14)
+    log = [[now - 3600, "mid_task", "auto"], [now - 7200, "prompt", "auto"], [now - 1800, "mid_task", "manual"],
+           [now - 30 * 86400, "mid_task", "auto"]]                                     # a manual one, and one too old
+    monkeypatch.setattr(op, "analyze", lambda folder, days: dict(m, compaction_log=log, compaction_rereads=[]))
+    s = ck.folder_stats(proj, now - 14 * 86400, 14)
+    assert s["compactions"] == 2 and s["kinds"] == {"mid_task": 1, "prompt": 1, "idle": 0, "instant": 0}
+    rows = ck.session_rows([{"name": "Q", "cwd": proj, "version": "2.1.322", "status": "waiting",
+                             "statusUpdatedAt": (now - 600) * 1000}], "2.1.322", now)
+    assert rows[0]["waiting_s"] is None                                                # 10 minutes is not "waiting on you"
