@@ -19,7 +19,7 @@ The aim: you stop thinking about when to refresh context and which sessions are 
 - **Long sessions get expensive.** Claude re-reads your whole conversation on every reply. Pit Stop refreshes the session at a break between tasks, so you stop paying to drag a huge history along.
 - **It doesn't lose the thread.** It refreshes between tasks, not in the middle of one, whenever it can.
 - **It learns each project.** It fits the refresh point of each of your projects to that project's own history.
-- **It keeps you current.** It tells you when a newer Claude Code is ready. If you run sessions in tmux, it moves them onto it at a break, same conversation.
+- **It keeps you current.** It tells you when a newer Claude Code is ready. If you run sessions in tmux on Linux or macOS with a paid Claude plan, it can move them onto it at a break, same conversation.
 - **Small overhead.** It is plain code on your computer and never calls an AI to decide anything. On the machine we measured it cost about 2% of the day's usage.
 - **What it can save** (modelled from one real day): refreshing at 300K instead of letting a session run to 700K saves about $820 a month per busy session on Opus 5.5, or about $410 on Sonnet 5.5. Details below.
 
