@@ -27,6 +27,15 @@ The aim: you stop thinking about when to refresh context and which sessions are 
 
 It works with Claude Code only, for now. [Install it](#install) in about a minute.
 
+## Measured on our own fleet
+
+We run Pit Stop on our main machine, where Claude Code sessions work around the clock on many projects (94 today), using between 1.9 and 9.9 billion tokens a day (November 4-12, 2026). For each session we compared its history before Pit Stop's hooks were loaded (from October 26, 2026) with the time after. This is our own machine and our own work, not a controlled trial.
+
+- Automatic refreshes in the middle of a task: 52% before Pit Stop (280 of 543), 11% with it (32 of 291). Sessions that ran without it over the same days: 76% (134 of 177).
+- After a refresh, sessions re-read files they had just lost less often: 17% of their first file reads before Pit Stop, 10% with it (a small sample: 163 reads with Pit Stop).
+- Overnight from November 12 to 13, it moved 86 sessions onto a new Claude Code version at their breaks, with nobody watching.
+- Not measured yet: what it saves in practice. The savings above are modelled; they depend on each project's refresh point, which we started tuning for a test group on November 13. The comparison with untouched sessions comes next. Pit Stop's own cost was about 2% on the day we measured.
+
 ## Why it pays, in pictures
 
 ### 1. Your AI re-reads the whole conversation on every reply
