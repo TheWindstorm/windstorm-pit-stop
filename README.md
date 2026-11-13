@@ -34,7 +34,7 @@ One busy session, one day:
 
 <img src="docs/img/spend-by-refresh-point.svg" alt="Spend per busy session per day by refresh point for Haiku 5.5, Sonnet 5.5, Opus 5.5 and Fable 5.2; 300K is highlighted" width="720">
 
-The same, per month:
+The same, per month (modelled; see How these numbers were made):
 
 | Refresh at | Haiku 5.5 | Sonnet 5.5 | Opus 5.5 | Fable 5.2 | Refreshes a day |
 |---|---:|---:|---:|---:|---:|
@@ -45,16 +45,16 @@ The same, per month:
 | 500K | $256 | $691 | $1,383 | $2,019 | 1.3 |
 | 700K | $339 | $870 | $1,740 | $2,457 | 0.8 |
 | 900K | $402 | $1,013 | $2,027 | $2,828 | 0.5 |
-| **Saved, 300K vs 700K** | **$190** | **$410** | **$820** | **$1,054** | |
+| **Modelled saving, 300K vs 700K** | **$190** | **$410** | **$820** | **$1,054** | |
 
 Haiku 5.5 charges five times more per token once a prompt passes 100K, which is why its bill jumps after 100K.
 
-### 4. Less baggage, sharper answers
+### 4. Less baggage, cleaner breaks
 
 - **Old topics get in the way.** When you switch from the login page to the invoice bug, everything about the login page is still in the backpack, and the model has to work around it on every reply. A refresh between tasks leaves a short summary and a clear head.
-- **Bad timing loses the thread.** Without Pit Stop, Claude Code refreshes the moment a size is reached, even halfway through an edit, and the summary cuts a task in half. Pit Stop waits for the break. On the machine we measured, it moved 34 refreshes off the middle of work in one day.
+- **Bad timing loses the thread.** Without Pit Stop, Claude Code refreshes the moment a size is reached, even in the middle of a task, and the summary cuts a task in half. Pit Stop waits for the break. On the machine we measured, it moved 34 refreshes off the middle of work in one day.
 
-### 5. Pit Stop's own cost: about 2%
+### 5. Pit Stop's own cost: about 2% on the day we measured
 
 Waiting for a break means a session sometimes works a few extra minutes at a larger size, and a restart onto a new Claude Code rebuilds its cache once. We measured both over a day:
 
@@ -66,7 +66,9 @@ Everything Pit Stop decides is plain code on your computer. It never calls an AI
 
 After a refresh, a session sometimes has to open files again that it just forgot. Refresh too often and that re-reading, and the mistakes from lost detail, eat the savings. The right point is different for every project. Pit Stop's tuner reads each project's own history, counts how often it had to re-read after a refresh, and moves its refresh point one step at a time: lower while nothing is lost, back up when it is.
 
-**How these numbers were made.** One real day (22,750 replies from 48 busy Claude Code sessions on one machine) replayed at each refresh point and priced at Anthropic's list API prices (cached reads, cache writes and output). The cost of re-reading forgotten files is not in this model, so treat the low end as optimistic. On a Claude subscription you are not billed per token, but the same tokens count against your usage limits.
+**How these numbers were made.** One real day (22,750 replies from 48 busy Claude Code sessions on one machine) replayed at each refresh point and priced at Anthropic's list API prices as published on November 3, 2026 (cached reads, cache writes and output). The cost of re-reading forgotten files is not in this model, so treat the low end as optimistic. On a Claude subscription you are not billed per token, but the same tokens count against your usage limits.
+
+Pit Stop is an independent plugin. It is not made or endorsed by Anthropic. Claude, Claude Code and the model names are Anthropic's.
 
 ## Install
 
