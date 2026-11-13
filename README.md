@@ -12,20 +12,97 @@ A race car never stops mid-corner. It waits for the pit stop, then refuels, chan
 
 The aim: you stop thinking about when to refresh context and which sessions are on an old version.
 
+## Why it pays, in pictures
+
+### 1. Your AI re-reads the whole conversation on every reply
+
+Every time Claude answers, it reads everything said so far in that session. A long session is a backpack that keeps getting heavier, and you pay to carry it on every single step. The price of one reply grows in a straight line with the size of the conversation. Each re-read token is cheap, but there are a lot of them, hundreds of times a day.
+
+<img src="docs/img/cost-per-reply.svg" alt="Cost of one reply, just to re-read the conversation: at 700K tokens about $0.14 on Opus 5.5 or Fable 5.2, $0.07 on Sonnet 5.5, $0.04 on Haiku 5.5" width="720">
+
+*Cached-input price of reading the conversation once, at Anthropic's list API prices. Output and new text come on top.*
+
+### 2. You pay for the shaded area
+
+A session grows as it works. A refresh (Claude Code calls it *compaction*) swaps the long history for a short summary, and the session keeps going. The shaded area is everything you pay to re-read. Refresh at a lower point and the area shrinks.
+
+<img src="docs/img/shaded-area.svg" alt="Conversation size over two days: refreshing at 700K leaves a much bigger shaded area than refreshing at 300K" width="720">
+
+### 3. The bill, by refresh point and model
+
+One busy session, one day:
+
+<img src="docs/img/spend-by-refresh-point.svg" alt="Spend per busy session per day by refresh point for Haiku 5.5, Sonnet 5.5, Opus 5.5 and Fable 5.2; 300K is highlighted" width="720">
+
+The same, per month (modelled; see How these numbers were made):
+
+| Refresh at | Haiku 5.5 | Sonnet 5.5 | Opus 5.5 | Fable 5.2 | Refreshes a day |
+|---|---:|---:|---:|---:|---:|
+| 100K | $31.50 | $310 | $620 | $1,081 | 8.2 |
+| 200K | $97.62 | $380 | $759 | $1,230 | 4.0 |
+| **300K** | $149 | $460 | $920 | $1,403 | 2.6 |
+| 400K | $203 | $572 | $1,143 | $1,689 | 1.8 |
+| 500K | $256 | $691 | $1,383 | $2,019 | 1.3 |
+| 700K | $339 | $870 | $1,740 | $2,457 | 0.8 |
+| 900K | $402 | $1,013 | $2,027 | $2,828 | 0.5 |
+| **Modelled saving, 300K vs 700K** | **$190** | **$410** | **$820** | **$1,054** | |
+
+Haiku 5.5 charges five times more per token once a prompt passes 100K, which is why its bill jumps after 100K.
+
+### 4. Less baggage, cleaner breaks
+
+- **Old topics get in the way.** When you switch from the login page to the invoice bug, everything about the login page is still in the backpack, and the model has to work around it on every reply. A refresh between tasks leaves a short summary and a clear head.
+- **Bad timing loses the thread.** Without Pit Stop, Claude Code refreshes the moment a size is reached, even in the middle of a task, and the summary cuts a task in half. Pit Stop waits for the break. On the machine we measured, it moved 34 refreshes off the middle of work in one day.
+
+### 5. Pit Stop's own cost: about 2% on the day we measured
+
+Waiting for a break means a session sometimes works a few extra minutes at a larger size, and a restart onto a new Claude Code rebuilds its cache once. We measured both over a day:
+
+<img src="docs/img/pit-stop-fee.svg" alt="Pit Stop's own cost was $38 of $1,702, about 2.2%" width="720">
+
+Everything Pit Stop decides is plain code on your computer. It never calls an AI model to decide anything.
+
+### 6. Why not refresh at 100K, then?
+
+After a refresh, a session sometimes has to open files again that it just forgot. Refresh too often and that re-reading, and the mistakes from lost detail, eat the savings. The right point is different for every project. Pit Stop's tuner reads each project's own history, counts how often it had to re-read after a refresh, and moves its refresh point one step at a time: lower while nothing is lost, back up when it is.
+
+**How these numbers were made.** One real day (22,750 replies from 48 busy Claude Code sessions on one machine) replayed at each refresh point and priced at Anthropic's list API prices as published on November 3, 2026 (cached reads, cache writes and output). The cost of re-reading forgotten files is not in this model, so treat the low end as optimistic. On a Claude subscription you are not billed per token, but the same tokens count against your usage limits.
+
+Pit Stop is an independent plugin. It is not made or endorsed by Anthropic. Claude, Claude Code and the model names are Anthropic's.
+
 ## Install
+
+It takes about a minute. You type three short commands, **one at a time**, into Claude Code itself (the box where you talk to Claude), not into a separate terminal window. Paste them one at a time: pasted together they arrive as one message and do not run as three commands.
+
+**Step 1.** Open Claude Code. Copy this line (each box below has a copy button at its top right), paste it into Claude Code and press Enter. It tells Claude Code where to find Pit Stop.
 
 ```text
 /plugin marketplace add TheWindstorm/windstorm-pit-stop
+```
+
+**Step 2.** When step 1 has finished, copy this line, paste it and press Enter. It installs Pit Stop. If Claude Code asks you to confirm, say yes.
+
+```text
 /plugin install windstorm-pit-stop@thewindstorm
 ```
 
-Then, once:
+**Step 3.** Copy this line, paste it and press Enter. It sets Pit Stop up for your projects. It shows a plan first and changes nothing until you say yes. It switches weekly tuning on, fits every running session's folder now, and (if you use tmux) offers fleet mode.
 
 ```text
 /pit-stop setup
 ```
 
-It shows a plan first and changes nothing until you say yes. It switches weekly tuning on, fits every running session's folder now, and (if you use tmux) offers fleet mode.
+If Claude Code says it does not know `/pit-stop`, type `/reload-plugins` and press Enter (or close Claude Code and open it again), then do step 3 again.
+
+**Prefer your computer's terminal?** Steps 1 and 2 also work there, outside Claude Code, as two commands (one at a time). Then open Claude Code for step 3.
+
+```bash
+claude plugin marketplace add TheWindstorm/windstorm-pit-stop
+```
+
+```bash
+claude plugin install windstorm-pit-stop@thewindstorm
+```
 
 Requirements: Claude Code, plus Python 3.10+ (standard library only) as `python3`, or as `python` where `python3` is not a real interpreter (Windows, where `python3` can be the Microsoft Store stub: the hooks then run `python`). The hook commands need a POSIX shell, which Claude Code uses on macOS, Linux and Windows with Git Bash. Fleet mode needs tmux on Linux or macOS, and Claude Code's `/restart`, which needs the native macOS or Linux install (not WSL or Windows) and a paid Claude plan.
 
