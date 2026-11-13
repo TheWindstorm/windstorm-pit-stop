@@ -14,6 +14,17 @@ A race car never stops mid-corner. It waits for the pit stop, then refuels, chan
 
 The aim: you stop thinking about when to refresh context and which sessions are on an old version.
 
+## Pit Stop in 30 seconds
+
+- **Long sessions get expensive.** Claude re-reads your whole conversation on every reply. Pit Stop refreshes the session at a break between tasks, so you stop paying to drag a huge history along.
+- **It doesn't lose the thread.** It refreshes between tasks, not in the middle of one, whenever it can.
+- **It learns each project.** It fits the refresh point of each of your projects to that project's own history.
+- **It keeps you current.** It tells you when a newer Claude Code is ready. If you run sessions in tmux, it moves them onto it at a break, same conversation.
+- **It costs almost nothing to run.** It is plain code on your computer and never calls an AI to decide anything. On the machine we measured it cost about 2% of a day's usage.
+- **What it can save** (modelled from one real day): refreshing at 300K instead of letting a session run to 700K saves about $820 a month per busy session on Opus 5.5, or about $410 on Sonnet 5.5. Details below.
+
+It works with Claude Code only, for now. [Install it](#install) in about a minute.
+
 ## Why it pays, in pictures
 
 ### 1. Your AI re-reads the whole conversation on every reply
@@ -76,7 +87,15 @@ Pit Stop is an independent plugin. It is not made or endorsed by Anthropic. Clau
 
 Pit Stop lives here, in The Windstorm's GitHub organization ([github.com/TheWindstorm](https://github.com/TheWindstorm)). You don't have to download anything from this page yourself: step 1 points Claude Code at it.
 
-It takes about a minute. You type three short commands, **one at a time**, into Claude Code itself (the box where you talk to Claude), not into a separate terminal window. Paste them one at a time: pasted together they arrive as one message and do not run as three commands.
+**Easiest: let Claude do it.** Open Claude Code and paste this to it:
+
+```text
+Install the Claude Code plugin from https://github.com/TheWindstorm/windstorm-pit-stop using the terminal commands in the Install section of its README, then tell me what to type next.
+```
+
+Claude runs the two terminal commands below for you, then tells you to type `/reload-plugins` and `/pit-stop setup`.
+
+**Or do it yourself.** It takes about a minute. You type three short commands, **one at a time**, into Claude Code itself (the box where you talk to Claude), not into a separate terminal window. Paste them one at a time: pasted together they arrive as one message and do not run as three commands.
 
 **Step 1.** Open Claude Code. Copy this line (each box below has a copy button at its top right), paste it into Claude Code and press Enter. It tells Claude Code where to find Pit Stop.
 
