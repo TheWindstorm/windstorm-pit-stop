@@ -12,7 +12,7 @@
                                 folder by itself; with --apply, write one lane
                                 profile per session (~/.claude/pit-stop/lanes/)
   optimize.py ... --max-steps N move each point at most N steps from where it
-                                is now (the weekly tune uses 1)
+                                is now (the daily tune uses 1)
   optimize.py ... --budget economy|balanced|roomy
                                 how hard to hold down usage (default: "budget"
                                 in ~/.claude/pit-stop/config.json, else
@@ -46,7 +46,7 @@ What it recommends:
   - idle point, window and hard ceiling: applied with --apply, within bounds
   - model and effort: SUGGESTIONS only, never applied. A person decides those,
     because they change quality and cost.
-These are heuristics, not guarantees. Re-run weekly; the profile records why.
+These are heuristics, not guarantees. Re-run now and then; the profile records why.
 """
 import argparse
 import json
@@ -93,6 +93,7 @@ def analyze(project, days, only=None):
     cache_read = cache_new = fresh_in = 0
     max_ctx = 0
     rereads = reread_checks = 0
+    by_comp = []           # one [time, tokens before, re-read checks, re-reads] per automatic compaction
     sessions = boundaries = 0
     outs = []
     drifts, cold_tokens, cold_wakes, t_first, t_last = [], 0, 0, None, None
@@ -101,7 +102,7 @@ def analyze(project, days, only=None):
     busiest = None                             # the most cache reads per day of any one session with a day of history
     for path in files:
         sessions += 1
-        prev_reads, cur_reads, after_compact = set(), set(), None
+        prev_reads, cur_reads, after_compact, comp_rec = set(), set(), None, None
         touched, cold_pending, last_kind, last_ts = [], False, None, None
         s_read, s_first, s_last = 0, None, None
         cur = {"peak": 0, "turns": 0, "start": None, "end": None}
@@ -124,6 +125,11 @@ def analyze(project, days, only=None):
                     cycles.append(cur)
                 cur = {"peak": 0, "turns": 0, "start": ts, "end": ts}
                 prev_reads, cur_reads, after_compact = cur_reads, set(), 0
+                md = e.get("compactMetadata") if isinstance(e.get("compactMetadata"), dict) else {}
+                comp_rec = None
+                if isinstance(md.get("preTokens"), int) and md.get("trigger") == "auto" and ts:
+                    comp_rec = [ts, md["preTokens"], 0, 0]
+                    by_comp.append(comp_rec)
                 continue
             t = e.get("type")
             if t == "user" and not e.get("isSidechain"):
@@ -192,6 +198,9 @@ def analyze(project, days, only=None):
                         if after_compact is not None and after_compact < REREAD_WINDOW:
                             reread_checks += 1
                             rereads += 1 if fp in prev_reads else 0
+                            if comp_rec is not None:
+                                comp_rec[2] += 1
+                                comp_rec[3] += 1 if fp in prev_reads else 0
                         cur_reads.add(fp)
                     if after_compact is not None:
                         after_compact += 1
@@ -225,6 +234,7 @@ def analyze(project, days, only=None):
         # folder shared by many light sessions is not a heavy one
         "busiest_session_read_per_day": busiest,
         "compactions_when": when,
+        "compaction_rereads": by_comp,
         "work_mix": {k: round(v / ntools, 2) for k, v in tools.items()},
         "tool_error_rate": round(errors / tool_results, 3) if tool_results else None,
         "prompts": len(prompts),
@@ -232,6 +242,43 @@ def analyze(project, days, only=None):
         "current_window": current_window(project),
         "current_idle_point": pc.env_int(project, pc.IDLE_ENV),
     }
+
+
+def start_of(window):
+    """Where Claude Code starts an automatic compaction for WINDOW (about WINDOW_MARGIN under it)."""
+    return window - WINDOW_MARGIN if window and window > WINDOW_MARGIN else None
+
+
+def at_point(m, lo=None, hi=None, since=None, until=None):
+    """How the automatic compactions with tokens-before in [LO, HI) and a time
+    in [SINCE, UNTIL) went: (count, re-read checks, re-read rate or None).
+    The caller picks bounds that only one window can have produced (see
+    check_last_move): a compaction's size alone does not tell its window,
+    because a Pit Stop hold can carry it well past where the window starts it,
+    and a session keeps the window it started with until its next restart."""
+    rows = [r for r in m.get("compaction_rereads") or []
+            if isinstance(r, list) and len(r) == 4
+            and (lo is None or r[1] >= lo) and (hi is None or r[1] < hi)
+            and (since is None or r[0] >= since) and (until is None or r[0] < until)]
+    checks, hits = sum(r[2] for r in rows), sum(r[3] for r in rows)
+    return len(rows), checks, (round(hits / checks, 2) if checks else None)
+
+
+def clean_history(h):
+    """A tune history as autotune.py writes it, with anything else dropped:
+    {"moves": [{"at": number, "from": int or None, "to": int}], "floor": {"value": int, "until": number}}.
+    A hand-edited or damaged file never stops a folder's tuning. Pure."""
+    num = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool)          # noqa: E731
+    whole = lambda x: isinstance(x, int) and not isinstance(x, bool) and x > 0        # noqa: E731
+    h = h if isinstance(h, dict) else {}
+    moves = [x for x in (h.get("moves") if isinstance(h.get("moves"), list) else [])
+             if isinstance(x, dict) and num(x.get("at")) and whole(x.get("to"))
+             and (x.get("from") is None or whole(x.get("from")))]
+    out = {"moves": moves}
+    fl = h.get("floor")
+    if isinstance(fl, dict) and whole(fl.get("value")) and num(fl.get("until")):
+        out["floor"] = {"value": fl["value"], "until": fl["until"]}
+    return out
 
 
 def current_window(project):
@@ -295,7 +342,67 @@ def read_saving(old, new):
     return round(1 - (SUMMARY_KEEPS + new - WINDOW_MARGIN) / (SUMMARY_KEEPS + old - WINDOW_MARGIN), 2)
 
 
-def recommend(m, context_limit=None, max_steps=None, budget=None):
+EVIDENCE_COMPACTIONS, EVIDENCE_CHECKS = 3, 10     # what a move needs at its new point before the next one
+EVIDENCE_WAIT = 14 * 86400                        # a move with no evidence after this long no longer holds things up
+UNDO_FLOOR = 14 * 86400                           # after an undone lowering, not lower again for this long
+
+
+def check_last_move(m, history, window, now):
+    """The tuner's own feedback loop: did its last move help? HISTORY is what
+    autotune.py keeps for the folder (see clean_history). Returns (window, why
+    lines, floor or None).
+    Which compactions count. A session keeps the window it started with, so
+    after a move both windows run for a while. Only compactions that the NEW
+    window alone can have produced count for it: after the move, and for a
+    lowering, smaller than where the old window would start one (for a raise,
+    or a first move, at least where the new one starts). The old window's
+    record is the compactions between the move before and this one.
+      - Too little evidence for the new point yet (fewer than 3 such automatic
+        compactions, or under 10 re-read checks): stay where it is and wait, so
+        one step is measured before the next is taken (at most 14 days).
+      - It LOWERED the window and the sessions now re-read much more after a
+        compaction (30% or more, and 15 points above the old point when that
+        has a record): it cost context, so it is undone, and the window is not
+        lowered again for 14 days.
+      - Otherwise it held up, and the usual recommendation goes ahead.
+    A move the user has since overridden (the window is not where the move
+    left it) is not judged. Pure, for tests."""
+    h = clean_history(history)
+    moves = h["moves"]
+    last, cur, why, floor = (moves[-1] if moves else None), m.get("current_window"), [], None
+    if last and cur == last["to"] and last["from"] != last["to"]:
+        new_start, old_start = start_of(last["to"]), start_of(last["from"])
+        lowered = bool(last["from"]) and last["to"] < last["from"]
+        lo, hi = new_start * 0.95, (old_start * 0.95 if lowered else None)
+        n_new, ch_new, r_new = at_point(m, lo, hi, since=last["at"])
+        prev_at = moves[-2]["at"] if len(moves) > 1 else None
+        n_old, _, r_old = (at_point(m, old_start * 0.95, None, since=prev_at, until=last["at"]) if old_start
+                           else (0, 0, None))
+        if n_new < EVIDENCE_COMPACTIONS or ch_new < EVIDENCE_CHECKS:
+            if now - last["at"] < EVIDENCE_WAIT and window != cur:
+                return cur, [f"waiting for evidence: {n_new} automatic compaction(s) at {pc.fmt_k(cur)} since the move "
+                             f"from {pc.fmt_k(last['from'])} (each move is measured before the next; needs "
+                             f"{EVIDENCE_COMPACTIONS})"], None
+        elif (lowered and r_new is not None and r_new >= 0.30
+              and (r_old is None or n_old < EVIDENCE_COMPACTIONS or r_new >= r_old + 0.15)):
+            floor = {"value": last["from"], "until": now + UNDO_FLOOR}
+            return last["from"], [f"undo: at {pc.fmt_k(cur)}, {int(r_new * 100)}% of early reads after a compaction "
+                                  f"re-read files from before it" + (f" ({int(r_old * 100)}% at {pc.fmt_k(last['from'])})"
+                                                                      if r_old is not None and n_old >= EVIDENCE_COMPACTIONS else "")
+                                  + f": the lower point cost context, so back to {pc.fmt_k(last['from'])}, and not lower "
+                                  f"again for 14 days"], floor
+        else:
+            why.append(f"the last move ({pc.fmt_k(last['from'])} -> {pc.fmt_k(cur)}) held up: {n_new} compactions there"
+                       + (f", {int(r_new * 100)}% re-reads after them" if r_new is not None else ""))
+    fl = h.get("floor") or {}
+    if fl and fl["until"] > now and window < fl["value"]:
+        why.append(f"not lower than {pc.fmt_k(fl['value'])} until {time.strftime('%Y-%m-%d', time.gmtime(fl['until']))} "
+                   f"(an earlier lowering was undone)")
+        window = fl["value"]
+    return window, why, floor
+
+
+def recommend(m, context_limit=None, max_steps=None, budget=None, history=None, now=None):
     budget = budget or pc.config().get("budget") or "balanced"
     if budget not in BUDGETS:
         budget = "balanced"
@@ -356,6 +463,13 @@ def recommend(m, context_limit=None, max_steps=None, budget=None):
         window = m["current_window"]
         why.append(f"economy budget: a window is not raised unless sessions re-read a lot after compacting; "
                    f"it stays at {pc.fmt_k(window)}")
+    floor_set = None
+    if history is not None and enough:
+        window, mwhy, floor_set = check_last_move(m, history, window, now or time.time())
+        if mwhy and mwhy[0].startswith(("waiting", "undo")):
+            why = why[:1] + mwhy                          # the other reasons do not apply this time
+        else:
+            why += mwhy
     saving = read_saving(m["current_window"], window)
     if saving >= 0.05:
         why.append(f"a window of {pc.fmt_k(window)} instead of {pc.fmt_k(m['current_window'])} should cut this folder's "
@@ -396,7 +510,7 @@ def recommend(m, context_limit=None, max_steps=None, budget=None):
     why += iwhy
     ceiling = max(min(window + 2 * step, int(limit * (0.85 if big else 0.90))), window)
     base = {"context_limit": limit, "idle_point": idle, "window": window, "ceiling": ceiling, "why": why,
-            "budget": budget, "usage_class": usage_class, "est_read_saving": saving}
+            "budget": budget, "usage_class": usage_class, "est_read_saving": saving, "floor_set": floor_set}
     er = m["tool_error_rate"]
     if m["prompts"] < MIN_PROMPTS_FOR_SUGGESTIONS:
         return dict(base, model_effort_suggestions=[
