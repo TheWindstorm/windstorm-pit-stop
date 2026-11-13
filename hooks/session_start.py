@@ -10,14 +10,15 @@ context; it never starts a turn.
     the next step unclear. Switch it off with "after_compact_note": false in
     ~/.claude/pit-stop/config.json.
   - On a normal START or RESUME it prints nothing. If tuning is on
-    ("auto_tune": true, set by /pit-stop setup), it starts scripts/autotune.py
-    for this folder in the background and returns at once; autotune does
-    nothing if the folder was tuned within "tune_every_days" (default 1).
+    ("auto_tune": true, set by /pit-stop setup), the folder is on
+    "tune_folders" (if there is a list) and its tune is due ("tune_every_days",
+    default 1), it starts scripts/autotune.py for this folder in the
+    background and returns at once. The Stop hook does the same at the end of
+    every turn, so a session that stays open for weeks is tuned too.
 Any error: print nothing, exit 0.
 """
 import json
 import os
-import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -42,13 +43,8 @@ def main():
             sys.stdout.write(AFTER_COMPACT)
         return 0
     cwd = payload.get("cwd")
-    if source in ("startup", "resume") and cfg.get("auto_tune") is True and cwd and os.path.isdir(cwd):
-        try:
-            subprocess.Popen([sys.executable, "-I", os.path.join(ROOT, "scripts", "autotune.py"), "--project", cwd],
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                             start_new_session=True, close_fds=True)
-        except Exception:
-            pass
+    if source in ("startup", "resume"):
+        pc.start_tune(cwd, cfg)
     return 0
 
 

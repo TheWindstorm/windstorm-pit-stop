@@ -2257,3 +2257,72 @@ def test_needs_you_names_sessions_kept_off_the_list_once_a_week_when_behind_a_we
     ny.refresh([_s("A", now=now)] + off, "2.1.322", now + 9000, force=True)
     assert "Ghost (in a folder that is Grant's call (BOARD 2026-11-12T17:16:18Z))" in told[-1]
     assert "  - Ghost: in a folder that is Grant's call" in open(ny.OUT).read() and "X:" not in open(ny.OUT).read()
+
+
+def test_tune_folders_narrows_tuning_to_a_test_group(tmp_path, monkeypatch):
+    import pitstop_common as pc
+    a, b = tmp_path / "a", tmp_path / "b"
+    a.mkdir(), b.mkdir()
+    assert pc.tune_wanted(str(a), {}) and pc.tune_wanted(str(a), {"tune_folders": []})          # no list: every folder
+    cfg = {"tune_folders": [str(a) + "/", "  "]}
+    assert pc.tune_wanted(str(a), cfg) and not pc.tune_wanted(str(b), cfg)                       # a trailing slash is the same folder
+    assert pc.tune_wanted(str(b), {"tune_folders": str(a)}) and pc.tune_wanted(str(b), {"tune_folders": [7]})   # junk never stops tuning
+    # the helper never picks a folder off the list (it would pick it every run and starve the others)
+    rab = _rab(tmp_path, monkeypatch)
+    monkeypatch.setattr(pc, "CONFIG", str(tmp_path / "config.json"))
+    (tmp_path / "config.json").write_text(json.dumps({"tune_folders": [str(b)]}))
+    sess = [{"name": "A", "cwd": str(a)}, {"name": "B", "cwd": str(b)}]
+    assert rab.tune_due(sess, time.time(), dict(rab.CFG), str(tmp_path / "tuned")) == str(b)
+
+
+def test_tuning_starts_from_the_hooks_with_no_timer_only_when_on_listed_and_due(tmp_path, monkeypatch):
+    import pitstop_common as pc
+    monkeypatch.setattr(pc, "STATE_DIR", str(tmp_path / "state"))
+    started = []
+    monkeypatch.setattr(pc.subprocess, "Popen", lambda cmd, **kw: started.append((cmd, kw)))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    now = time.time()
+    assert pc.start_tune(str(proj), {}, now) is False and not started                            # tuning off
+    on = {"auto_tune": True}
+    assert pc.start_tune(str(tmp_path / "gone"), on, now) is False                               # no such folder
+    assert pc.start_tune(None, on, now) is False
+    assert pc.start_tune(str(proj), dict(on, tune_folders=[str(tmp_path / "other")]), now) is False and not started
+    assert pc.start_tune(str(proj), on, now) is True and len(started) == 1
+    cmd, kw = started[0]
+    assert cmd[-3:] == [os.path.join(ROOT, "scripts", "autotune.py"), "--project", str(proj)] and "--force" not in cmd
+    assert kw.get("start_new_session") is True
+    st = pc.tune_stamp(str(proj))
+    os.makedirs(os.path.dirname(st), exist_ok=True)
+    open(st, "w").write("1")
+    assert pc.start_tune(str(proj), on, time.time()) is False and len(started) == 1              # tuned just now: a stat, nothing else
+    os.utime(st, (now - 86400, now - 86400))
+    assert pc.start_tune(str(proj), on, now) is True                                             # a day later: due again
+    assert pc.start_tune(str(proj), dict(on, tune_every_days=7), now) is False                   # weekly: not yet
+    monkeypatch.setattr(pc.subprocess, "Popen", lambda cmd, **kw: (_ for _ in ()).throw(OSError("no")))
+    os.utime(st, (now - 86400, now - 86400))
+    assert pc.start_tune(str(proj), on, now) is False                                            # never raises
+
+
+def test_the_stop_hook_starts_the_daily_tune_and_autotune_honours_the_list(tmp_path):
+    state = tmp_path / "cfg" / "pit-stop"
+    state.mkdir(parents=True)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    import pitstop_common as pc
+    stamp = state / "tuned" / pc.project_key(str(proj))
+    (state / "config.json").write_text(json.dumps({"auto_tune": True, "tune_folders": [str(tmp_path / "other")]}))
+    assert _run("stop_pit_stop.py", {"session_id": "t-1", "cwd": str(proj)}, tmp_path)[:2] == (0, "")
+    time.sleep(1.5)
+    assert not stamp.exists()                                                                    # not on the list: never started
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp_path / "cfg"), HOME=str(tmp_path / "home"))
+    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "autotune.py"), "--project", str(proj)],
+                       capture_output=True, text=True, env=env)
+    assert r.returncode == 0 and r.stdout == "" and not stamp.exists()                           # autotune itself honours the list
+    (state / "config.json").write_text(json.dumps({"auto_tune": True}))
+    assert _run("stop_pit_stop.py", {"session_id": "t-1", "cwd": str(proj)}, tmp_path)[:2] == (0, "")   # the stop is never held for it
+    for _ in range(50):
+        if stamp.exists():
+            break
+        time.sleep(0.1)
+    assert stamp.exists()                                                                        # the tune ran, in the background

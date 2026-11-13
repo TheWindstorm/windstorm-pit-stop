@@ -16,6 +16,10 @@ at most one thing, and almost always nothing:
      version: type /restart at a break. Claude does not see it and no turn
      starts. Switch it off with "nudge": false in ~/.claude/pit-stop/config.json.
 
+It also starts the daily tune of the session's folder in the background when
+tuning is on and due (see pitstop_common.start_tune): a session left open for
+weeks is tuned too, with no timer.
+
 It never blocks twice in a row (stop_hook_active), allows the stop on any
 error, and leaves a stamp per session so the restart helper knows the plugin
 is loaded there. Reads and writes only under ~/.claude/pit-stop/.
@@ -104,6 +108,7 @@ def main():
         return 0
     key = pc.safe_id(sid)
     touch(os.path.join(pc.SEEN, key))
+    pc.start_tune(payload.get("cwd"))   # the daily tune, when on and due: a stat, or one background start
     askf = os.path.join(pc.ASKS, key + ".json")
     a = pc.read_json(askf, None)
     if isinstance(a, dict) and not a.get("delivered"):

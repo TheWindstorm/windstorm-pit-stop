@@ -54,7 +54,7 @@ Tell them plainly:
 - `hooks/precompact_wait_for_break.py` holds AUTOMATIC compaction while a tool call is in flight and lets it run at the next break. It never blocks a manual `/compact`, allows anything at or above the ceiling, and allows on any error. When an automatic compaction goes ahead it prints a keep-list for the summary. Log, counts only: `~/.claude/pit-stop/precompact.log`.
 - `hooks/session_start.py` adds a three-line checklist after a compaction, and starts the daily tune in the background when it is switched on.
 - `hooks/stop_pit_stop.py` hands over a waiting background-jobs ask once, or shows the user one line when an update is waiting and fleet mode is not running.
-- Switches, in `~/.claude/pit-stop/config.json`: `auto_tune`, `compact_instructions` (false, or a string of extra notes), `after_compact_note`, `nudge`.
+- Switches, in `~/.claude/pit-stop/config.json`: `auto_tune`, `tune_folders` (a list of folders: tune only these), `compact_instructions` (false, or a string of extra notes), `after_compact_note`, `nudge`.
 
 ## If you are the session being asked
 A message that starts "Pit Stop (this plugin's own hook, set up by your user)" at the end of your turn comes from this plugin's Stop hook. Do what it says: sort your background jobs; if any is real work in progress, change nothing and end your turn; otherwise list the ones you will start again in the file it names, stop them, and end your turn. Do not type `/restart` yourself.

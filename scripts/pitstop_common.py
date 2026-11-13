@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 
 HOME = os.path.expanduser("~")
@@ -208,15 +209,72 @@ def fmt_k(n):
 
 def config():
     """User-level switches in ~/.claude/pit-stop/config.json (all optional):
-      auto_tune            true = re-tune each folder daily in the background (set by /pit-stop setup)
+      auto_tune            true = re-tune each folder daily in the background (set by /pit-stop setup);
+                           started by the SessionStart and Stop hooks, and in fleet mode by the helper
       tune_every_days      days between two tunes of one folder (1 to 30, default 1)
       compact_instructions true (default), false, or a string of extra notes for the summary
       checkpoint_break     false = during a hold, a finished git commit or push does not count as a break
       nudge                false = never show the "an update is waiting" line
       budget               "economy", "balanced" (default) or "roomy": how hard tuning holds down usage
+      tune_folders         a list of folders: tune only these (for a test group); absent or empty = every folder
     """
     d = read_json(CONFIG, {})
     return d if isinstance(d, dict) else {}
+
+
+def tune_every(cfg=None):
+    """Seconds between two tunes of one folder: "tune_every_days" (1 to 30, default 1)."""
+    v = (config() if cfg is None else cfg).get("tune_every_days", 1)
+    v = v if isinstance(v, (int, float)) and not isinstance(v, bool) else 1
+    return max(1, min(30, v)) * 86400
+
+
+def _norm_dir(p):
+    return os.path.normcase(os.path.normpath(os.path.abspath(os.path.expanduser(p))))
+
+
+def tune_wanted(folder, cfg=None):
+    """True unless config.json "tune_folders" lists folders and FOLDER is not one of them.
+    Anything but a list of strings counts as no list (every folder), so a typo never stops tuning silently
+    for everyone; it can only fail to narrow it."""
+    lst = (config() if cfg is None else cfg).get("tune_folders")
+    if not isinstance(lst, list):
+        return True
+    dirs = [_norm_dir(x) for x in lst if isinstance(x, str) and x.strip()]
+    return not dirs or _norm_dir(folder) in dirs
+
+
+def tune_stamp(folder):
+    return os.path.join(STATE_DIR, "tuned", project_key(folder))
+
+
+def tune_due_now(folder, now, cfg=None):
+    """True when FOLDER's last tune is at least one cadence old (or it was never tuned). A little slack, so a
+    daily tune never slips a day."""
+    try:
+        return now - os.path.getmtime(tune_stamp(folder)) >= tune_every(cfg) - 600
+    except OSError:
+        return True
+
+
+def start_tune(cwd, cfg=None, now=None):
+    """Start scripts/autotune.py for CWD in the background when tuning is on ("auto_tune"), the folder is on
+    "tune_folders" (if there is a list) and its tune is due. The SessionStart hook calls this when a session
+    starts, and the Stop hook at the end of every turn, so a session left open for weeks is tuned too, with no
+    timer and no helper. Costs a stat when nothing is due; never waits; never raises. Returns True when it
+    started one."""
+    try:
+        cfg = config() if cfg is None else cfg
+        if cfg.get("auto_tune") is not True or not isinstance(cwd, str) or not cwd or not os.path.isdir(cwd):
+            return False
+        if not tune_wanted(cwd, cfg) or not tune_due_now(cwd, time.time() if now is None else now, cfg):
+            return False
+        subprocess.Popen([sys.executable, "-I", os.path.join(os.path.dirname(os.path.abspath(__file__)), "autotune.py"),
+                          "--project", cwd], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True, close_fds=True)
+        return True
+    except Exception:
+        return False
 
 
 def vkey(v):

@@ -1116,9 +1116,7 @@ def plugin_root_now():
 
 def tune_every():
     """Seconds between two tunes of one folder ("tune_every_days" in config.json, default 1)."""
-    v = pc.config().get("tune_every_days", 1)
-    v = v if isinstance(v, (int, float)) and not isinstance(v, bool) else 1
-    return max(1, min(30, v)) * 86400
+    return pc.tune_every()
 
 
 def tune_due(sessions, now, cfg, tuned_dir=None, week=None):
@@ -1134,6 +1132,8 @@ def tune_due(sessions, now, cfg, tuned_dir=None, week=None):
         if not cwd or not s.get("name") or not allowed(s["name"], cwd, cfg) or not os.path.isdir(cwd):
             continue
         folder = os.path.abspath(cwd)
+        if not pc.tune_wanted(folder):          # config.json "tune_folders": a test group only
+            continue
         try:
             at = os.path.getmtime(os.path.join(tuned_dir, pc.project_key(folder)))
         except OSError:

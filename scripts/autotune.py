@@ -39,9 +39,7 @@ KEEP_MOVES = 20
 
 def every(cfg=None):
     """Seconds between tunes of one folder: "tune_every_days" (1 to 30, default 1)."""
-    v = (pc.config() if cfg is None else cfg).get("tune_every_days", 1)
-    v = v if isinstance(v, (int, float)) and not isinstance(v, bool) else 1
-    return max(1, min(30, v)) * DAY
+    return pc.tune_every(cfg)
 
 
 def due(stamp, now, force):
@@ -78,7 +76,7 @@ def main():
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args()
     project = os.path.abspath(a.project)
-    if not a.force and not a.dry and pc.config().get("auto_tune") is not True:
+    if not a.force and not a.dry and (pc.config().get("auto_tune") is not True or not pc.tune_wanted(project)):
         return 0
     stamp = os.path.join(pc.STATE_DIR, "tuned", pc.project_key(project))
     now = time.time()
