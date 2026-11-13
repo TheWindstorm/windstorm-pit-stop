@@ -20,7 +20,7 @@ The aim: you stop thinking about when to refresh context and which sessions are 
 - **It doesn't lose the thread.** It refreshes between tasks, not in the middle of one, whenever it can.
 - **It learns each project.** It fits the refresh point of each of your projects to that project's own history.
 - **It keeps you current.** It tells you when a newer Claude Code is ready. If you run sessions in tmux, it moves them onto it at a break, same conversation.
-- **It costs almost nothing to run.** It is plain code on your computer and never calls an AI to decide anything. On the machine we measured it cost about 2% of a day's usage.
+- **Small overhead.** It is plain code on your computer and never calls an AI to decide anything. On the machine we measured it cost about 2% of the day's usage.
 - **What it can save** (modelled from one real day): refreshing at 300K instead of letting a session run to 700K saves about $820 a month per busy session on Opus 5.5, or about $410 on Sonnet 5.5. Details below.
 
 It works with Claude Code only, for now. [Install it](#install) in about a minute.
@@ -93,7 +93,7 @@ Pit Stop lives here, in The Windstorm's GitHub organization ([github.com/TheWind
 Install the Claude Code plugin from https://github.com/TheWindstorm/windstorm-pit-stop using the terminal commands in the Install section of its README, then tell me what to type next.
 ```
 
-Claude runs the two terminal commands below for you, then tells you to type `/reload-plugins` and `/pit-stop setup`.
+Claude can run the two terminal commands below for you. Then type `/reload-plugins` and `/pit-stop setup` (step 3 below).
 
 **Or do it yourself.** It takes about a minute. You type three short commands, **one at a time**, into Claude Code itself (the box where you talk to Claude), not into a separate terminal window. Paste them one at a time: pasted together they arrive as one message and do not run as three commands.
 
