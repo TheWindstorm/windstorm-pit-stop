@@ -165,6 +165,11 @@ def label(folder):
     return "~" if f == os.path.abspath(pc.HOME) else os.path.basename(f) or f
 
 
+def tokens(n):
+    """A token count people can read at a glance: 1.6 billion, 640 million."""
+    return f"{n / 1e9:.1f} billion" if n >= 1e9 else f"{n / 1e6:.0f} million"
+
+
 def hours(sec):
     return f"{sec / 3600:.0f} hours" if sec < 72 * 3600 else f"{sec / 86400:.0f} days"
 
@@ -187,7 +192,7 @@ def compare(base, cur):
 
 def render_text(d, cmp_lines):
     t = d["totals"]
-    out = [f"PIT STOP CHECKUP ({time.strftime('%a %Y-%m-%d %H:%M', time.localtime(d['at']))}, last {d['days']} days, this computer only)",
+    out = [f"PIT STOP CHECKUP ({time.strftime('%a %Y-%m-%d %H:%M', time.localtime(d['at']))}, last {d['days']} days, your sessions on this computer only)",
            "",
            f"{t['sessions']} Claude Code sessions running; {t['on_newest']} on the newest version installed ({d['newest'] or 'not found'})."]
     waiting = sorted((r for r in d["sessions"] if r["waiting_s"] is not None), key=lambda r: -r["waiting_s"])
@@ -219,14 +224,14 @@ def render_text(d, cmp_lines):
                        f"{pc.fmt_k(s.get('window')):>7} {pc.fmt_k(s.get('fitted_window')):>7} {sav:>16}")
     if t["saving_usd_month"] > 0:
         out += ["", f"Modelled: moving every project to its fitted refresh point would cut cached reads by about "
-                    f"{t['saving_tokens_day'] / 1e6:.0f}M tokens a day, about ${t['saving_usd_month']:,} a month at list prices. "
+                    f"{tokens(t['saving_tokens_day'])} tokens a day, about ${t['saving_usd_month']:,} a month at list prices. "
                     f"An estimate from your own history, not a measurement; daily tuning moves one step at a time and checks each step."]
     mem = [s for s in d["folders"] if s.get("memory_lines", 0) > pc.MEMORY_LOAD_LINES]
     if mem:
         out += ["", f"{len(mem)} project(s) have a memory index past the {pc.MEMORY_LOAD_LINES} lines Claude Code loads: "
                     f"run /pit-stop reading in each."]
     out += ["", "What Pit Stop does now:",
-            "- holds an automatic refresh that arrives mid-task until the next break (in every session with its hooks)",
+            "- holds an automatic refresh that arrives mid-task until the next break whenever it can (in every session with its hooks)",
             ("- daily tuning is ON: each project moves one step toward its fitted point and the step is measured"
              if d["pitstop"]["auto_tune"] else "- daily tuning is OFF: /pit-stop setup switches it on"),
             ("- fleet mode is ON: sessions behind are restarted onto the newest Claude Code at a break"
@@ -286,14 +291,14 @@ def render_html(d, cmp_lines, share=False):
                      + (f", for {hours(r['behind_s'])}" if r["behind_s"] else "") + "</li>"
                      for r in sorted(d["sessions"], key=lambda r: -(r["behind_s"] or 0)) if r["behind_s"] is not None)
     saving = (f"<p><b>Modelled:</b> moving every project to its fitted refresh point would cut cached reads by about "
-              f"{t['saving_tokens_day'] / 1e6:.0f}M tokens a day, about ${t['saving_usd_month']:,} a month at list prices. "
+              f"{tokens(t['saving_tokens_day'])} tokens a day, about ${t['saving_usd_month']:,} a month at list prices. "
               f"An estimate from your own history, not a measurement.</p>" if t["saving_usd_month"] > 0 else "")
     since = ("<div class='card'><h2>Since your first checkup</h2><ul>" + "".join(f"<li>{e(x[2:])}</li>" for x in cmp_lines[1:])
              + "</ul></div>") if cmp_lines else ""
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Pit Stop Checkup</title><style>{CSS}</style></head><body><main>
 <div><h1>Pit Stop checkup</h1><p class="mut">{time.strftime('%A %Y-%m-%d %H:%M', time.localtime(d['at']))} · last {d['days']} days ·
-this computer only · counts and times, never what was said · nothing was sent anywhere</p></div>
+your sessions on this computer only · counts and times, never what was said · nothing was sent anywhere</p></div>
 <div class="tiles">
 <div class="tile ok"><b>{t['on_newest']}/{t['sessions']}</b>sessions on the newest Claude Code</div>
 <div class="tile {'bad' if t['behind'] else 'ok'}"><b>{t['behind']}</b>behind on an older version</div>
@@ -302,7 +307,7 @@ this computer only · counts and times, never what was said · nothing was sent 
 </div>
 <div class="card"><h2>Where your {t['compactions']} automatic refreshes landed</h2>
 <svg viewBox="0 0 760 54" width="100%" role="img" aria-label="Where refreshes landed">{''.join(bars)}</svg>
-<p class="mut">A refresh in the middle of a task summarises half-done work. Pit Stop holds it until the next break.</p></div>
+<p class="mut">A refresh in the middle of a task summarises half-done work. Pit Stop holds it until the next break whenever it can.</p></div>
 {since}
 {'<div class="card"><h2>Waiting on you</h2><ul>' + people + '</ul></div>' if people else ''}
 {'<div class="card"><h2>Behind the newest Claude Code (' + e(d['newest'] or '') + ')</h2><ul>' + behind + '</ul></div>' if behind else ''}

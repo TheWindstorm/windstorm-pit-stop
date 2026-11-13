@@ -2391,7 +2391,7 @@ def test_checkup_reports_waiting_behind_and_mid_task_refreshes_from_local_histor
     txt = ck.render_text(d, [])
     assert "Lane One: 43 hours" in txt and "Lane One: on 2.1.319" in txt and "in the middle of a task: 4 (100%" in txt
     assert "Lane Two" in txt and "/reload-plugins" in txt                                  # not on this release's hooks yet
-    assert "daily tuning is OFF" in txt
+    assert "daily tuning is OFF" in txt and "your sessions on this computer only" in txt
     # only what it can judge: a window it does not know gives no saving, never a made-up one
     assert t["saving_usd_month"] == 0 and "Modelled:" not in txt
     page = ck.render_html(d, [])
@@ -2420,6 +2420,7 @@ def test_checkup_modelled_saving_only_when_the_fitted_window_is_lower(tmp_path, 
     monkeypatch.setattr(ck, "last_model", lambda folder: "some-other-model")
     s = ck.folder_stats(proj, 0, 14)
     assert s["saving_tokens_day"] and s["saving_usd_month"] is None                          # unknown price: tokens only
+    assert ck.tokens(1_638_000_000) == "1.6 billion" and ck.tokens(640_000_000) == "640 million"
     assert ck.read_price("claude-sonnet-5-5") == 0.10 and ck.read_price("claude-opus-5") == 0.50 and ck.read_price(None) is None
 
 
