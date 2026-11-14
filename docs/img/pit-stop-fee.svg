@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 130" width="720" height="130"><style>
+.bg{fill:#ffffff}.fg{fill:#1c2124}.mut{fill:#5d676c}.ln{stroke:#d9dedc}.acc{fill:#c2410c}.accs{stroke:#c2410c}
+.good{fill:#1f7a55}.goods{stroke:#1f7a55}.bar{fill:#5d676c}.dark{fill:#1c2124}
+text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+.ax{font-size:12px}.lb{font-size:13px;font-weight:600}.tt{font-size:15px;font-weight:700}
+@media (prefers-color-scheme:dark){.bg{fill:#0d1117}.fg,.dark{fill:#e6edf3}.mut,.bar{fill:#8b949e}.ln{stroke:#30363d}
+.acc{fill:#f08a4b}.accs{stroke:#f08a4b}.good{fill:#4cc08d}.goods{stroke:#4cc08d}}
+</style><rect class="bg" width="720" height="130" rx="6"/><text x="20.0" y="30.0" class="lb fg" text-anchor="start">Everything 48 busy sessions did in a day: $1,702</text><rect x="20" y="42" width="680" height="34" class="bar" fill-opacity="0.35" rx="3"/><rect x="684.8" y="42" width="15.2" height="34" class="acc" rx="3"/><text x="700.0" y="98.0" class="lb acc" text-anchor="end">Pit Stop: $38 (2.2%)</text><text x="700.0" y="116.0" class="ax mut" text-anchor="end">holding for breaks $23 + restarts $15</text></svg>
