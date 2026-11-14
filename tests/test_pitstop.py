@@ -955,6 +955,59 @@ def test_type_line_never_types_a_note_over_the_limit(tmp_path, monkeypatch):
     assert ("send-keys", "-t", "pane-2", "Enter") in sent
 
 
+def _fake_box(rab, monkeypatch, box, per_ctrl_u):
+    """A pane whose input box holds BOX[0]; each Ctrl-U removes PER_CTRL_U characters
+    from its end (one wrapped line), or nothing when PER_CTRL_U is 0."""
+    sent, told = [], []
+
+    def tmux(*a):
+        sent.append(a)
+        if a[-1] == "C-u":
+            box[0] = box[0][:-per_ctrl_u] if per_ctrl_u else box[0]
+    monkeypatch.setattr(rab, "LIVE", True)
+    monkeypatch.setattr(rab, "tmux", tmux)
+    monkeypatch.setattr(rab, "input_empty", lambda t: True)
+    monkeypatch.setattr(rab, "screen_busy", lambda t: False)
+    monkeypatch.setattr(rab, "screen", lambda t, escapes=False: [rab.PROMPT + (" " + box[0] if box[0] else "")])
+    monkeypatch.setattr(rab, "notify", lambda m: told.append(m))
+    monkeypatch.setattr(rab.time, "sleep", lambda n: None)
+    return sent, told
+
+
+def test_a_mismatch_keeps_clearing_its_own_long_note_and_says_so_when_it_cannot(tmp_path, monkeypatch):
+    # Mac mini 2026-11-14: the box read back 258 of 497 characters, one Ctrl-U did not empty it,
+    # and the note sat in Windy Fly Mobile's box until a person pressed Enter.
+    rab = _rab(tmp_path, monkeypatch)
+    note = "word " * 99
+    box = ["".join(note.split())[:258]]           # what the check read back: not our whole text
+    sent, told = _fake_box(rab, monkeypatch, box, per_ctrl_u=100)
+    assert rab.type_line("pane-1", note) == (False, "mismatch")
+    assert box[0] == "" and told == []            # kept pressing Ctrl-U until the box was empty
+    assert not any(a[-1] == "Enter" for a in sent)
+    assert sum(a[-1] == "C-u" for a in sent) == 3
+
+    # Ctrl-U that does nothing: bounded tries, no Enter, and a person is told
+    box[0] = "".join(note.split())[:258]
+    sent, told = _fake_box(rab, monkeypatch, box, per_ctrl_u=0)
+    assert rab.type_line("pane-2", note) == (False, "mismatch")
+    assert sum(a[-1] == "C-u" for a in sent) == rab.CLEAR_TRIES
+    assert not any(a[-1] == "Enter" for a in sent)
+    assert len(told) == 1 and "pane-2" in told[0] and "Look before pressing Enter" in told[0]
+    log = open(os.path.join(rab.BASE, "restart.log")).read()
+    assert "COULD NOT CLEAR" in log
+
+
+def test_a_mismatch_never_keeps_clearing_text_that_is_not_its_own(tmp_path, monkeypatch):
+    # someone typed in the second after the helper did: one Ctrl-U as before, then hands off
+    rab = _rab(tmp_path, monkeypatch)
+    box = ["hello from a person who is typing right now"]
+    sent, told = _fake_box(rab, monkeypatch, box, per_ctrl_u=5)
+    assert rab.type_line("pane-1", "/restart") == (False, "mismatch")
+    assert sum(a[-1] == "C-u" for a in sent) == 1
+    assert box[0] == "hello from a person who is typing righ" and len(told) == 1
+    assert not any(a[-1] == "Enter" for a in sent)
+
+
 def test_live_restart_with_a_long_list_names_the_file_and_a_mismatch_stops_carrying_the_list(tmp_path, monkeypatch):
     import re
     import time
