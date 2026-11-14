@@ -293,13 +293,37 @@ def type_line(target, text):
     # EXACTLY our text; otherwise clear the line and skip.
     got = input_box_text(screen(target, escapes=True))
     if not same_text(got, text):
-        tmux("send-keys", "-t", target, "C-u")
         read = "no input box found" if got is None else f"read {len(''.join(got.split()))} chars"
-        log(f"{target}: input box did not match the typed text ({read}, typed {len(''.join(text.split()))}); "
-            f"cleared it, skipped, no Enter")
+        why = f"input box did not match the typed text ({read}, typed {len(''.join(text.split()))})"
+        if clear_ours(target, text):
+            log(f"{target}: {why}; cleared it, skipped, no Enter")
+        else:
+            log(f"{target}: {why}; COULD NOT CLEAR it: text is left in the input box, no Enter; "
+                f"nothing more is typed there until the box is empty")
+            notify(f"pit-stop: {target}: the input box may still hold text the helper typed (its check before "
+                   f"Enter failed and clearing did not empty it). Look before pressing Enter; Ctrl-U clears it.")
         return False, "mismatch"
     tmux("send-keys", "-t", target, "Enter")
     return True, ""
+
+
+CLEAR_TRIES = 6   # Ctrl-U presses at most, after a mismatch (each can take one wrapped line of a long note)
+
+
+def clear_ours(target, text):
+    """After a typing mismatch: press Ctrl-U, and keep pressing it only while what is
+    left in the box is part of our own text, never someone else's. True when the box
+    ends empty. (0.1.4 pressed Ctrl-U once and never looked: a long note stayed.)"""
+    ours = "".join(text.split())
+    for _ in range(CLEAR_TRIES):
+        tmux("send-keys", "-t", target, "C-u")
+        time.sleep(0.5)
+        left = input_box_text(screen(target, escapes=True))
+        if left == "":
+            return True
+        if left is None or "".join(left.split()) not in ours:
+            return False   # no box to read, or text that is not ours: leave it alone
+    return False
 
 
 def mismatch_wait(n, cfg):

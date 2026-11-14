@@ -229,7 +229,7 @@ Settings live in `~/.claude/pit-stop/restart.json` (see the top of `scripts/rest
 - **Fails safe.** Every hook allows on any error. The restart helper skips anything it cannot read.
 - **Never mid-task.** It never types into a session with text in its input box, a dialog open, or work running, and never restarts one with background jobs it hasn't agreed to stop. Claude Code itself refuses `/restart` while background work runs.
 - **Never a cold, costly turn.** Nothing that starts a turn is typed into a big session whose cache has gone cold.
-- **Checks before Enter.** After typing, the restart helper presses Enter only if the input box holds exactly what it typed; otherwise it clears the line, skips, and backs off that session.
+- **Checks before Enter.** After typing, the restart helper presses Enter only if the input box holds exactly what it typed; otherwise it clears the line, checks that the box is empty, skips, and backs off that session. If it cannot empty the box, it leaves any text that is not its own alone and tells you through `notify_command`.
 - **Asks through its own hook.** The background-jobs ask reaches Claude through the plugin's Stop hook, once, and never twice in a row.
 - **One measured step at a time.** Tuning moves a point at most one step a day, waits until that step has been measured, undoes a lowering that cost context, and keeps the newest three backups of the settings file.
 - **Your folder, not the project's.** Profiles, switches and extra summary notes are read from `~/.claude/pit-stop/` only, so a cloned repo cannot steer the summary. A ceiling from a 0.1.x project file is still read, and clamped.
