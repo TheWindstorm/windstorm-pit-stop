@@ -16,6 +16,10 @@ at most one thing, and almost always nothing:
      version: type /restart at a break. Claude does not see it and no turn
      starts. Switch it off with "nudge": false in ~/.claude/pit-stop/config.json.
 
+It also starts the daily tune of the session's folder in the background when
+tuning is on and due (see pitstop_common.start_tune): a session left open for
+weeks is tuned too, with no timer.
+
 It never blocks twice in a row (stop_hook_active), allows the stop on any
 error, and leaves a stamp per session so the restart helper knows the plugin
 is loaded there. Reads and writes only under ~/.claude/pit-stop/.
@@ -34,6 +38,17 @@ LOG = os.path.join(pc.STATE_DIR, "stop.log")
 
 def ask_text(a):
     okf = a.get("okf") or ""
+    days = a.get("days") or 0
+    if days:  # behind for days because the jobs never stop: the helper asks for everything that can be restarted
+        return (f"Pit Stop (this plugin's own hook, set up by your user): Claude Code {a.get('newest')} is installed and "
+                f"this session runs {a.get('ver')}. For {days} days its background jobs have kept it from restarting "
+                f"(Claude Code will not restart a session while they run). It has waited long enough. At the next point where "
+                f"nothing is lost (a run has finished, work is saved, a job can pick up where it stopped), stop ALL your "
+                f"background jobs, real work too if it can be started again: (1) write one line per job, with how to "
+                f"start it again, into {okf}; (2) stop them yourself; (3) end your turn. The restart helper then restarts "
+                f"this session within a few minutes, same conversation, and tells you to start your jobs again. Only if a "
+                f"job cannot be stopped at all without losing work, change nothing and end your turn: you will be asked "
+                f"again later. Do not type /restart yourself. No reply to the user is needed for this.")
     return (f"Pit Stop (this plugin's own hook, set up by your user): Claude Code {a.get('newest')} is installed and this "
             f"session runs {a.get('ver')}. Claude Code will not restart a session while background work runs, and you have "
             f"background jobs. Sort them now: (A) watchers, monitors and loops that you can simply start again; "
@@ -50,11 +65,14 @@ OK_DIR = os.path.join(pc.STATE_DIR, "restart", "ok")
 
 def ask_ok(a):
     """True when every field the ask prints is what the restart helper writes:
-    two plain version numbers, and a re-arm list path directly inside
+    two plain version numbers, a whole number of days (or none), and a re-arm list path directly inside
     ~/.claude/pit-stop/restart/ok/ made of letters, digits, '.', '_' and '-'.
     The text goes to Claude as an instruction, so a file with anything else in
     it (someone else's writing, a path elsewhere, a line break) is not passed on."""
     if not all(isinstance(a.get(k), str) and VERSION.fullmatch(a[k]) for k in ("newest", "ver")):
+        return False
+    days = a.get("days", 0)
+    if days is not None and (not isinstance(days, int) or isinstance(days, bool) or not 0 <= days <= 3650):
         return False
     okf = a.get("okf")
     if not isinstance(okf, str) or len(okf) > 400:
@@ -90,6 +108,7 @@ def main():
         return 0
     key = pc.safe_id(sid)
     touch(os.path.join(pc.SEEN, key))
+    pc.start_tune(payload.get("cwd"))   # the daily tune, when on and due: a stat, or one background start
     askf = os.path.join(pc.ASKS, key + ".json")
     a = pc.read_json(askf, None)
     if isinstance(a, dict) and not a.get("delivered"):

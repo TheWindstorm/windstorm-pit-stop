@@ -6,7 +6,11 @@
   setup.py --fleet [--apply]  also set up fleet mode (tmux): the launcher and
                               a timer that runs the pit stop every few minutes
 Options:
-  --no-auto-tune              leave weekly tuning off
+  --no-auto-tune              leave tuning off
+  --plugin-updates pit-stop|all|off
+                              fleet mode: what the helper keeps up to date
+                              before it restarts sessions (default pit-stop;
+                              written only into a NEW restart.json)
   --no-tune-now               do not tune the folders of the running sessions now
   --interval MIN              minutes between fleet runs (default 5)
   --days N                    days of history to read when tuning (default 14)
@@ -18,21 +22,26 @@ Options:
                               roomy: tune for memory only.
 
 What --apply does:
-  1. Weekly tuning ON ("auto_tune": true in ~/.claude/pit-stop/config.json):
+  1. Tuning ON ("auto_tune": true in ~/.claude/pit-stop/config.json):
      each folder's two compaction points are re-fitted to its own history once
-     a week, one step at a time, in the background.
+     a day, one step at a time, in the background; each step is measured
+     before the next, and a lowering that cost context is undone.
   2. Tunes the folder of every running session now (and the current folder).
      Settings files are backed up first; only Pit Stop's two keys change.
 With --fleet it also:
   3. Copies the launcher to ~/.claude/pit-stop/bin/pit-stop-restart, so the
      timer keeps working across plugin updates.
   4. Writes ~/.claude/pit-stop/restart.json ONLY if there is none (it finds
-     which tmux server holds your sessions). An existing file is never changed.
+     which tmux server holds your sessions, and sets plugin_updates: the
+     helper then brings this plugin, or all plugins, up to date with Claude
+     Code's own commands before it restarts anyone, so one restart brings the
+     newest Claude Code and the newest plugins). An existing file is never
+     changed.
   5. Installs a timer (systemd user timer on Linux, launchd on macOS) that
      runs the launcher with --live. If something already schedules
      restart_at_break.py, it changes nothing and prints the one line to edit.
 Nothing here needs sudo. Undo: delete the timer files it names, and set
-"auto_tune": false.
+"auto_tune": false (and "plugin_updates": "off" in restart.json).
 """
 import argparse
 import glob
@@ -163,6 +172,7 @@ def main():
     ap.add_argument("--interval", type=int, default=5)
     ap.add_argument("--days", type=int, default=14)
     ap.add_argument("--budget", choices=op.BUDGETS)
+    ap.add_argument("--plugin-updates", choices=("pit-stop", "all", "off"), default="pit-stop")
     a = ap.parse_args()
     word = "DOING" if a.apply else "PLAN (nothing is changed; add --apply)"
     sessions, source = pc.live_sessions()
@@ -178,7 +188,7 @@ def main():
         print("  NOTE: Claude Code has no /restart on Windows or WSL. Compaction tuning works; fleet mode does not.")
 
     budget = a.budget or (pc.config().get("budget") if pc.config().get("budget") in op.BUDGETS else None) or "balanced"
-    print("1. Weekly tuning: " + ("left off (--no-auto-tune)" if a.no_auto_tune else "ON (auto_tune: true)")
+    print("1. Tuning: " + ("left off (--no-auto-tune)" if a.no_auto_tune else "ON (auto_tune: true), daily")
           + f"; usage budget: {budget}" + ("" if a.budget else " (change it with --budget economy|balanced|roomy)"))
     if a.apply and (a.budget or not a.no_auto_tune):
         cfg, err = pc.read_json_strict(pc.CONFIG)
@@ -245,11 +255,11 @@ def main():
     if os.path.exists(rj):
         print(f"4. {rj}: exists, left exactly as it is")
     else:
-        print(f"4. {rj}: new, with tmux_socket = {best!r} (add allow_names, deny_names, deny_name_globs or deny_paths "
-              f"there to keep sessions out)")
+        print(f"4. {rj}: new, with tmux_socket = {best!r} and plugin_updates = {a.plugin_updates!r} (add allow_names, "
+              f"deny_names, deny_name_globs or deny_paths there to keep sessions out)")
         if a.apply:
             pc.write_json_atomic(rj, {"tmux_socket": best, "allow_names": [], "deny_names": [],
-                                      "deny_name_globs": [], "deny_paths": []})
+                                      "deny_name_globs": [], "deny_paths": [], "plugin_updates": a.plugin_updates})
     hits = already_scheduled()
     if hits:
         print("5. timer: something already schedules the restart helper; nothing changed:")

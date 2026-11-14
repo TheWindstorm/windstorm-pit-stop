@@ -32,6 +32,7 @@ NOT_LISTED = "not on the list the helper may touch"
 WAITING_AFTER = 2 * 3600
 STUCK_AFTER = 24 * 3600
 EVERY = 3600
+OFF_LIST_AFTER = 7 * 86400
 
 
 def _rab():
@@ -44,19 +45,16 @@ def hours(sec):
 
 
 def behind_since(ver):
-    """When a session on VER fell behind: the time the first newer Claude Code
-    was installed on this machine (the oldest file in its versions folder that
-    is newer than VER). Old version files get pruned, so for a session far
-    behind this is "at least since"; never the newest release's time, which
-    would make every stuck session look freshly behind after each update."""
-    times = []
-    try:
-        for name in os.listdir(pc.VERSIONS):
-            if pc.vkey(name) and pc.vkey(name) > pc.vkey(ver):
-                times.append(os.path.getmtime(os.path.join(pc.VERSIONS, name)))
-    except OSError:
-        return None
-    return min(times) if times else None
+    return pc.behind_since(ver)
+
+
+def off_reasons(cfg):
+    """Why each session is kept off the helper's list, as its owner wrote it:
+    "off_list_reasons": {"Session name": "reason"} in restart.json. Shown in the
+    file and in the weekly notice, so a choice is said once, not rediscovered."""
+    r = cfg.get("off_list_reasons")
+    return {k: " ".join(v.split())[:200] for k, v in r.items() if isinstance(k, str) and isinstance(v, str) and v.strip()} \
+        if isinstance(r, dict) else {}
 
 
 def collect(sessions, newest, now, panes=None):
@@ -109,7 +107,7 @@ def collect(sessions, newest, now, panes=None):
                     nohook.append(name)
     on_newest = sum(1 for s in sessions if newest and s.get("version") and pc.vkey(s["version"]) >= pc.vkey(newest))
     return {"newest": newest, "total": len(sessions), "on_newest": on_newest, "waiting": waiting, "stuck": stuck,
-            "behind_new": behind_new, "unloaded": unloaded, "nohook": nohook, "reload_on": bool(cfg.get("reload_plugins"))}
+            "behind_new": behind_new, "unloaded": unloaded, "nohook": nohook, "off_reasons": off_reasons(cfg), "reload_on": bool(cfg.get("reload_plugins"))}
 
 
 def render(d, now):
@@ -124,8 +122,10 @@ def render(d, now):
                 if why != NOT_LISTED]
         off = [n for n, _, _, why in d["stuck"] if why == NOT_LISTED]
         if off:
+            reasons = d.get("off_reasons") or {}
             out.append(f"- {len(off)} session(s) are not on the list the helper may touch (allow_names and the deny "
                        f"lists in restart.json): {', '.join(off[:12])}{', ...' if len(off) > 12 else ''}")
+            out += [f"  - {n}: {reasons[n]}" for n in off if n in reasons]
     if d["behind_new"]:
         out += ["", f"Behind for less than a day, nothing to do yet: {len(d['behind_new'])} "
                     f"({', '.join(d['behind_new'][:6])}{', ...' if len(d['behind_new']) > 6 else ''})."]
@@ -192,7 +192,27 @@ def refresh(sessions, newest, now, force=False, panes=None):
             f.write("\n".join(names))
         if set(names) - set(before) and headline(d):
             rab.notify(headline(d))
+    # Sessions kept off the helper's list are never restarted by it, so they can sit on an old Claude Code
+    # for weeks. Once a week, those behind for a week or more are named, so the choice stays a choice.
+    off = sorted(n for n, _, a, why in d["stuck"] if why == NOT_LISTED and a >= OFF_LIST_AFTER)
+    offf = os.path.join(rab.BASE, "state", "needs-you.offlist")
+    if off and (age(offf, now) is None or age(offf, now) >= OFF_LIST_AFTER):
+        os.makedirs(os.path.dirname(offf), exist_ok=True)
+        with open(offf, "w") as f:
+            f.write("\n".join(off))
+        why = d.get("off_reasons") or {}
+        named = [f"{n} ({why[n]})" if n in why else n for n in off[:8]]
+        rab.notify(f"pit-stop: {len(off)} session(s) behind the newest Claude Code for a week or more are off the "
+                   f"helper's list, so it never restarts them: {'; '.join(named)}{'; ...' if len(off) > 8 else ''}; "
+                   f"add them to allow_names in restart.json, or close them")
     return d
+
+
+def age(path, now):
+    try:
+        return now - os.path.getmtime(path)
+    except OSError:
+        return None
 
 
 def main():

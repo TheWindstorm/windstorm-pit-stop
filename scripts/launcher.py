@@ -53,7 +53,8 @@ def main():
     if not root:
         sys.stderr.write("pit-stop launcher: the windstorm-pit-stop plugin is not installed\n")
         return 1
-    os.execv(sys.executable, [sys.executable, "-I", os.path.join(root, SCRIPT)] + sys.argv[1:])
+    env = dict(os.environ, PIT_STOP_LAUNCHER="1")   # the helper then knows it follows plugin updates
+    os.execve(sys.executable, [sys.executable, "-I", os.path.join(root, SCRIPT)] + sys.argv[1:], env)
 
 
 if __name__ == "__main__":
