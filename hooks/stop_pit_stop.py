@@ -16,7 +16,8 @@ at most one thing, and almost always nothing:
      version: type /restart at a break. Claude does not see it and no turn
      starts. Switch it off with "nudge": false in ~/.claude/pit-stop/config.json.
 
-It also starts the daily tune of the session's folder in the background when
+A week after the first /pit-stop checkup it shows the person one line, once,
+saying the before-and-after is ready. It also starts the daily tune of the session's folder in the background when
 tuning is on and due (see pitstop_common.start_tune): a session left open for
 weeks is tuned too, with no timer.
 
@@ -98,6 +99,26 @@ def touch(path):
         pass
 
 
+def week_note(now=None):
+    """Once, a week after the first /pit-stop checkup: one line telling the person the before-and-after is ready.
+    Never again after that (a stamp), never when "checkup_reminder" is false in config.json."""
+    base = os.path.join(pc.STATE_DIR, "checkup", "baseline.json")
+    told = os.path.join(pc.STATE_DIR, "checkup", "week-told")
+    if os.path.exists(told) or pc.config().get("checkup_reminder") is False:
+        return None
+    b = pc.read_json(base, None)
+    at = b.get("at") if isinstance(b, dict) else None
+    if not isinstance(at, (int, float)) or isinstance(at, bool) or (now or time.time()) - at < 7 * 86400:
+        return None
+    try:
+        with open(told, "w") as f:
+            f.write(str(int(now or time.time())))
+    except OSError:
+        return None   # cannot record it: do not say it, or it would repeat every turn
+    return ("Pit Stop: a week has passed since your first checkup. Type /pit-stop checkup to see this computer's "
+            "before and after.")
+
+
 def main():
     try:
         payload = json.loads(sys.stdin.read() or "{}")
@@ -134,6 +155,10 @@ def main():
         pc.append_log(LOG, f"session={key[:8]} ASK delivered ({a.get('ver')}->{a.get('newest')})")
         sys.stderr.write(ask_text(a) + "\n")
         return 2
+    note = week_note()
+    if note:
+        sys.stdout.write(json.dumps({"systemMessage": note}))
+        return 0
     if pc.config().get("nudge") is False or pc.fleet_active():
         return 0
     newest = pc.newest_installed_version()

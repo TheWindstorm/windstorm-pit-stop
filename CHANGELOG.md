@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.0 (2026-11-13)
+- **`/pit-stop checkup`: the first thing to run.** One report on every Claude Code session on the computer, from its own history: sessions waiting on a question for 2 hours or more, sessions behind the newest Claude Code and for how long, sessions not running this release's hooks, automatic refreshes in the last 14 days and how many landed in the middle of a task, re-reads after a refresh, cold wake-ups, each project's refresh point now and the one its history suggests, and the modelled cached-read cost of each at list prices for the model the project last used (labelled an estimate). Printed, and saved as a page with charts (`~/.claude/pit-stop/checkup/checkup.html`; `--share` writes one without project or session names). Counts and times only; calls no model; sends nothing. The skill runs it first, before setup, and tells an agent that installs Pit Stop for its user to show it.
+- **Your own before and after.** The first checkup keeps a baseline. A checkup 6 or more days later adds "Since your first checkup": refreshes mid-task, sessions behind, sessions waiting, then and now. A week after the first one, the Stop hook tells the person once (`"checkup_reminder": false` switches that off).
+- optimize.analyze keeps each compaction's time and kind (`compaction_log`), so a report can count over its own window.
+
 ## 0.4.0 (2026-11-12)
 The goal, in the owner's words: install it and stop worrying. It picks each session's compaction point and keeps re-fitting it as the work changes, waits for a break to compact, and keeps Claude Code and the plugins up to date at breaks, also when background jobs have been in the way for days.
 

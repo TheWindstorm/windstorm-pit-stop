@@ -98,6 +98,7 @@ def analyze(project, days, only=None):
     outs = []
     drifts, cold_tokens, cold_wakes, t_first, t_last = [], 0, 0, None, None
     when = {"idle": 0, "prompt": 0, "mid_task": 0, "instant": 0}
+    comp_log = []          # one [time, kind, trigger] per compaction, for /pit-stop checkup's own time windows
     calls, read_once, seen_ids = 0, 0, set()   # one model call can span several transcript rows: count it once
     busiest = None                             # the most cache reads per day of any one session with a day of history
     for path in files:
@@ -117,9 +118,13 @@ def analyze(project, days, only=None):
                 # background, and swapped it in here in milliseconds with the
                 # newest messages kept word for word. Nobody waits and the work
                 # in hand is kept, so it is not counted as a mid-task compaction.
-                when["instant" if (e.get("compactMetadata") if isinstance(e.get("compactMetadata"), dict) else {}).get("precomputed")
-                     else "mid_task" if last_kind == "tool" else "idle" if last_kind == "reply" and quiet >= 1800
-                     else "prompt"] += 1
+                kind = ("instant" if (e.get("compactMetadata") if isinstance(e.get("compactMetadata"), dict) else {}).get("precomputed")
+                        else "mid_task" if last_kind == "tool" else "idle" if last_kind == "reply" and quiet >= 1800
+                        else "prompt")
+                when[kind] += 1
+                trig = (e.get("compactMetadata") if isinstance(e.get("compactMetadata"), dict) else {}).get("trigger")
+                if ts:
+                    comp_log.append([ts, kind, trig if trig in ("auto", "manual") else None])
                 if cur["turns"]:
                     cur["compacted"] = True
                     cycles.append(cur)
@@ -234,6 +239,7 @@ def analyze(project, days, only=None):
         # folder shared by many light sessions is not a heavy one
         "busiest_session_read_per_day": busiest,
         "compactions_when": when,
+        "compaction_log": comp_log,
         "compaction_rereads": by_comp,
         "work_mix": {k: round(v / ntools, 2) for k, v in tools.items()},
         "tool_error_rate": round(errors / tool_results, 3) if tool_results else None,
