@@ -1248,10 +1248,10 @@ def main():
         log("--not-before: cannot read the time (want 2026-11-11T20:45:00Z); nothing done" if wait < 0
             else f"--not-before: {int(wait) + 1}s too early; nothing done")
         return
-    newest = pc.newest_installed_version()
-    if not newest:
-        log("no installed versions found; exit")
-        return
+    newest = pc.newest_installed_version()   # restarts type /restart, which needs Anthropic's native install
+    if not newest:   # npm, Homebrew, WinGet, mise, ...: everything else still runs (0.5.1 stopped here)
+        log("no native Claude Code install (~/.local/share/claude/versions): no restarts this run; "
+            "holds, reloads, the needs-you list and tuning still run")
     sessions, _ = pc.live_sessions()
     if not sessions:
         log("no running sessions found (registry and `claude agents --json` both empty); exit")
@@ -1270,7 +1270,7 @@ def main():
     counts = {"restart": 0, "compact": 0, "reload": 0}
     if ONLY is None and CFG.get("plugin_updates") in ("pit-stop", "all"):
         try:   # before any restart: the restart that brings a session the newest Claude Code brings the newest plugins
-            behind = sum(1 for s in sessions if s.get("version") and pc.vkey(s["version"]) < pc.vkey(newest)
+            behind = sum(1 for s in sessions if newest and s.get("version") and pc.vkey(s["version"]) < pc.vkey(newest)
                          and allowed(s.get("name") or "", s.get("cwd") or "", CFG))
             update_plugins(now, behind)
         except Exception as e:
@@ -1290,14 +1290,15 @@ def main():
                 continue
             if not allowed(s["name"], s.get("cwd") or "", CFG):
                 continue
-            handle(s, newest, target, now, counts)
+            # no native install: judged as current, so its idle compaction and re-arm notes still run, never a /restart
+            handle(s, newest or s["version"], target, now, counts)
             maybe_reload(s, target, now, counts, info)
         except Exception as e:  # one odd session (an unreadable transcript, a vanished pane) never stops the run
             log(f"{s.get('name') or '?'}: skip: error {type(e).__name__}: {str(e)[:120]}")
     if LIVE and ONLY is None and CFG.get("needs_you", True):
         try:   # about once an hour: the short list of what needs a person (~/.claude/pit-stop/needs-you.md)
             import needs_you
-            needs_you.refresh(sessions, newest, time.time(), panes=tty_map)
+            needs_you.refresh(sessions, newest or pc.newest_local_version(), time.time(), panes=tty_map)
         except Exception as e:
             log(f"needs-you list: skip: error {type(e).__name__}: {str(e)[:120]}")
     if LIVE and ONLY is None and CFG.get("fleet_tune", True) and pc.config().get("auto_tune") is True:

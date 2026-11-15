@@ -1,3 +1,4 @@
+import calendar
 import json
 import os
 import subprocess
@@ -2433,7 +2434,7 @@ def _checkup(tmp_path, monkeypatch):
 
 def test_checkup_reports_waiting_behind_and_mid_task_refreshes_from_local_history(tmp_path, monkeypatch):
     pc, ck, proj = _checkup(tmp_path, monkeypatch)
-    now = time.time()
+    now = calendar.timegm((2026, 11, 8, 0, 0, 0))   # a fixed day: _history writes 2026-11-01 (time.time() failed it from 11-15)
     sessions = [{"name": "Lane One", "cwd": proj, "version": "2.1.319", "status": "waiting",
                  "statusUpdatedAt": (now - 43 * 3600) * 1000},
                 {"name": "Lane Two", "cwd": proj, "version": "2.1.322", "status": "idle", "statusUpdatedAt": now * 1000}]
@@ -2526,3 +2527,224 @@ def test_checkup_counts_only_automatic_refreshes_in_its_window_and_waits_of_two_
     rows = ck.session_rows([{"name": "Q", "cwd": proj, "version": "2.1.322", "status": "waiting",
                              "statusUpdatedAt": (now - 600) * 1000}], "2.1.322", now)
     assert rows[0]["waiting_s"] is None                                                # 10 minutes is not "waiting on you"
+
+
+# ---------------------------------------------------------------- 0.5.2: any install method (case: OC3, 2026-11-15)
+@pytest.fixture(autouse=True)
+def _no_release_fetch(tmp_path, monkeypatch):
+    """No test asks the download server, and no test touches the real state folder's release files."""
+    monkeypatch.setenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
+    import install_method as im
+    monkeypatch.setattr(im, "RELEASED_FILE", str(tmp_path / "released.json"))
+    monkeypatch.setattr(im, "BEHIND_FILE", str(tmp_path / "machine-behind.json"))
+
+
+def test_every_install_method_is_named_from_where_claude_really_lives():
+    import install_method as im
+    H = "/home/u"
+    cases = {
+        f"{H}/.local/share/claude/versions/2.1.325": "native",
+        f"{H}/.npm-global/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe": "npm",
+        "/usr/local/lib/node_modules/@anthropic-ai/claude-code/cli.js": "npm",
+        "/opt/homebrew/Caskroom/claude-code/2.1.311/claude": "homebrew",
+        "/usr/local/Caskroom/claude-code@latest/2.1.325/claude": "homebrew",          # Intel Mac
+        f"{H}/.local/share/mise/installs/claude/2.1.322/claude": "mise",
+        f"{H}/.asdf/installs/claude/2.1.300/bin/claude": "asdf",
+        "/nix/store/abc123-claude-code-2.1.320/bin/claude": "nix",
+        "C:/Users/u/AppData/Local/Microsoft/WinGet/Packages/Anthropic.ClaudeCode/claude.exe": "winget",
+        "/srv/tools/claude": "unknown",
+    }
+    for real, want in cases.items():
+        assert im.classify(real, "/x/bin/claude", exists=lambda p: False) == want, real
+    # a system package is told by the file its package manager keeps
+    assert im.classify("/usr/bin/claude", "/usr/bin/claude", exists=lambda p: p.endswith("claude-code.list")) == "apt"
+    assert im.classify("/usr/bin/claude", "/usr/bin/claude", exists=lambda p: p == "/var/lib/rpm") == "dnf"
+    assert im.classify("/usr/bin/claude", "/usr/bin/claude", exists=lambda p: False) == "unknown"
+    # mise's shim or link names the method even when the real file is elsewhere
+    assert im.classify("/opt/x/claude", f"{H}/.local/share/mise/installs/claude/latest/claude") == "mise"
+    for real, v in ((f"{H}/.local/share/claude/versions/2.1.325", "2.1.325"),
+                    (f"{H}/.local/share/mise/installs/claude/2.1.322/claude", "2.1.322"),
+                    (f"{H}/.asdf/installs/claude/2.1.300/bin/claude", "2.1.300"),
+                    ("/opt/homebrew/Caskroom/claude-code/2.1.311/claude", "2.1.311")):
+        assert im.version_from_path(real, im.classify(real, exists=lambda p: False)) == v
+
+
+def test_npm_version_comes_from_its_package_file_and_unknown_installs_ask_the_program(tmp_path):
+    import install_method as im
+    pkg = tmp_path / "lib" / "node_modules" / "@anthropic-ai" / "claude-code"
+    (pkg / "bin").mkdir(parents=True)
+    (pkg / "package.json").write_text(json.dumps({"version": "2.1.325"}))
+    assert im.version_from_path(str(pkg / "bin" / "claude.exe"), "npm") == "2.1.325"
+    ok = lambda c: subprocess.CompletedProcess(c, 0, "2.1.330 (Claude Code)\n", "")
+    bad = lambda c: subprocess.CompletedProcess(c, 1, "", "boom")
+    assert im.version_by_running("/x/claude", ok) == "2.1.330" and im.version_by_running("/x/claude", bad) is None
+
+
+def test_a_version_manager_pin_is_found_nearest_folder_first(tmp_path):
+    import install_method as im
+    home, proj = tmp_path / "home", tmp_path / "home" / "work" / "app"
+    (home / ".config" / "mise").mkdir(parents=True)
+    proj.mkdir(parents=True)
+    (home / ".config" / "mise" / "config.toml").write_text('[tools]\nnode = "22"\nclaude = "2.1.322"\n')
+    assert im.tool_pin("mise", str(proj), str(home)) == (str(home / ".config" / "mise" / "config.toml"), "2.1.322")
+    (home / "work" / ".mise.toml").write_text('[tools]\nclaude = "latest"  # follow releases\n')
+    assert im.tool_pin("mise", str(proj), str(home)) == (str(home / "work" / ".mise.toml"), "latest")
+    (home / ".tool-versions").write_text("nodejs 22.1.0\nclaude 2.1.300\n")
+    assert im.tool_pin("asdf", str(proj), str(home)) == (str(home / ".tool-versions"), "2.1.300")
+    assert im.tool_pin("npm", str(proj), str(home)) == (None, None)
+
+
+def test_channel_follows_the_cask_name_or_the_settings(tmp_path):
+    import install_method as im
+    assert im.channel("homebrew", "/opt/homebrew/Caskroom/claude-code/2.1.311/claude") == "stable"
+    assert im.channel("homebrew", "/opt/homebrew/Caskroom/claude-code@latest/2.1.325/claude") == "latest"
+    assert im.channel("native", settings={"autoUpdatesChannel": "stable"}) == "stable"
+    assert im.channel("npm", settings={}) == "latest" and im.channel("mise") == "latest"
+
+
+def test_the_newest_release_is_asked_at_most_every_six_hours_and_never_when_switched_off(tmp_path):
+    import install_method as im
+    asked = []
+    fetch = lambda ch: asked.append(ch) or {"latest": "2.1.325", "stable": "2.1.311"}[ch]
+    f = str(tmp_path / "rel.json")
+    assert im.newest_released("latest", 1000, fetch, f, allowed=True) == ("2.1.325", 1000)
+    assert im.newest_released("latest", 2000, fetch, f, allowed=True) == ("2.1.325", 1000) and asked == ["latest"]
+    assert im.newest_released("latest", 1000 + 7 * 3600, lambda ch: "2.1.326", f, allowed=True)[0] == "2.1.326"
+    assert im.newest_released("latest", 1000 + 14 * 3600, lambda ch: None, f, allowed=True)[0] == "2.1.326"   # offline: last answer
+    g = str(tmp_path / "off.json")
+    assert im.newest_released("stable", 1000, fetch, g, allowed=False) == (None, None) and asked == ["latest"]
+    assert im.newest_released("stable", 1000, fetch, g, allowed=True, write=False)[0] == "2.1.311"
+    assert not os.path.exists(g)                                                       # a read-only run writes nothing
+    assert im.release_check_allowed({"DISABLE_UPDATES": "1"}, {}) is False
+    assert im.release_check_allowed({}, {"release_check": False}) is False and im.release_check_allowed({}, {}) is True
+    garbage = lambda req: (_ for _ in ()).throw(OSError("offline"))
+    assert im.fetch_release("latest", garbage) is None
+
+
+def test_behind_is_counted_from_the_first_time_seen_across_new_releases(tmp_path):
+    import install_method as im
+    f = str(tmp_path / "b.json")
+    m = {"behind": True, "installed": "2.1.322"}
+    assert im.behind_for(m, 1000, f) == 0
+    assert im.behind_for(m, 1000 + 5 * 86400, f) == 5 * 86400                          # a newer release since: still 5 days
+    assert im.behind_for(m, 9999, f, write=False) == 8999
+    assert im.behind_for({"behind": False}, 10_000, f) is None and not os.path.exists(f)
+
+
+def _oc3(tmp_path, monkeypatch, pin='claude = "2.1.322"'):
+    """A machine like OC3 on 2026-11-15: claude on PATH is a mise link, mise's global config holds 2.1.322."""
+    import install_method as im
+    import pitstop_common as pc
+    home = tmp_path / "home"
+    inst = home / ".local" / "share" / "mise" / "installs" / "claude" / "2.1.322"
+    inst.mkdir(parents=True)
+    (inst / "claude").write_text("#!/bin/sh\necho '2.1.322 (Claude Code)'\n")
+    (inst / "claude").chmod(0o755)
+    (home / ".local" / "bin").mkdir(parents=True)
+    os.symlink(inst / "claude", home / ".local" / "bin" / "claude")
+    (home / ".config" / "mise").mkdir(parents=True)
+    (home / ".config" / "mise" / "config.toml").write_text(f"[tools]\n{pin}\n")
+    monkeypatch.setattr(pc, "HOME", str(home))
+    monkeypatch.setattr(pc, "VERSIONS", str(tmp_path / "no-native"))
+    return im, str(home / ".local" / "bin"), str(home / "work")
+
+
+def test_oc3_a_mise_pin_is_named_as_behind_with_the_one_command_that_moves_it(tmp_path, monkeypatch):
+    im, path, work = _oc3(tmp_path, monkeypatch)
+    m = im.machine(work, 1000, fetch=lambda ch: "2.1.325", path_env=path, allowed=True)
+    assert (m["method"], m["installed"], m["released"], m["behind"], m["who"]) == ("mise", "2.1.322", "2.1.325", True, "pin")
+    assert m["update"] == "mise use -g claude@latest" and m["restart_ok"] is False
+    text = "\n".join(im.describe(m, 1000 + 5 * 86400))
+    assert "installed with mise" in text and "held at 2.1.322 by ~/.config/mise/config.toml" in text
+    assert "To move it: mise use -g claude@latest" in text
+    shown = "\n".join(im.describe(m, 1000, paths=False))                           # the page to show others: no paths
+    assert "/.config" not in shown and "/.local" not in shown and "held at 2.1.322 by a mise config file" in shown
+    # 0.5.1 read only the native folder: here it found nothing, so it never judged "behind"
+    import pitstop_common as pc
+    assert pc.newest_installed_version() is None
+    # "latest" in the config is not a hold: the update is mise's own
+    im2, path2, work2 = _oc3(tmp_path / "b", monkeypatch, pin='claude = "latest"')
+    m2 = im2.machine(work2, 1000, fetch=lambda ch: "2.1.325", path_env=path2, allowed=True)
+    assert "held at" not in "\n".join(im2.describe(m2, 1000))
+
+
+def test_needs_you_names_this_machine_once_it_has_been_behind_a_day(tmp_path, monkeypatch):
+    pc, rab, ny = _needs(tmp_path, monkeypatch)
+    im, path, work = _oc3(tmp_path, monkeypatch)
+    now = time.time()
+    m = im.machine(work, now, fetch=lambda ch: "2.1.325", path_env=path, allowed=True)
+    fresh = ny.collect([_s("A", now=now)], "2.1.322", now, machine=m, machine_behind_s=3600)
+    assert fresh["machine"] is None and "Nothing needs you." in ny.render(fresh, now)
+    d = ny.collect([_s("A", now=now)], "2.1.322", now, machine=m, machine_behind_s=5 * 86400)
+    text = ny.render(d, now)
+    assert "This machine's Claude Code is behind the newest release (for 5 days)" in text
+    assert "mise use -g claude@latest" in text and "Nothing needs you" not in text
+    assert "held by mise" in ny.headline(d) and "mise use -g claude@latest" in ny.headline(d)
+    # the person is told once, through notify_command, when it first appears
+    told = []
+    monkeypatch.setattr(rab, "notify", lambda msg: told.append(msg))
+    monkeypatch.setattr(rab, "LIVE", True)
+    monkeypatch.setattr(ny, "machine_now", lambda now, write: (m, 5 * 86400))
+    ny.refresh([_s("A", now=now)], "2.1.322", now)
+    os.utime(ny.OUT, (now - 4000, now - 4000))
+    ny.refresh([_s("A", now=now)], "2.1.322", now + 4000)
+    assert len(told) == 1 and "this machine's Claude Code is 2.1.322" in told[0]
+
+
+def test_sessions_behind_on_a_machine_without_restart_say_how_to_restart_by_hand(tmp_path, monkeypatch):
+    pc, rab, ny = _needs(tmp_path, monkeypatch, {"allow_names": ["D"]})
+    now = time.time()
+    os.utime(os.path.join(pc.VERSIONS, "2.1.322"), (now - 3 * 86400, now - 3 * 86400))
+    d = ny.collect([_s("D", version="2.1.319", now=now)], "2.1.322", now,
+                   machine={"method": "npm", "restart_ok": False}, machine_behind_s=None)
+    assert "this machine uses npm" in d["stuck"][0][3] and "claude --resume" in d["stuck"][0][3]
+
+
+def test_newest_local_version_reads_an_npm_install_when_there_is_no_native_folder(tmp_path, monkeypatch):
+    import pitstop_common as pc
+    import install_method as im
+    pkg = tmp_path / "lib" / "node_modules" / "@anthropic-ai" / "claude-code"
+    (pkg / "bin").mkdir(parents=True)
+    (pkg / "package.json").write_text(json.dumps({"version": "2.1.325"}))
+    (pkg / "bin" / "claude.exe").write_text("")
+    monkeypatch.setattr(pc, "VERSIONS", str(tmp_path / "none"))
+    monkeypatch.setattr(im, "find_claude", lambda path_env=None: ("/x/bin/claude", str(pkg / "bin" / "claude.exe")))
+    assert pc.newest_installed_version() is None and pc.newest_local_version() == "2.1.325"
+    os.utime(pkg / "bin" / "claude.exe", (5000, 5000))
+    assert pc.behind_since("2.1.322") == 5000 and pc.behind_since("2.1.325") is None
+
+
+def test_the_helper_keeps_running_without_a_native_install(tmp_path, monkeypatch):
+    import pitstop_common as pc
+    rab = _rab(tmp_path, monkeypatch)
+    lines = []
+    monkeypatch.setattr(rab, "log", lambda m: lines.append(m))
+    monkeypatch.setattr(pc, "newest_installed_version", lambda: None)
+    monkeypatch.setattr(pc, "live_sessions", lambda *a, **k: ([], "registry"))
+    monkeypatch.setattr(sys, "argv", ["restart_at_break.py"])
+    rab.main()
+    assert any("no native Claude Code install" in x for x in lines)
+    assert any("no running sessions found" in x for x in lines)                        # it went on (0.5.1 stopped)
+
+
+def test_setup_switches_on_pit_stops_own_marketplace_updates_once_and_keeps_a_no(tmp_path, monkeypatch):
+    import setup as su
+    cd = tmp_path / "claude"
+    (cd / "plugins").mkdir(parents=True)
+    (cd / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user"}]}}))
+    src = {"source": "github", "repo": "TheWindstorm/windstorm-pit-stop"}
+    (cd / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thewindstorm": {"source": src}}))
+    sp = cd / "settings.json"
+    sp.write_text(json.dumps({"env": {"X": "1"}}))
+    assert "would switch ON" in su.self_update(False, str(sp), str(cd)) and "extraKnown" not in sp.read_text()
+    assert "switched ON" in su.self_update(True, str(sp), str(cd))
+    s = json.loads(sp.read_text())
+    assert s["extraKnownMarketplaces"]["thewindstorm"] == {"source": src, "autoUpdate": True} and s["env"] == {"X": "1"}
+    assert "already on" in su.self_update(True, str(sp), str(cd))
+    s["extraKnownMarketplaces"]["thewindstorm"]["autoUpdate"] = False
+    sp.write_text(json.dumps(s))
+    assert "left OFF" in su.self_update(True, str(sp), str(cd))
+    assert json.loads(sp.read_text())["extraKnownMarketplaces"]["thewindstorm"]["autoUpdate"] is False
+    sp.write_text("{not json")
+    assert "NOT changed" in su.self_update(True, str(sp), str(cd)) and sp.read_text() == "{not json"

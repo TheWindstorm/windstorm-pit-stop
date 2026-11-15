@@ -206,6 +206,14 @@ Several sessions in one folder share that folder's settings. `--lanes` also writ
 
 These are heuristics, not guarantees. Model and effort changes affect quality and cost, so Pit Stop only suggests them.
 
+## However Claude Code was installed
+
+Claude Code can be installed with Anthropic's native installer, npm, Homebrew, WinGet, apt, dnf or apk, or a version manager such as mise, asdf or nix. Each keeps it current differently, and a version manager holds it where its config says until someone moves it. Pit Stop does not assume one: it follows the `claude` a new session would start, reads its version there, and compares it with the newest release on your channel. `/pit-stop checkup` and the needs-you list say how it was installed, what holds it back when it is behind for a day or more, and the one command that moves it (for example "held at 2.1.322 by ~/.config/mise/config.toml. To move it: mise use -g claude@latest"). Run `python3 -I <plugin>/scripts/install_method.py` to see it alone.
+
+What works where: holding refreshes for a break, tuning, the checkup and the needs-you list work with every install method. Restarting sessions onto a new version needs Claude Code's `/restart`, which needs the native install on macOS or Linux (not WSL or Windows); on other installs, Pit Stop names the sessions that are behind and says to end each at a break and start it again with `claude --resume`.
+
+`/pit-stop setup` also switches on Claude Code's own auto-update for the marketplace Pit Stop came from (`"autoUpdate": true` on its `extraKnownMarketplaces` entry in `~/.claude/settings.json`; `--no-self-update` leaves it alone, and an `"autoUpdate": false` you wrote is kept). Claude Code leaves that off for marketplaces other than Anthropic's, so without it an install stays on the release it was installed with.
+
 ## Fleet mode: what it types, and what it costs
 
 Claude Code accepts `/restart` only when it is typed at the prompt, so fleet mode types into tmux panes. It types three things (and `/reload-plugins`, if you switch that on; see below), each only into an idle session with an empty input box and no dialog:
@@ -235,7 +243,7 @@ Settings live in `~/.claude/pit-stop/restart.json` (see the top of `scripts/rest
 - **Your folder, not the project's.** Profiles, switches and extra summary notes are read from `~/.claude/pit-stop/` only, so a cloned repo cannot steer the summary. A ceiling from a 0.1.x project file is still read, and clamped.
 - **Capped ceilings.** A ceiling from a profile or the environment is clamped to 1.5x the first hold and 95% of the model's context size, so a cloned repo cannot hold compaction until the context overflows.
 - **Backups first.** Every file is backed up before it is written. Only the keys Pit Stop owns are changed.
-- **Local only.** No network calls. Logs hold counts only and rotate at 5 MB.
+- **Local, but for one version number.** To tell whether this machine's Claude Code is behind, Pit Stop asks the address Anthropic's own install script reads (`downloads.claude.ai/claude-code-releases/latest` or `/stable`) for the newest version number, at most every six hours, with a generic client name. Nothing about you, the machine or its sessions is sent. It does not ask when `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or `DISABLE_UPDATES` is set, or with `"release_check": false` in `~/.claude/pit-stop/config.json`. No other network calls. Logs hold counts only and rotate at 5 MB.
 
 `/pit-stop setup --fleet` installs a timer (systemd user timer or launchd) that runs a small launcher every 5 minutes; the launcher finds the installed plugin each run, so the timer keeps working across plugin updates. A timer you wrote yourself that names a version folder stays pinned to that version until you change it. Timers start with a bare PATH: setup puts the folders of `tmux` and `claude` in it. Fleet mode reads Claude Code's local session registry (`~/.claude/sessions/`), which is not a public interface; if that gives nothing usable it falls back to the documented `claude agents --json`.
 
