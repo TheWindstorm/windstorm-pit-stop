@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Pit Stop: the short list of what needs a person.
 
-  needs_you.py            print it now (reads only; writes nothing)
+  needs_you.py            print it now (reads only; writes nothing; may ask
+                          Anthropic's download server for the newest version
+                          number, see install_method.py)
   needs_you.py --write    also keep ~/.claude/pit-stop/needs-you.md up to date
                           (in fleet mode the restart helper does this about
                           once an hour, and tells notify_command when the
@@ -17,6 +19,9 @@ as a list:
     background jobs that never stop; never quiet long enough).
   - NOT LOADED: sessions that started before the plugin was installed or last
     updated, so they run old hooks or none.
+  - THIS MACHINE'S CLAUDE CODE: behind the newest release for a day or more,
+    however it was installed (native, npm, Homebrew, WinGet, apt/dnf/apk, mise,
+    asdf, nix), with what holds it and the one command that moves it.
 Names, versions and durations only: nothing a session says or shows is read
 out. Standard library only.
 """
@@ -33,6 +38,7 @@ WAITING_AFTER = 2 * 3600
 STUCK_AFTER = 24 * 3600
 EVERY = 3600
 OFF_LIST_AFTER = 7 * 86400
+MACHINE_NAME = "(this machine's Claude Code)"
 
 
 def _rab():
@@ -57,9 +63,11 @@ def off_reasons(cfg):
         if isinstance(r, dict) else {}
 
 
-def collect(sessions, newest, now, panes=None):
+def collect(sessions, newest, now, panes=None, machine=None, machine_behind_s=None):
     """PANES: the helper's map of terminal -> tmux pane, when it has one. With it,
-    a session the helper cannot type into (no tmux pane) is named as that."""
+    a session the helper cannot type into (no tmux pane) is named as that.
+    MACHINE: install_method.machine() for this machine (and MACHINE_BEHIND_S,
+    how long it has been behind the newest release), when known."""
     rab = _rab()
     cfg = rab.CFG
     try:
@@ -78,6 +86,10 @@ def collect(sessions, newest, now, panes=None):
             since = behind_since(ver)
             if not rab.allowed(name, s.get("cwd") or "", cfg):
                 why = NOT_LISTED
+            elif machine and not machine.get("restart_ok"):
+                why = (f"Claude Code's /restart works only with Anthropic's native installer on macOS or Linux, and this "
+                       f"machine uses {machine.get('method') or 'another install'}: end the session and start it again "
+                       f"with claude --resume")
             elif panes and not panes.get(rab.pid_tty(s.get("pid")) or ""):
                 why = "it does not run in a tmux pane the helper can type into"
             elif st == "waiting":
@@ -107,12 +119,18 @@ def collect(sessions, newest, now, panes=None):
                     nohook.append(name)
     on_newest = sum(1 for s in sessions if newest and s.get("version") and pc.vkey(s["version"]) >= pc.vkey(newest))
     return {"newest": newest, "total": len(sessions), "on_newest": on_newest, "waiting": waiting, "stuck": stuck,
-            "behind_new": behind_new, "unloaded": unloaded, "nohook": nohook, "off_reasons": off_reasons(cfg), "reload_on": bool(cfg.get("reload_plugins"))}
+            "behind_new": behind_new, "unloaded": unloaded, "nohook": nohook, "off_reasons": off_reasons(cfg), "reload_on": bool(cfg.get("reload_plugins")),
+            "machine": machine if machine_behind_s is not None and machine_behind_s >= STUCK_AFTER else None,
+            "machine_behind_s": machine_behind_s}
 
 
 def render(d, now):
     out = [f"# Pit Stop: what needs you ({time.strftime('%a %Y-%m-%d %H:%M %Z', time.localtime(now))})", ""]
     out.append(f"{d['on_newest']} of {d['total']} sessions are on the newest Claude Code ({d['newest'] or 'not found'}).")
+    if d.get("machine"):
+        import install_method as im
+        out += ["", f"This machine's Claude Code is behind the newest release (for {hours(d['machine_behind_s'])}):"]
+        out += [f"- {x}" for x in im.describe(d["machine"], now)]
     if d["waiting"]:
         out += ["", "Waiting for you (a question or permission prompt on screen):"]
         out += [f"- {n}: {hours(a)}" for n, a in sorted(d["waiting"], key=lambda x: -x[1])]
@@ -142,7 +160,7 @@ def render(d, now):
         out += ["", " ".join(parts) + " " + (
             "The helper reloads them at a break (reload_plugins is on)." if d["reload_on"] else
             "Switch on \"reload_plugins\" in restart.json, or type /reload-plugins in each.")]
-    if not (d["waiting"] or d["stuck"]):
+    if not (d["waiting"] or d["stuck"] or d.get("machine")):
         out += ["", "Nothing needs you."]
     return "\n".join(out) + "\n"
 
@@ -150,6 +168,11 @@ def render(d, now):
 def headline(d):
     """One line for notify_command, or '' when nothing needs a person."""
     parts = []
+    if d.get("machine"):
+        m = d["machine"]
+        held = m.get("pin") and m["pin"][0] and m["pin"][1] and im_ver(m["pin"][1])
+        parts.append(f"this machine's Claude Code is {m.get('installed')}, newest {m.get('released')}"
+                     + (f" (held by {m['method']})" if held else "") + (f"; to move it: {m['update']}" if m.get("update") else ""))
     if d["waiting"]:
         n, a = max(d["waiting"], key=lambda x: x[1])
         parts.append(f"{len(d['waiting'])} session(s) waiting for you ({n}, {hours(a)})")
@@ -157,6 +180,21 @@ def headline(d):
     if stuck:
         parts.append(f"{len(stuck)} cannot be updated")
     return ("pit-stop: " + "; ".join(parts) + f"; see {OUT}") if parts else ""
+
+
+def machine_now(now, write):
+    """(install_method.machine(), seconds behind) for this machine, or (None, None) when it cannot be read."""
+    try:
+        import install_method as im
+        m = im.machine(os.getcwd(), now, write=write)
+        return m, im.behind_for(m, now, write=write)
+    except Exception:
+        return None, None
+
+
+def im_ver(v):
+    import re
+    return bool(re.fullmatch(r"\d+\.\d+\.\d+", v or ""))
 
 
 def refresh(sessions, newest, now, force=False, panes=None):
@@ -171,7 +209,8 @@ def refresh(sessions, newest, now, force=False, panes=None):
     except OSError:
         pass
     rab = _rab()
-    d = collect(sessions, newest, now, panes)
+    m, mb = machine_now(now, write=rab.LIVE)
+    d = collect(sessions, newest, now, panes, m, mb)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     tmp = OUT + ".tmp-pitstop"
     with open(tmp, "w") as f:
@@ -179,7 +218,8 @@ def refresh(sessions, newest, now, force=False, panes=None):
     os.replace(tmp, OUT)
     if not rab.LIVE:
         return d
-    names = sorted({n for n, _ in d["waiting"]} | {n for n, _, _, why in d["stuck"] if why != NOT_LISTED})
+    names = sorted({n for n, _ in d["waiting"]} | {n for n, _, _, why in d["stuck"] if why != NOT_LISTED}
+                   | ({MACHINE_NAME} if d.get("machine") else set()))
     lastf = os.path.join(rab.BASE, "state", "needs-you.last")
     try:
         with open(lastf) as f:
@@ -218,7 +258,7 @@ def age(path, now):
 def main():
     now = time.time()
     sessions, _ = pc.live_sessions()
-    newest = pc.newest_installed_version()
+    newest = pc.newest_local_version()
     try:
         panes = _rab().panes()
     except Exception:
@@ -226,7 +266,8 @@ def main():
     if "--write" in sys.argv:
         d = refresh(sessions, newest, now, force=True, panes=panes)
     else:
-        d = collect(sessions, newest, now, panes)
+        m, mb = machine_now(now, write=False)
+        d = collect(sessions, newest, now, panes, m, mb)
     sys.stdout.write(render(d, now))
     return 0
 

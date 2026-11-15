@@ -1,6 +1,8 @@
 """Shared helpers for Pit Stop. Standard library only; reads local files only.
 
-Nothing here sends data anywhere. Transcripts are read for COUNTS (token
+Nothing here sends data anywhere (install_method.py alone asks Anthropic's
+download server for the newest version number, and sends nothing about the
+machine or its sessions). Transcripts are read for COUNTS (token
 usage, tool names, timestamps, file paths); message text is never printed.
 """
 import glob
@@ -199,6 +201,25 @@ def newest_installed_version():
     except OSError:
         return None
     return max(vs, key=lambda v: tuple(int(x) for x in v.split("."))) if vs else None
+
+
+def newest_local_version():
+    """The newest Claude Code a new session on this machine can start, whatever
+    installed it: the native installer's newest, else the version of the
+    claude on PATH (npm, Homebrew, WinGet, mise, ...: see install_method.py).
+    None when neither is found. Restarts with /restart still need the native
+    install; this is for judging and reporting "behind"."""
+    v = newest_installed_version()
+    if v:
+        return v
+    try:
+        import install_method as im
+        link, real = im.find_claude()
+        if real:
+            return im.version_from_path(real, im.classify(real, link)) or im.version_by_running(link)
+    except Exception:
+        pass
+    return None
 
 
 def fmt_k(n):
@@ -550,5 +571,16 @@ def behind_since(ver):
             if vkey(name) and vkey(name) > vkey(ver):
                 times.append(os.path.getmtime(os.path.join(VERSIONS, name)))
     except OSError:
-        return None
-    return min(times) if times else None
+        pass
+    if times:
+        return min(times)
+    try:   # no native folder (npm, Homebrew, mise, ...): when the newer claude on PATH was installed
+        import install_method as im
+        link, real = im.find_claude()
+        if real:
+            v = im.version_from_path(real, im.classify(real, link)) or im.version_by_running(link)
+            if v and vkey(v) > vkey(ver):
+                return os.path.getmtime(real)
+    except Exception:
+        pass
+    return None

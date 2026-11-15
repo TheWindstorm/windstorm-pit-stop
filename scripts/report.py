@@ -28,7 +28,7 @@ def main():
     ap.add_argument("--project")
     ap.add_argument("--json", action="store_true")
     a = ap.parse_args()
-    newest = pc.newest_installed_version()
+    newest = pc.newest_local_version()
     rows = []
     if a.project:
         sessions = [{"name": "-", "cwd": os.path.abspath(a.project), "version": "-", "status": "-"}]

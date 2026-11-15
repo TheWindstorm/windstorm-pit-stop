@@ -12,6 +12,8 @@ Options:
                               before it restarts sessions (default pit-stop;
                               written only into a NEW restart.json)
   --no-tune-now               do not tune the folders of the running sessions now
+  --no-self-update            leave Claude Code's auto-update for Pit Stop's
+                              marketplace as it is
   --interval MIN              minutes between fleet runs (default 5)
   --days N                    days of history to read when tuning (default 14)
   --budget economy|balanced|roomy
@@ -28,16 +30,21 @@ What --apply does:
      before the next, and a lowering that cost context is undone.
   2. Tunes the folder of every running session now (and the current folder).
      Settings files are backed up first; only Pit Stop's two keys change.
+  3. Switches on Claude Code's own auto-update for the marketplace Pit Stop
+     came from ("autoUpdate": true on its entry under extraKnownMarketplaces in
+     ~/.claude/settings.json; backed up first). Claude Code leaves it off for
+     marketplaces other than Anthropic's, so without this an install stays on
+     the release it was installed with (one machine sat on 0.1.4 for days).
 With --fleet it also:
-  3. Copies the launcher to ~/.claude/pit-stop/bin/pit-stop-restart, so the
+  4. Copies the launcher to ~/.claude/pit-stop/bin/pit-stop-restart, so the
      timer keeps working across plugin updates.
-  4. Writes ~/.claude/pit-stop/restart.json ONLY if there is none (it finds
+  5. Writes ~/.claude/pit-stop/restart.json ONLY if there is none (it finds
      which tmux server holds your sessions, and sets plugin_updates: the
      helper then brings this plugin, or all plugins, up to date with Claude
      Code's own commands before it restarts anyone, so one restart brings the
      newest Claude Code and the newest plugins). An existing file is never
      changed.
-  5. Installs a timer (systemd user timer on Linux, launchd on macOS) that
+  6. Installs a timer (systemd user timer on Linux, launchd on macOS) that
      runs the launcher with --live. If something already schedules
      restart_at_break.py, it changes nothing and prints the one line to edit.
 Nothing here needs sudo. Undo: delete the timer files it names, and set
@@ -163,12 +170,61 @@ def install_timer(interval, apply):
                                                "systemctl --user enable --now pit-stop-restart.timer")
 
 
+SETTINGS = os.path.join(pc.CLAUDE_DIR, "settings.json")
+
+
+def own_marketplace(claude_dir=None):
+    """(name, source) of the marketplace this plugin was installed from for the user, or (None, None)."""
+    claude_dir = claude_dir or pc.CLAUDE_DIR
+    rows = (pc.read_json(os.path.join(claude_dir, "plugins", "installed_plugins.json"), {}) or {}).get("plugins")
+    for key, v in sorted((rows or {}).items()) if isinstance(rows, dict) else []:
+        if isinstance(key, str) and key.startswith("windstorm-pit-stop@") and any(
+                isinstance(r, dict) and r.get("scope", "user") == "user" for r in (v if isinstance(v, list) else [])):
+            name = key.split("@", 1)[1]
+            known = pc.read_json(os.path.join(claude_dir, "plugins", "known_marketplaces.json"), {}) or {}
+            src = known.get(name, {}).get("source") if isinstance(known.get(name), dict) else None
+            return name, src if isinstance(src, dict) else None
+    return None, None
+
+
+def self_update(apply, settings_path=None, claude_dir=None):
+    """Switch on Claude Code's auto-update for Pit Stop's marketplace. Returns one line saying what it found or did."""
+    settings_path = settings_path or SETTINGS
+    name, src = own_marketplace(claude_dir)
+    if not name:
+        return "not installed from a marketplace for this user; nothing to switch on"
+    cfg, err = pc.read_json_strict(settings_path) if os.path.exists(settings_path) else ({}, None)
+    if err or not isinstance(cfg, dict):
+        return f"NOT changed: {settings_path} does not read as a JSON object ({err or 'not an object'})"
+    extra = cfg.get("extraKnownMarketplaces")
+    entry = extra.get(name) if isinstance(extra, dict) else None
+    if isinstance(entry, dict) and entry.get("autoUpdate") is True:
+        return f"already on for marketplace {name}"
+    if isinstance(entry, dict) and entry.get("autoUpdate") is False:
+        return f"left OFF for marketplace {name}: settings.json says autoUpdate false (your choice; change it there)"
+    if not isinstance(entry, dict) and not src:
+        return f"NOT changed: cannot read where marketplace {name} comes from (known_marketplaces.json)"
+    if extra is not None and not isinstance(extra, dict):
+        return "NOT changed: extraKnownMarketplaces in settings.json is not an object"
+    if apply:
+        if os.path.exists(settings_path):
+            pc.backup(settings_path)
+        new = dict(entry) if isinstance(entry, dict) else {"source": src}
+        new["autoUpdate"] = True
+        cfg["extraKnownMarketplaces"] = dict(extra or {}, **{name: new})
+        mode = os.stat(settings_path).st_mode & 0o777 if os.path.exists(settings_path) else 0o600
+        pc.write_json_atomic(settings_path, cfg, mode=mode)
+        return f"switched ON for marketplace {name} (Claude Code checks it at start and updates the plugin)"
+    return f"would switch ON for marketplace {name} (autoUpdate: true in {settings_path.replace(pc.HOME, '~')})"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--fleet", action="store_true")
     ap.add_argument("--no-auto-tune", action="store_true")
     ap.add_argument("--no-tune-now", action="store_true")
+    ap.add_argument("--no-self-update", action="store_true")
     ap.add_argument("--interval", type=int, default=5)
     ap.add_argument("--days", type=int, default=14)
     ap.add_argument("--budget", choices=op.BUDGETS)
@@ -176,16 +232,22 @@ def main():
     a = ap.parse_args()
     word = "DOING" if a.apply else "PLAN (nothing is changed; add --apply)"
     sessions, source = pc.live_sessions()
-    newest = pc.newest_installed_version()
+    newest = pc.newest_local_version()
     behind = [s for s in sessions if newest and s.get("version") and pc.vkey(s["version"]) < pc.vkey(newest)]
     print(f"Pit Stop setup: {word}")
     print(f"  found {len(sessions)} running session(s) (from {source}); newest installed Claude Code: {newest or 'not found'}; "
           f"{len(behind)} behind it")
-    if not newest:
-        print("  NOTE: no native install found in ~/.local/share/claude/versions. /restart needs the native macOS or "
-              "Linux install; the compaction parts still work.")
-    if is_wsl() or platform.system() == "Windows":
-        print("  NOTE: Claude Code has no /restart on Windows or WSL. Compaction tuning works; fleet mode does not.")
+    try:
+        import install_method as im
+        mach = im.machine(os.getcwd(), write=a.apply)
+        for line in im.describe(mach):
+            print(f"  {line}")
+    except Exception as e:
+        mach = None
+        print(f"  (could not read how Claude Code is installed here: {type(e).__name__})")
+    if mach and not mach.get("restart_ok"):
+        print("  NOTE: Claude Code's /restart works only with Anthropic's native installer on macOS or Linux (not WSL), so "
+              "Pit Stop cannot restart sessions onto a new version here; holding refreshes for a break and tuning work.")
 
     budget = a.budget or (pc.config().get("budget") if pc.config().get("budget") in op.BUDGETS else None) or "balanced"
     print("1. Tuning: " + ("left off (--no-auto-tune)" if a.no_auto_tune else "ON (auto_tune: true), daily")
@@ -234,6 +296,9 @@ def main():
                     print(f"     {e}")
         print("   New points take effect at each session's next start (a pit-stop restart counts).")
 
+    print("3. Pit Stop's own updates: " + ("left as they are (--no-self-update)" if a.no_self_update
+                                          else self_update(a.apply)))
+
     if not a.fleet:
         print("Fleet mode: not asked for. If you run several sessions in tmux, add --fleet to see that plan.")
         return 0
@@ -246,28 +311,28 @@ def main():
     best = max(servers, key=lambda n: len(servers[n] & ttys)) if servers else None
     in_tmux = len(servers.get(best, set()) & ttys) if servers else 0
     print(f"  {in_tmux} of {len(sessions)} session(s) run in tmux" + (f" (server: {best or 'default'})" if servers else ""))
-    print(f"3. launcher: {BIN}")
+    print(f"4. launcher: {BIN}")
     if a.apply:
         os.makedirs(os.path.dirname(BIN), exist_ok=True)
         shutil.copyfile(os.path.join(os.path.dirname(os.path.abspath(__file__)), "launcher.py"), BIN)
         os.chmod(BIN, 0o755)
     rj = os.path.join(pc.STATE_DIR, "restart.json")
     if os.path.exists(rj):
-        print(f"4. {rj}: exists, left exactly as it is")
+        print(f"5. {rj}: exists, left exactly as it is")
     else:
-        print(f"4. {rj}: new, with tmux_socket = {best!r} and plugin_updates = {a.plugin_updates!r} (add allow_names, "
+        print(f"5. {rj}: new, with tmux_socket = {best!r} and plugin_updates = {a.plugin_updates!r} (add allow_names, "
               f"deny_names, deny_name_globs or deny_paths there to keep sessions out)")
         if a.apply:
             pc.write_json_atomic(rj, {"tmux_socket": best, "allow_names": [], "deny_names": [],
                                       "deny_name_globs": [], "deny_paths": [], "plugin_updates": a.plugin_updates})
     hits = already_scheduled()
     if hits:
-        print("5. timer: something already schedules the restart helper; nothing changed:")
+        print("6. timer: something already schedules the restart helper; nothing changed:")
         for h in hits:
             print(f"     {h}")
         print(f"   To follow plugin updates by itself, make its command: {sys.executable} -I {BIN} --live")
     else:
-        print("5. timer:")
+        print("6. timer:")
         install_timer(max(2, min(a.interval, 30)), a.apply)
     print(f"   First look at what it would do: {sys.executable} -I {os.path.join(os.path.dirname(os.path.abspath(__file__)), 'restart_at_break.py')}")
     return 0

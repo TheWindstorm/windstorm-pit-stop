@@ -32,7 +32,7 @@ If you just installed Pit Stop for your user, do this before anything else.
 4. Say plainly: new points take effect at each session's next start; fleet mode types `/restart`, `/compact` and at most one note into idle tmux panes.
 
 ### `/pit-stop status` (read-only)
-Run `python3 -I <scripts>/needs_you.py` and show its output as it is. It is the short list of what needs a person: sessions waiting on a question or permission prompt for 2 hours or more, sessions that have been behind the newest Claude Code for a day or more and why, and sessions that never loaded the plugin's hooks. If it says "Nothing needs you.", say so in one line.
+Run `python3 -I <scripts>/needs_you.py` and show its output as it is. It is the short list of what needs a person: sessions waiting on a question or permission prompt for 2 hours or more, sessions that have been behind the newest Claude Code for a day or more and why, sessions that never loaded the plugin's hooks, and this machine's own Claude Code when it has been behind the newest release for a day (with what holds it, such as a mise or Homebrew install, and the one command that moves it). If it says "Nothing needs you.", say so in one line. If the user asks why Claude Code is not updating, run `python3 -I <scripts>/install_method.py` and show its lines; do not run the update command it names unless the user asks.
 
 ### `/pit-stop report` (read-only)
 Run `scripts/report.py` (no arguments, or `--project DIR`). Show the table. Point out sessions waiting for a restart (`*`) and memory indexes past the 200-line load limit (`!`).
