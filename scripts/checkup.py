@@ -8,7 +8,8 @@
 
 What it reads, all on this computer: the list of running sessions, each
 session's version, and the history Claude Code keeps for each project folder
-(counts, sizes and times only, never what was said). Nothing is sent anywhere.
+(counts, sizes and times only, never what was said). Apart from one version
+check (Anthropic's newest version number; see the README), nothing is sent.
 No AI model is called.
 
 What it reports:
@@ -315,14 +316,15 @@ def render_html(d, cmp_lines, share=False):
     lines = m.get("lines") if not share else m.get("share_lines")
     mach = ("<div class='card'><h2>Claude Code on this machine</h2><ul>" + "".join(f"<li>{e(x)}</li>" for x in lines)
             + "</ul></div>") if lines else ""
-    sent = (" (Pit Stop asked Anthropic's download server for the newest version number)"
-            if m.get("released") and release_asked() else "")
+    sent = ("Pit Stop asked Anthropic's download server for the newest version number; like any web request, "
+            "it reached Anthropic's server from your IP address; nothing else about you or your sessions was sent"
+            if m.get("released") and release_asked() else "nothing about you or your sessions was sent anywhere")
     since = ("<div class='card'><h2>Since your first checkup</h2><ul>" + "".join(f"<li>{e(x[2:])}</li>" for x in cmp_lines[1:])
              + "</ul></div>") if cmp_lines else ""
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Pit Stop Checkup</title><style>{CSS}</style></head><body><main>
 <div><h1>Pit Stop checkup</h1><p class="mut">{time.strftime('%A %Y-%m-%d %H:%M', time.localtime(d['at']))} · last {d['days']} days ·
-your sessions on this computer only · counts and times, never what was said · nothing about you or your sessions was sent anywhere{sent}</p></div>
+your sessions on this computer only · counts and times, never what was said · {sent}</p></div>
 <div class="tiles">
 <div class="tile ok"><b>{t['on_newest']}/{t['sessions']}</b>sessions on the newest Claude Code</div>
 <div class="tile {'bad' if t['behind'] else 'ok'}"><b>{t['behind']}</b>behind on an older version</div>
