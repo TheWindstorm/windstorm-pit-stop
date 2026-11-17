@@ -3,6 +3,7 @@
 ## 0.5.3 (2026-11-17)
 - **The skill loads in strict parsers.** The skill's description had an unquoted ": " ("for the user: run the checkup"). Claude Code reads it, but strict YAML parsers (the Agent Skills validator `gh skill publish`, and other tools that read skills) rejected the whole skill. The colon is gone.
 - **It cannot come back.** New `tests/test_skill_spec.py` checks every SKILL.md against the Agent Skills rules (name, folder, description length, values a strict parser would misread), and CI now also loads each one with a real YAML parser and runs `gh skill publish --dry-run`.
+- The skill names its license (Apache-2.0, as the repo), which the Agent Skills validator recommends.
 - Hooks unchanged (generation 2).
 
 ## 0.5.2 (2026-11-15)
