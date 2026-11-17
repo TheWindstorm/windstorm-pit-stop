@@ -2748,3 +2748,144 @@ def test_setup_switches_on_pit_stops_own_marketplace_updates_once_and_keeps_a_no
     assert json.loads(sp.read_text())["extraKnownMarketplaces"]["thewindstorm"]["autoUpdate"] is False
     sp.write_text("{not json")
     assert "NOT changed" in su.self_update(True, str(sp), str(cd)) and sp.read_text() == "{not json"
+
+
+# ---- 0.6.0: Claude Code updated by Pit Stop, whatever installed it ----
+
+def test_classify_version_manager_shims():
+    import install_method as im
+    H = "/home/x"
+    # a mise shim on PATH resolves to the mise program itself (seen on two Linux machines)
+    assert im.classify("/usr/bin/mise", f"{H}/.local/share/mise/shims/claude") == "mise"
+    assert im.classify(f"{H}/.local/bin/mise", f"{H}/.local/share/mise/shims/claude") == "mise"
+    assert im.classify(f"{H}/.asdf/bin/asdf", f"{H}/.asdf/shims/claude") == "asdf"
+    # each sign alone is enough: a shim whose program has another file name, and a plain link to mise
+    assert im.classify("/opt/tools/mise-x86_64", f"{H}/.local/share/mise/shims/claude") == "mise"
+    assert im.classify("/opt/tools/mise", "/usr/local/bin/claude") == "mise"
+    # Windows paths too
+    assert im.classify(r"C:\Users\g\AppData\Local\mise\installs\claude\2.1.322\claude.exe") == "mise"
+
+
+def test_needs_admin_never_sudo():
+    import install_method as im
+    npm_sys = "/usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+    assert im.needs_admin("npm", npm_sys, access=lambda p, m: False) is True
+    assert im.needs_admin("npm", npm_sys, access=lambda p, m: True) is False
+    assert im.needs_admin("native", "/home/x/.local/share/claude/versions/2.1.322", access=lambda p, m: False) is True
+    for m in ("apt", "dnf", "apk"):
+        assert im.needs_admin(m, "/usr/bin/claude") is True
+    assert im.needs_admin("mise", "/usr/bin/mise", access=lambda p, m: False) is False
+
+
+def _mach(**kw):
+    base = {"behind": True, "installed": "2.1.322", "released": "2.1.326", "released_seen": 0, "method": "native",
+            "path": "/home/x/.local/bin/claude", "real": "/home/x/.local/share/claude/versions/2.1.322",
+            "updater": "on", "pin": [None, None], "channel": "latest", "admin": False, "who": "self", "update": ""}
+    base.update(kw)
+    return base
+
+
+def test_update_plan_per_method(monkeypatch):
+    import install_method as im
+    w = {"brew": "/opt/homebrew/bin/brew", "mise": "/usr/bin/mise", "claude": "/x/claude"}.get
+    assert im.update_plan(_mach(behind=False), cfg={}, which=w) == (None, "current")
+    assert im.update_plan(_mach(), cfg={}, which=w) == (["/home/x/.local/bin/claude", "update"], None)
+    assert im.update_plan(_mach(method="npm"), cfg={}, which=w)[0][1:] == ["update"]
+    assert im.update_plan(_mach(method="homebrew", channel="latest"), cfg={}, which=w)[0] == \
+        ["/opt/homebrew/bin/brew", "upgrade", "--cask", "claude-code@latest"]
+    assert im.update_plan(_mach(method="homebrew", channel="stable"), cfg={}, which=w)[0][-1] == "claude-code"
+    g = os.path.join(im.pc.HOME, ".config", "mise", "config.toml")
+    assert im.update_plan(_mach(method="mise", pin=[g, "2.1.322"]), cfg={}, which=w)[0] == \
+        ["/usr/bin/mise", "use", "-g", "claude@2.1.326"]
+    assert im.update_plan(_mach(method="mise", pin=[g, "latest"]), cfg={}, which=w)[0] == ["/usr/bin/mise", "upgrade", "claude"]
+    # the mise program found through the shim's real path when mise is not on PATH
+    assert im.update_plan(_mach(method="mise", pin=[g, "2.1.322"], real="/opt/m/mise"), cfg={},
+                          which=lambda n: None)[0][0] == "/opt/m/mise"
+
+
+def test_update_plan_respects_the_owner_and_never_uses_sudo():
+    import install_method as im
+    w = lambda n: "/usr/bin/" + n   # noqa: E731
+    p, why = im.update_plan(_mach(), cfg={"hold_claude_version": True}, which=w)
+    assert p is None and "hold_claude_version" in why
+    p, why = im.update_plan(_mach(), cfg={"hold_claude_version": "2.1.322"}, which=w)
+    assert p is None and "2.1.322" in why
+    p, why = im.update_plan(_mach(updater="off (DISABLE_AUTOUPDATER)"), cfg={}, which=w)
+    assert p is None and "DISABLE_AUTOUPDATER" in why
+    for kw in ({"admin": True}, {"method": "apt"}, {"method": "dnf"}):
+        p, why = im.update_plan(_mach(**kw), cfg={}, which=w)
+        assert p is None and "never uses sudo" in why
+    p, why = im.update_plan(_mach(method="mise", pin=["/work/proj/mise.toml", "2.1.322"]), cfg={}, which=w)
+    assert p is None and "project" in why
+    for meth in ("winget", "nix", "asdf", "unknown"):
+        assert im.update_plan(_mach(method=meth), cfg={}, which=w)[0] is None
+    # no plan ever starts with sudo
+    for meth in ("native", "npm", "homebrew", "mise"):
+        p, _ = im.update_plan(_mach(method=meth, pin=[None, "2.1.322"]), cfg={}, which=w)
+        assert p and "sudo" not in p
+
+
+def test_describe_names_an_admin_install():
+    import install_method as im
+    m = _mach(method="npm", admin=True, who="admin", update="sudo npm install -g @anthropic-ai/claude-code@latest")
+    text = "\n".join(im.describe(m, now=10_000))
+    assert "only an administrator" in text
+
+
+def test_claude_update_due_waits_and_retries(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    cfg = dict(rab.CFG)
+    m, plan = _mach(released_seen=1000.0), ["/x/claude", "update"]
+    assert rab.claude_update_due(m, plan, None, 1000.0 + 99_999, cfg) is False          # off by default
+    cfg["claude_updates"] = "auto"
+    assert rab.claude_update_due(m, None, None, 1000.0 + 99_999, cfg) is False         # nothing to run
+    assert rab.claude_update_due(m, plan, None, 1000.0 + 600, cfg) is False            # Claude Code's own updater first
+    assert rab.claude_update_due(m, plan, None, 1000.0 + 7200, cfg) is True
+    last = {"released": "2.1.326", "at": 9000.0}
+    assert rab.claude_update_due(m, plan, last, 9000.0 + 3600, cfg) is False           # tried this release lately
+    assert rab.claude_update_due(m, plan, last, 9000.0 + 21600, cfg) is True
+    assert rab.claude_update_due(m, plan, {"released": "2.1.325", "at": 9000.0}, 9000.0 + 60, cfg) is True
+
+
+def test_helper_updates_claude_code_live_and_dry(tmp_path, monkeypatch, capsys):
+    rab = _rab(tmp_path, monkeypatch)
+    import install_method as im
+    rab.CFG["claude_updates"] = "auto"
+    m = _mach(released_seen=0.0)
+    calls, notes = [], []
+    monkeypatch.setattr(rab, "notify", lambda msg: notes.append(msg))
+
+    class R:
+        def __init__(self, rc):
+            self.returncode, self.stdout, self.stderr = rc, "updated", ""
+    # dry run: says what it would do, runs nothing, writes nothing
+    monkeypatch.setattr(rab, "LIVE", False)
+    assert rab.update_claude_code(50_000.0, run=lambda c, t: calls.append(c) or R(0), machine=m) is None
+    assert calls == [] and "DRY would update Claude Code 2.1.322 -> 2.1.326" in capsys.readouterr().out
+    stampf = os.path.join(rab.BASE, "state", "claude-update.json")
+    assert not os.path.exists(stampf)
+    # live: runs the plan, checks the result, keeps a stamp
+    monkeypatch.setattr(rab, "LIVE", True)
+    os.makedirs(os.path.join(rab.BASE, "state"), exist_ok=True)
+    monkeypatch.setattr(im, "machine", lambda **k: _mach(installed="2.1.326", behind=False))
+    got = rab.update_claude_code(50_000.0, run=lambda c, t: calls.append(c) or R(0), machine=m)
+    assert got == "2.1.326" and calls == [["/home/x/.local/bin/claude", "update"]] and notes == []
+    assert json.load(open(stampf))["released"] == "2.1.326"
+    # the same release is not tried again within claude_update_retry
+    assert rab.update_claude_code(50_100.0, run=lambda c, t: calls.append(c) or R(0), machine=m) is None
+    assert len(calls) == 1
+    # a failure is logged and a person is told
+    os.remove(stampf)
+    monkeypatch.setattr(im, "machine", lambda **k: _mach())
+    assert rab.update_claude_code(60_000.0, run=lambda c, t: R(1), machine=m) is None
+    assert notes and "failed" in notes[0]
+    assert "Claude Code update: FAILED" in open(rab.LOG).read()
+    # the command says ok but the version did not move: still a failure, and a person is told
+    os.remove(stampf)
+    notes.clear()
+    assert rab.update_claude_code(70_000.0, run=lambda c, t: R(0), machine=m) is None
+    assert notes and "failed" in notes[0]
+    # switched off: nothing at all
+    rab.CFG["claude_updates"] = "off"
+    assert rab.update_claude_code(99_000.0, run=lambda c, t: calls.append(c) or R(0), machine=m) is None
+    assert len(calls) == 1

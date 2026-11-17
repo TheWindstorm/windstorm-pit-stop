@@ -73,9 +73,9 @@ def classify(real, link=None, exists=os.path.exists):
     both = r + "\n" + l
     if "/.local/share/claude/versions/" in r:
         return "native"
-    if "/mise/installs/claude" in both:
-        return "mise"
-    if re.search(r"/\.?asdf/installs/claude", both):
+    if "/mise/installs/claude" in both or "/mise/shims/claude" in l or os.path.basename(r) == "mise":
+        return "mise"     # a mise shim resolves to the mise program itself (seen on two Linux machines, 2026-11-16)
+    if re.search(r"/\.?asdf/(installs/claude|shims/claude)", both):
         return "asdf"
     if "/nix/store/" in both:
         return "nix"
@@ -174,6 +174,22 @@ def tool_pin(method, folder=None, home=None):
     return None, None
 
 
+def needs_admin(method, real, access=os.access):
+    """True when updating this install needs an administrator (Pit Stop never uses sudo): system
+    packages always; npm or native when the folder holding Claude Code is not writable by this user
+    (an npm install under /usr/lib, seen 2026-11-16). Pure but for ACCESS."""
+    if method in ("apt", "dnf", "apk"):
+        return True
+    r = _norm(real)
+    if method == "npm":
+        i = r.find("/node_modules/@anthropic-ai/claude-code")
+        return i >= 0 and not access(r[:i] + "/node_modules", os.W_OK)
+    if method == "native":
+        i = r.find("/versions/")
+        return i >= 0 and not access(r[:i + len("/versions")], os.W_OK)
+    return False
+
+
 def channel(method, real=None, settings=None):
     """The release channel this install follows: "latest" or "stable"."""
     if method == "homebrew":
@@ -268,6 +284,12 @@ def machine(folder=None, now=None, fetch=None, path_env=None, run=None, allowed=
     released, seen = newest_released(chan, now, fetch, allowed=allowed, write=write)
     pin = tool_pin(method, folder)
     who, cmd = METHODS.get(method, METHODS["unknown"])
+    admin = bool(real) and needs_admin(method, real)
+    if admin and method == "npm":
+        who, cmd = "admin", ("sudo npm install -g @anthropic-ai/claude-code@latest (needs an administrator), "
+                             "or move to Anthropic's installer, which needs none: claude install")
+    elif admin and method == "native":
+        who = "admin"
     if method == "homebrew":
         cmd = cmd.format(cask="claude-code@latest" if chan == "latest" else "claude-code")
     if method == "mise" and pin[0] and pin[0] != os.path.join(pc.HOME, ".config", "mise", "config.toml"):
@@ -283,7 +305,58 @@ def machine(folder=None, now=None, fetch=None, path_env=None, run=None, allowed=
     restart_ok = method == "native" and _p.system() in ("Darwin", "Linux") and not wsl
     return {"method": method, "path": link, "real": real, "installed": installed, "channel": chan,
             "released": released, "released_seen": seen, "behind": behind, "pin": list(pin), "who": who,
-            "update": cmd, "updater": updater_state(method), "restart_ok": restart_ok}
+            "update": cmd, "updater": updater_state(method), "restart_ok": restart_ok, "admin": admin}
+
+
+def held_by_owner(cfg=None):
+    """The owner's word to leave Claude Code's version alone: "hold_claude_version" in
+    ~/.claude/pit-stop/config.json, true (hold whatever is installed) or a version string
+    (hold that one). Returns the reason, or None."""
+    cfg = pc.config() if cfg is None else cfg
+    h = cfg.get("hold_claude_version")
+    if h is True:
+        return "held by its owner (hold_claude_version in ~/.claude/pit-stop/config.json)"
+    if isinstance(h, str) and h.strip():
+        return f"held at {h.strip()} by its owner (hold_claude_version)"
+    return None
+
+
+def update_plan(m, cfg=None, which=shutil.which):
+    """What Pit Stop may run to bring this machine's Claude Code to the newest release:
+    (argv, None) or (None, why not). Never sudo, never a project's own pin, never against the
+    owner's word (hold_claude_version, or Claude Code's updater switched off). Pure but for CFG
+    and WHICH. The helper runs it (restart.json "claude_updates": "auto"); running sessions keep
+    their version until their restart, which the helper does at a break."""
+    if not m.get("behind"):
+        return None, "current" if m.get("released") else "newest release not known (check off or offline)"
+    held = held_by_owner(cfg)
+    if held:
+        return None, held
+    method, rel = m.get("method"), m.get("released")
+    if m.get("admin") or method in ("apt", "dnf", "apk"):
+        return None, "needs an administrator; Pit Stop never uses sudo"
+    if method in ("native", "npm"):
+        if (m.get("updater") or "").startswith("off"):
+            return None, f"its owner switched Claude Code's updates {m['updater']}"
+        prog = m.get("path") or which("claude")
+        return ([prog, "update"], None) if prog else (None, "no claude program found")
+    if method == "homebrew":
+        brew = which("brew")
+        cask = "claude-code@latest" if m.get("channel") == "latest" else "claude-code"
+        return ([brew, "upgrade", "--cask", cask], None) if brew else (None, "brew not found on PATH")
+    if method == "mise":
+        mise = which("mise") or (m.get("real") if os.path.basename(m.get("real") or "") == "mise" else None)
+        if not mise:
+            return None, "mise not found on PATH"
+        f, v = (m.get("pin") or [None, None])[:2]
+        if f and f not in (os.path.join(pc.HOME, ".config", "mise", "config.toml"),):
+            return None, f"pinned in a project's own file ({f.replace(pc.HOME, '~')}); Pit Stop moves only the global pin"
+        if v and not VER.fullmatch(v):   # "latest" or a prefix: install what it now resolves to
+            return [mise, "upgrade", "claude"], None
+        return [mise, "use", "-g", f"claude@{rel}"], None
+    if method == "winget":
+        return None, "WinGet updates run on Windows, where the helper does not run yet"
+    return None, f"{method} installs are moved by a person ({m.get('update') or 'see its manager'})"
 
 
 BEHIND_FILE = os.path.join(pc.STATE_DIR, "machine-behind.json")
@@ -336,6 +409,7 @@ def describe(m, now=None, paths=True):
         held = m["pin"][0] and m["pin"][1] and VER.fullmatch(m["pin"][1] or "")
         why = (f"held at {m['pin'][1]} by " + (m['pin'][0].replace(pc.HOME, '~') if paths else f"a {m['method']} config file")
                if held else
+               "it is installed where only an administrator can change it" if m.get("admin") else
                "Claude Code's own updater is " + m["updater"] if m["who"] == "self" else
                f"{name or 'its package manager'} updates it, not Claude Code")
         out.append(f"BEHIND: {why}" + (f"; Pit Stop has known of {m['released']} for {hours(age)}" if age and age >= 3600 else "")
