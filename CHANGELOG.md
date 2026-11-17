@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.3 (2026-11-17)
+- **The skill loads in strict parsers.** The skill's description had an unquoted ": " ("for the user: run the checkup"). Claude Code reads it, but strict YAML parsers (the Agent Skills validator `gh skill publish`, and other tools that read skills) rejected the whole skill. The colon is gone.
+- **It cannot come back.** New `tests/test_skill_spec.py` checks every SKILL.md against the Agent Skills rules (name, folder, description length, values a strict parser would misread), and CI now also loads each one with a real YAML parser and runs `gh skill publish --dry-run`.
+- Hooks unchanged (generation 2).
+
 ## 0.5.2 (2026-11-15)
 - **Behind, however Claude Code was installed.** Pit Stop read only the native installer's folder (`~/.local/share/claude/versions`). On any other install it found no "newest version" at all, so it never judged a session or the machine behind. On one machine, a mise config held Claude Code at 2.1.322 while 2.1.325 was out, and nothing said so for five days. On another (npm), the checkup said "newest: not found". New `scripts/install_method.py` follows the `claude` a new session would start (PATH, then links), reads its version there (folder name, npm's package file, or `claude --version`), names the method (native, npm, Homebrew, WinGet, apt, dnf, apk, mise, asdf, nix, or unknown), finds a version manager's pin (nearest folder first, then the global file), and compares with the newest release on the install's channel (`latest` or `stable`). Tested against fake installs of each method, and run read-only on four real machines: native (Linux and Apple Silicon), npm, and mise.
 - **The needs-you list names the machine.** Once this machine's Claude Code has been behind the newest release for a day (counted from the first time Pit Stop saw it behind, not from the newest release, so a machine held for weeks reads as weeks), needs-you.md says what holds it and the one command that moves it, and `notify_command` hears it once. The checkup shows the same, with no file paths on the `--share` page.

@@ -16,3 +16,31 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: pip install pytest
       - run: python -m pytest -q tests/
+  skill-spec:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Every SKILL.md loads in a strict YAML parser
+        run: |
+          pip install pyyaml
+          python - <<'EOF'
+          import glob, yaml
+          for p in glob.glob("skills/*/SKILL.md"):
+              t = open(p, encoding="utf-8").read()
+              fm = t.split("---", 2)[1]
+              d = yaml.safe_load(fm)
+              assert isinstance(d, dict) and d.get("name") and d.get("description"), p
+              print("ok", p)
+          EOF
+      - name: Agent Skills validator (gh skill publish --dry-run)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh skill --help >/dev/null 2>&1; then
+            gh skill publish --dry-run
+          else
+            echo "::warning::this runner's gh has no 'skill' command; the strict YAML step above still ran"
+          fi

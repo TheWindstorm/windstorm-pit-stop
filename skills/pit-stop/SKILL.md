@@ -1,6 +1,6 @@
 ---
 name: pit-stop
-description: Windstorm Pit Stop, a context optimizer for Claude Code. Use when the user says "pit stop", "/pit-stop checkup", "/pit-stop setup", "/pit-stop status", "/pit-stop report", "/pit-stop optimize", "/pit-stop reading" or "/pit-stop restart", or asks to tune when a session auto-compacts, set an idle point or a compaction window (300K/500K/700K), stop sessions compacting mid-task, check why sessions are not on the newest Claude Code, keep many sessions updated without watching them, check or trim MEMORY.md / CLAUDE.md so they load fully, or suggest a model and effort for a session's job. Also use right after installing this plugin for the user: run the checkup first and show it.
+description: Windstorm Pit Stop, a context optimizer for Claude Code. Use when the user says "pit stop", "/pit-stop checkup", "/pit-stop setup", "/pit-stop status", "/pit-stop report", "/pit-stop optimize", "/pit-stop reading" or "/pit-stop restart", or asks to tune when a session auto-compacts, set an idle point or a compaction window (300K/500K/700K), stop sessions compacting mid-task, check why sessions are not on the newest Claude Code, keep many sessions updated without watching them, check or trim MEMORY.md / CLAUDE.md so they load fully, or suggest a model and effort for a session's job. Also use right after installing this plugin for the user, to run the checkup first and show it.
 ---
 
 # Windstorm Pit Stop
