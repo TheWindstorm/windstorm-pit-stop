@@ -1,7 +1,7 @@
 # TODO
 
 ## Now
-- [ ] 2026-11-17 `DNA_STRAND_MASTER_PLAN.md` for Pit Stop, written in arrears: vision, terminology, critical invariants, the decisions so far, strands of codons (each naming its file and the test that proves it), gap analysis. A test fails when a script, hook or setting has no codon. Due 2026-11-18.
+- [x] 2026-11-17 `DNA-STRAND-MASTER-PLAN.md` for Pit Stop, written in arrears: vision, terminology, critical invariants, the decisions so far, strands of codons (each naming its file and the test that proves it), gap analysis. A test fails when a script, hook or setting has no codon. Done 2026-11-20 (plan 1.0, `tests/test_strand.py`).
 - [ ] 2026-11-10 Check what the keep-list does to real summaries: compare 5 compactions with and without it (does the next turn re-read less? is the next step stated?).
 - [ ] 2026-11-10 Run `/pit-stop setup --fleet --apply` on a clean macOS account and record that the launchd timer loads and runs.
 - [ ] 2026-11-10 The window could follow each session, not each folder: `/autocompact <tokens>` changes a running session, but check where it saves before fleet mode types it (if it saves for the whole user, it must not be typed per session).

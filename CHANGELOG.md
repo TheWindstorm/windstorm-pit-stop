@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.0 (2026-11-20)
+- **The DNA Strand Master Plan** (`DNA-STRAND-MASTER-PLAN.md`): Pit Stop described in arrears as 18 genes, G1 to G18, made of codons, and 12 invariants. Each codon is one claim with one test named after it. G1 to G12 are built, their tests renamed `test_G<n>_<m>_...` with no other change. G13 to G18 are open. New `tests/test_strand.py` proves the invariants and fails CI when a script, hook or helper setting has no codon, or a built codon has no test. From now on a change starts as a plan change.
+
 ## 0.6.0 (2026-11-17)
 - **Pit Stop can keep Claude Code itself current, however it was installed.** New `"claude_updates": "auto"` in restart.json (off by default; it is tried on one machine first): when this machine's Claude Code is behind the newest release, the helper runs the one update its install method allows (`claude update`, `brew upgrade --cask`, or moving mise's global pin), checks that the new version is there, and logs it; a failure is logged and goes to `notify_command`. It waits two hours after a release appears (Claude Code's own updater first) and tries one release at most every six hours. Never sudo, never a project's own pin, never against `"hold_claude_version"` in config.json or a switched-off updater. Sessions then move onto it at a break, as before.
 - **A switched-off updater stops it for every install method.** `DISABLE_UPDATES` or `DISABLE_AUTOUPDATER`, in the environment or in `~/.claude/settings.json`, now stops Pit Stop's Claude Code update for mise and Homebrew too, not only for native and npm installs. Found while writing the DNA strand's invariant tests.
