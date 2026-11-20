@@ -35,7 +35,7 @@ def run_hook(payload, tmp, env_extra=None):
     return r.returncode, r.stdout
 
 
-def test_hook_decisions(tmp_path):
+def test_G1_1_hook_decisions(tmp_path):
     tr_result = {"type": "user", "message": {"content": [{"type": "tool_result"}]}}
     prompt = {"type": "user", "message": {"content": "next task"}}
     cases = [
@@ -57,14 +57,14 @@ def test_hook_decisions(tmp_path):
             assert ("middle of a task" in out) == (name == "env_ceiling"), name
 
 
-def test_hook_always_allows_manual_bad_and_missing(tmp_path):
+def test_G1_2_hook_always_allows_manual_bad_and_missing(tmp_path):
     p = transcript(tmp_path, "m", [a("tool_use")])
     assert run_hook({"trigger": "manual", "transcript_path": p}, tmp_path) == (0, "")
     assert run_hook({"trigger": "auto", "transcript_path": str(tmp_path / "none.jsonl")}, tmp_path) == (0, "")
     assert run_hook("not json", tmp_path) == (0, "")
 
 
-def test_hook_default_flex_ceiling(tmp_path):
+def test_G1_3_hook_default_flex_ceiling(tmp_path):
     # no configured ceiling: first hold at 160K -> ceiling 176K; 170K holds, 180K allows
     p1 = transcript(tmp_path, "f1", [a("tool_use", 160000)])
     assert run_hook({"trigger": "auto", "transcript_path": p1, "session_id": "flex"}, tmp_path)[0] == 2
@@ -74,7 +74,7 @@ def test_hook_default_flex_ceiling(tmp_path):
     assert run_hook({"trigger": "auto", "transcript_path": p3, "session_id": "flex"}, tmp_path)[0] == 0
 
 
-def test_hook_profile_ceiling(tmp_path):
+def test_G1_4_hook_profile_ceiling(tmp_path):
     proj = tmp_path / "proj"
     (proj / ".claude").mkdir(parents=True)
     (proj / ".claude" / "pit-stop.json").write_text(json.dumps({"ceiling": 300000}))
@@ -82,7 +82,7 @@ def test_hook_profile_ceiling(tmp_path):
     assert run_hook({"trigger": "auto", "transcript_path": p, "session_id": "pc", "cwd": str(proj)}, tmp_path)[0] == 0
 
 
-def test_reading_trim_keeps_every_link():
+def test_G10_1_reading_trim_keeps_every_link():
     import reading_check as rc
     lines = ["- READ FIRST: free text that must stay exactly as it is."]
     for i in range(120):
@@ -99,7 +99,7 @@ def test_reading_trim_keeps_every_link():
     assert new.count("\n") < text.count("\n")
 
 
-def test_optimizer_recommends_within_bounds(tmp_path, monkeypatch):
+def test_G2_2_optimizer_recommends_within_bounds(tmp_path, monkeypatch):
     import pitstop_common as pc
     import optimize as op
     monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
@@ -127,7 +127,7 @@ def test_optimizer_recommends_within_bounds(tmp_path, monkeypatch):
     assert rec["model_effort_suggestions"]
 
 
-def test_hook_clamps_a_huge_project_ceiling(tmp_path):
+def test_G1_6_hook_clamps_a_huge_project_ceiling(tmp_path):
     # a cloned repo ships ceiling 10M: clamped to 1.5x the first hold (and 95% of the window)
     proj = tmp_path / "proj"
     (proj / ".claude").mkdir(parents=True)
@@ -143,7 +143,7 @@ def test_hook_clamps_a_huge_project_ceiling(tmp_path):
     assert "profile-clamped" in log
 
 
-def test_hook_log_rotates(tmp_path):
+def test_G1_8_hook_log_rotates(tmp_path):
     state = tmp_path / "cfg" / "pit-stop"
     state.mkdir(parents=True)
     (state / "precompact.log").write_text("x" * 5_000_001)
@@ -152,7 +152,7 @@ def test_hook_log_rotates(tmp_path):
     assert (state / "precompact.log").stat().st_size < 1000
 
 
-def test_restart_helper_reads_the_input_box(tmp_path, monkeypatch):
+def test_G4_1_restart_helper_reads_the_input_box(tmp_path, monkeypatch):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
     import importlib
     import pitstop_common
@@ -180,7 +180,7 @@ def _rab(tmp_path, monkeypatch):
     return rab
 
 
-def test_restart_rules_at_a_break(tmp_path, monkeypatch):
+def test_G4_9_restart_rules_at_a_break(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     cfg = dict(rab.CFG)
     # working sessions are never restarted
@@ -204,7 +204,7 @@ def test_restart_rules_at_a_break(tmp_path, monkeypatch):
     assert rab.at_a_break("shell", 61, 250_000, 600, cfg)[0] is True
 
 
-def test_restart_reads_the_last_compaction_time(tmp_path, monkeypatch):
+def test_G4_8_restart_reads_the_last_compaction_time(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     entries = [a("text"),
                {"type": "system", "subtype": "compact_boundary", "timestamp": "2026-11-10T12:00:00.000Z"},
@@ -221,7 +221,7 @@ def test_restart_reads_the_last_compaction_time(tmp_path, monkeypatch):
     assert rab.utc_ts("2026-07-01T00:00:00Z") == 1782864000  # summer: no DST shift
 
 
-def test_restart_backs_off_after_a_typing_mismatch(tmp_path, monkeypatch):
+def test_G4_7_restart_backs_off_after_a_typing_mismatch(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     cfg = dict(rab.CFG)
     # 30 min, doubling per miss in a row, never more than 12 h
@@ -244,7 +244,7 @@ def test_restart_backs_off_after_a_typing_mismatch(tmp_path, monkeypatch):
     assert not os.path.exists(mmf)
 
 
-def test_reading_topic_reads_hyphen_and_underscore_names():
+def test_G10_2_reading_topic_reads_hyphen_and_underscore_names():
     import reading_check as rc
     assert rc.topic("feedback_mind_rule3.md") == "mind"            # the older underscore style
     assert rc.topic("feedback-board-line-format-2026-11-10.md") == "board"
@@ -258,7 +258,7 @@ def test_reading_topic_reads_hyphen_and_underscore_names():
     assert "**board" in new and new.count("\n") < text.count("\n")
 
 
-def test_hook_command_falls_back_to_python_when_python3_is_a_stub(tmp_path):
+def test_G1_13_hook_command_falls_back_to_python_when_python3_is_a_stub(tmp_path):
     """Windows can ship a `python3` that is only a Microsoft Store stub. The hook command must then run `python`,
     and must pass the hook's own exit code through (2 = hold the compaction) on every system."""
     import pytest
@@ -286,7 +286,7 @@ def test_hook_command_falls_back_to_python_when_python3_is_a_stub(tmp_path):
             assert "Python was not found" not in r.stdout
 
 
-def test_a_hook_whose_plugin_folder_is_gone_lets_claude_code_go_on(tmp_path):
+def test_G1_14_a_hook_whose_plugin_folder_is_gone_lets_claude_code_go_on(tmp_path):
     """Claude Code deletes an old version folder 14 days after an update (its .orphaned_at marker). A session
     that loaded its hooks from there still runs the same command. Without the file check, python exits 2 on a
     missing script, and for PreCompact exit 2 means HOLD: that session could never compact again. With it,
@@ -310,7 +310,7 @@ def test_a_hook_whose_plugin_folder_is_gone_lets_claude_code_go_on(tmp_path):
 
 # ---------------------------------------------------------------- 0.2.0
 
-def test_hook_instructions_can_be_switched_off_or_extended(tmp_path):
+def test_G1_7_hook_instructions_can_be_switched_off_or_extended(tmp_path):
     p = transcript(tmp_path, "i", [a("text")])
     pay = {"trigger": "auto", "transcript_path": p, "session_id": "i"}
     state = tmp_path / "cfg" / "pit-stop"
@@ -326,7 +326,7 @@ def test_hook_instructions_can_be_switched_off_or_extended(tmp_path):
     assert run_hook(dict(pay, trigger="manual"), tmp_path) == (0, "")
 
 
-def test_hook_reads_the_user_level_folder_profile(tmp_path):
+def test_G1_5_hook_reads_the_user_level_folder_profile(tmp_path):
     import re
     proj = tmp_path / "proj"
     proj.mkdir()
@@ -348,7 +348,7 @@ def _run(script, payload, tmp, extra_env=None):
     return r.returncode, r.stdout, r.stderr
 
 
-def test_stop_hook_hands_over_the_ask_once(tmp_path):
+def test_G11_2_stop_hook_hands_over_the_ask_once(tmp_path):
     asks = tmp_path / "cfg" / "pit-stop" / "asks"
     asks.mkdir(parents=True)
     okf = str(tmp_path / "cfg" / "pit-stop" / "restart" / "ok" / "lane-1a2b3c4d")
@@ -365,7 +365,7 @@ def test_stop_hook_hands_over_the_ask_once(tmp_path):
     assert _run("stop_pit_stop.py", {}, tmp_path)[0] == 0
 
 
-def test_stop_hook_update_line_once_per_version(tmp_path):
+def test_G7_5_stop_hook_update_line_once_per_version(tmp_path):
     versions = tmp_path / "home" / ".local" / "share" / "claude" / "versions"
     versions.mkdir(parents=True)
     (versions / "2.1.322").write_text("")
@@ -389,7 +389,7 @@ def test_stop_hook_update_line_once_per_version(tmp_path):
     assert _run("stop_pit_stop.py", {"session_id": "sess-4"}, tmp_path)[:2] == (0, "")
 
 
-def test_session_start_checklist_only_after_a_compaction(tmp_path):
+def test_G11_1_session_start_checklist_only_after_a_compaction(tmp_path):
     code, out, _ = _run("session_start.py", {"source": "compact", "cwd": str(tmp_path)}, tmp_path)
     assert code == 0 and out.startswith("Pit Stop:") and "background jobs" in out
     for source in ("startup", "resume", "clear"):
@@ -408,7 +408,7 @@ def _lane(**kw):
     return base
 
 
-def test_plan_compact_first_then_restart(tmp_path, monkeypatch):
+def test_G4_10_plan_compact_first_then_restart(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     cfg = dict(rab.CFG)
     # big, warm, quiet 10 min: compact first
@@ -434,7 +434,7 @@ def test_plan_compact_first_then_restart(tmp_path, monkeypatch):
     assert rab.plan(_lane(status="waiting"), cfg)[0] == "skip"
 
 
-def test_plan_background_jobs_and_consent(tmp_path, monkeypatch):
+def test_G4_11_plan_background_jobs_and_consent(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     cfg = dict(rab.CFG)
     # background jobs: ask, whatever the context or idle time
@@ -462,7 +462,7 @@ def test_plan_background_jobs_and_consent(tmp_path, monkeypatch):
     assert rab.plan(_lane(blocked="a restart was tried 100s ago"), cfg) == ("skip", "a restart was tried 100s ago")
 
 
-def test_plan_idle_compact_is_opt_in(tmp_path, monkeypatch):
+def test_G4_13_plan_idle_compact_is_opt_in(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     cfg = dict(rab.CFG)
     up = _lane(behind=False, ctx=250_000, idle_point=200_000, idle=700)
@@ -491,7 +491,7 @@ def test_plan_idle_compact_is_opt_in(tmp_path, monkeypatch):
     assert rab.plan(dict(up, compact_ask_age=900), on)[0] == "none"     # already asked
 
 
-def test_allow_and_deny_lists(tmp_path, monkeypatch):
+def test_G4_15_allow_and_deny_lists(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     cfg = dict(rab.CFG, deny_name_globs=["user1-*", "* Boss"], deny_names=["Ghost"], deny_paths=[str(tmp_path / "private")])
     assert rab.allowed("Windy Hub", "/work", cfg)
@@ -533,7 +533,7 @@ def _history(tmp_path, monkeypatch, cycles=4, per=30, gap_min=1, start=300000, p
     return pc, op, str(proj)
 
 
-def test_optimizer_two_points_within_bounds(tmp_path, monkeypatch):
+def test_G2_3_optimizer_two_points_within_bounds(tmp_path, monkeypatch):
     pc, op, proj = _history(tmp_path, monkeypatch)
     m = op.analyze(proj, None)
     assert m["compactions"] == 4 and m["compactions_when"]["mid_task"] == 4
@@ -554,7 +554,7 @@ def test_optimizer_two_points_within_bounds(tmp_path, monkeypatch):
     assert small["idle_point"] == pc.IDLE_FLOOR and small["window"] <= 170_000
 
 
-def test_topic_change_measure():
+def test_G2_1_topic_change_measure():
     import optimize as op
     same = ["/a", "/b", "/c"] * 40
     assert op.drift_of(same) and max(op.drift_of(same)) == 0
@@ -563,7 +563,7 @@ def test_topic_change_measure():
     assert op.drift_of(["/a"] * 10) == []      # too little to say
 
 
-def test_cold_wake_ups_are_counted(tmp_path, monkeypatch):
+def test_G2_4_cold_wake_ups_are_counted(tmp_path, monkeypatch):
     pc, op, proj = _history(tmp_path, monkeypatch, cycles=2, per=12, gap_min=90)
     m = op.analyze(proj, None)
     assert m["cold_wakes_per_day"] and m["cold_wakes_per_day"] > 3
@@ -571,7 +571,7 @@ def test_cold_wake_ups_are_counted(tmp_path, monkeypatch):
     assert any("cold wake-ups" in w for w in rec["why"])
 
 
-def test_apply_writes_both_points_and_keeps_the_rest(tmp_path, monkeypatch):
+def test_G2_11_apply_writes_both_points_and_keeps_the_rest(tmp_path, monkeypatch):
     pc, op, proj = _history(tmp_path, monkeypatch)
     sdir = os.path.join(proj, ".claude")
     os.makedirs(sdir)
@@ -598,7 +598,7 @@ def test_apply_writes_both_points_and_keeps_the_rest(tmp_path, monkeypatch):
     assert len(glob.glob(s + ".bak-pitstop-*")) == 3
 
 
-def test_session_list_falls_back_to_the_documented_listing(tmp_path, monkeypatch):
+def test_G3_3_session_list_falls_back_to_the_documented_listing(tmp_path, monkeypatch):
     import pitstop_common as pc
     monkeypatch.setattr(pc, "SESSIONS", str(tmp_path / "sessions"))
     me = os.getpid()
@@ -617,7 +617,7 @@ def test_session_list_falls_back_to_the_documented_listing(tmp_path, monkeypatch
     assert pc.vkey("2.1.322") > pc.vkey("2.1.99") and pc.vkey("junk") == ()
 
 
-def test_launcher_finds_the_installed_plugin(tmp_path):
+def test_G12_1_launcher_finds_the_installed_plugin(tmp_path):
     import importlib.util
     spec = importlib.util.spec_from_file_location("launcher", os.path.join(ROOT, "scripts", "launcher.py"))
     launcher = importlib.util.module_from_spec(spec)
@@ -634,7 +634,7 @@ def test_launcher_finds_the_installed_plugin(tmp_path):
     assert launcher.plugin_root(str(tmp_path / "nothing")) is None
 
 
-def test_weekly_tune_is_off_until_switched_on(tmp_path, monkeypatch):
+def test_G2_17_tuning_is_off_until_switched_on(tmp_path, monkeypatch):
     pc, op, proj = _history(tmp_path, monkeypatch, projects=tmp_path / "cfg" / "projects")
     env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp_path / "cfg"))
     settings = os.path.join(proj, ".claude", "settings.local.json")
@@ -664,7 +664,7 @@ def test_weekly_tune_is_off_until_switched_on(tmp_path, monkeypatch):
     assert autotune.due(str(st), now + 3600, True) is True
 
 
-def test_every_hook_command_uses_the_python_probe_and_passes_exit_2(tmp_path):
+def test_G1_12_every_hook_command_uses_the_python_probe_and_the_stop_command_passes_exit_2(tmp_path):
     """All three hooks run through the same python3/python probe line, and the
     Stop hook's exit 2 (hand the ask to Claude) comes through it unchanged."""
     import shutil
@@ -691,7 +691,7 @@ def test_every_hook_command_uses_the_python_probe_and_passes_exit_2(tmp_path):
 
 # ---------------------------------------------------------------- 0.2.0, from the review
 
-def test_plan_never_asks_for_a_restart_it_cannot_do(tmp_path, monkeypatch):
+def test_G4_12_plan_never_asks_for_a_restart_it_cannot_do(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     cfg = dict(rab.CFG)
     cool = "a restart was tried 100s ago"
@@ -704,7 +704,7 @@ def test_plan_never_asks_for_a_restart_it_cannot_do(tmp_path, monkeypatch):
     assert rab.plan(_lane(status="busy", consented=True, consent_age=9999, blocked=cool), cfg)[0] == "skip"
 
 
-def test_only_the_rows_around_the_input_box_count_as_busy(tmp_path, monkeypatch):
+def test_G4_2_only_the_rows_around_the_input_box_count_as_busy(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     border = "─" * 40
     reply = ["● I can do that. Do you want me to proceed with the plan (y/n)?", "  1. first step"]
@@ -719,7 +719,7 @@ def test_only_the_rows_around_the_input_box_count_as_busy(tmp_path, monkeypatch)
     assert rab.input_box_text(["some other program owns this pane"]) is None   # ... and nothing is typed there
 
 
-def test_state_keys_and_stale_lists(tmp_path, monkeypatch):
+def test_G3_4_state_keys_and_stale_lists(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     # names with no ASCII letters, and names that reduce to the same letters, never share state
     assert rab.lane_key("日本語", "abcd1234-xyz") == "session-abcd1234"
@@ -745,7 +745,7 @@ def test_state_keys_and_stale_lists(tmp_path, monkeypatch):
     assert rab.ask_time("nobody", str(tmp_path / "none"), 1000.0) is None
 
 
-def test_only_without_a_name_does_nothing_and_a_dry_run_writes_nothing(tmp_path):
+def test_G4_28_only_without_a_name_does_nothing_and_a_dry_run_writes_nothing(tmp_path):
     env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp_path / "cfg"), HOME=str(tmp_path / "home"))
     script = os.path.join(ROOT, "scripts", "restart_at_break.py")
     for argv in (["--live", "--only"], ["--only", "", "--live"], ["--only", "--live"]):
@@ -756,7 +756,7 @@ def test_only_without_a_name_does_nothing_and_a_dry_run_writes_nothing(tmp_path)
     assert not (tmp_path / "cfg" / "pit-stop").exists()      # no folders, no log
 
 
-def test_apply_refuses_a_settings_file_it_cannot_read(tmp_path, monkeypatch):
+def test_G2_12_apply_refuses_a_settings_file_it_cannot_read(tmp_path, monkeypatch):
     import pytest
     pc, op, proj = _history(tmp_path, monkeypatch)
     os.makedirs(os.path.join(proj, ".claude"))
@@ -770,7 +770,7 @@ def test_apply_refuses_a_settings_file_it_cannot_read(tmp_path, monkeypatch):
     assert pc.read_json_strict(str(tmp_path / "missing.json")) == ({}, None)
 
 
-def test_odd_transcript_lines_do_not_break_the_readers(tmp_path, monkeypatch):
+def test_G3_1_odd_transcript_lines_do_not_break_the_readers(tmp_path, monkeypatch):
     import pitstop_common as pc
     import optimize as op
     monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
@@ -798,7 +798,7 @@ def test_odd_transcript_lines_do_not_break_the_readers(tmp_path, monkeypatch):
     assert run_hook({"trigger": "auto"}, tmp_path, {"PIT_STOP_DEFAULT_FLEX": "lots"}) == (0, "")
 
 
-def test_thin_history_leaves_the_window_where_it_is(tmp_path, monkeypatch):
+def test_G2_8_thin_history_leaves_the_window_where_it_is(tmp_path, monkeypatch):
     pc, op, proj = _history(tmp_path, monkeypatch, cycles=1)
     m = op.analyze(proj, None)
     assert m["compactions"] == 1
@@ -832,7 +832,7 @@ def _sess(status="idle", version="2.1.319", started=0, name="Lane One"):
             "startedAt": started, "pid": os.getpid()}
 
 
-def test_live_compact_first_then_restart_and_nothing_typed_after(tmp_path, monkeypatch):
+def test_G4_18_live_compact_first_then_restart_and_nothing_typed_after(tmp_path, monkeypatch):
     import time
     rab, typed = _live(tmp_path, monkeypatch)
     now, counts = time.time(), {"restart": 0, "compact": 0}
@@ -852,7 +852,7 @@ def test_live_compact_first_then_restart_and_nothing_typed_after(tmp_path, monke
     assert typed == ["/compact", "/restart"]
 
 
-def test_live_run_limit_and_cold_restart(tmp_path, monkeypatch):
+def test_G4_19_live_run_limit_and_cold_restart(tmp_path, monkeypatch):
     import time
     rab, typed = _live(tmp_path, monkeypatch, idle=4000)                # idle over an hour: the cache is cold
     now, counts = time.time(), {"restart": 0, "compact": 0}
@@ -862,7 +862,7 @@ def test_live_run_limit_and_cold_restart(tmp_path, monkeypatch):
     assert typed == ["/restart"]
 
 
-def test_live_background_jobs_ask_then_restart_then_rearm_note(tmp_path, monkeypatch):
+def test_G4_20_live_background_jobs_ask_then_restart_then_rearm_note(tmp_path, monkeypatch):
     import time
     import pitstop_common as pc
     rab, typed = _live(tmp_path, monkeypatch, ctx=60_000, idle=30)
@@ -886,7 +886,7 @@ def test_live_background_jobs_ask_then_restart_then_rearm_note(tmp_path, monkeyp
     assert not os.path.exists(ask["okf"]) and not os.path.exists(askf)   # list put away only after the note went
 
 
-def test_every_typed_note_stays_under_the_length_claude_code_folds_into_a_paste_block(tmp_path, monkeypatch):
+def test_G4_16_every_typed_note_stays_under_the_length_claude_code_folds_into_a_paste_block(tmp_path, monkeypatch):
     """Found live on Veron, 2026-11-12: a start-your-jobs note of about 930 chars became a "[Pasted text]" block,
     the box no longer showed the text, and the note was (safely) never sent: the session's watchers stayed down."""
     rab = _rab(tmp_path, monkeypatch)
@@ -911,7 +911,7 @@ def test_every_typed_note_stays_under_the_length_claude_code_folds_into_a_paste_
         head + ": your list of 1 is in the file " + where + " (read it)" + tail)
 
 
-def test_notes_stay_under_the_limit_with_the_longest_key_and_long_home_folders(tmp_path, monkeypatch):
+def test_G4_17_notes_stay_under_the_limit_with_the_longest_key_and_long_home_folders(tmp_path, monkeypatch):
     """Windy Boss's note on 0.3.2: the note that names the file had no fallback of its own, and the typed ask
     had room for a re-arm path of only about 110 chars. Now the key's name part is capped and both notes have
     a short last form, so a path of up to 300 chars still gives a note Claude Code shows as typed text."""
@@ -940,7 +940,7 @@ def test_notes_stay_under_the_limit_with_the_longest_key_and_long_home_folders(t
     assert short.startswith("[AUTOMATED pit-stop restart") and "/" + "p" * 300 in short and len(short) <= rab.NOTE_MAX
 
 
-def test_type_line_never_types_a_note_over_the_limit(tmp_path, monkeypatch):
+def test_G4_4_type_line_never_types_a_note_over_the_limit(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     sent = []
     monkeypatch.setattr(rab, "LIVE", True)
@@ -975,7 +975,7 @@ def _fake_box(rab, monkeypatch, box, per_ctrl_u):
     return sent, told
 
 
-def test_a_mismatch_keeps_clearing_its_own_long_note_and_says_so_when_it_cannot(tmp_path, monkeypatch):
+def test_G4_5_a_mismatch_keeps_clearing_its_own_long_note_and_says_so_when_it_cannot(tmp_path, monkeypatch):
     # Mac mini 2026-11-14: the box read back 258 of 497 characters, one Ctrl-U did not empty it,
     # and the note sat in Windy Fly Mobile's box until a person pressed Enter.
     rab = _rab(tmp_path, monkeypatch)
@@ -998,7 +998,7 @@ def test_a_mismatch_keeps_clearing_its_own_long_note_and_says_so_when_it_cannot(
     assert "COULD NOT CLEAR" in log
 
 
-def test_a_mismatch_never_keeps_clearing_text_that_is_not_its_own(tmp_path, monkeypatch):
+def test_G4_6_a_mismatch_never_keeps_clearing_text_that_is_not_its_own(tmp_path, monkeypatch):
     # someone typed in the second after the helper did: one Ctrl-U as before, then hands off
     rab = _rab(tmp_path, monkeypatch)
     box = ["hello from a person who is typing right now"]
@@ -1009,7 +1009,7 @@ def test_a_mismatch_never_keeps_clearing_text_that_is_not_its_own(tmp_path, monk
     assert not any(a[-1] == "Enter" for a in sent)
 
 
-def test_live_restart_with_a_long_list_names_the_file_and_a_mismatch_stops_carrying_the_list(tmp_path, monkeypatch):
+def test_G4_21_live_restart_with_a_long_list_names_the_file_and_a_mismatch_stops_carrying_the_list(tmp_path, monkeypatch):
     import re
     import time
     import pitstop_common as pc
@@ -1048,7 +1048,7 @@ def test_live_restart_with_a_long_list_names_the_file_and_a_mismatch_stops_carry
     assert not os.path.exists(okf) and not os.path.exists(mmf)
 
 
-def test_live_late_restart_still_gets_the_rearm_note(tmp_path, monkeypatch):
+def test_G4_22_live_late_restart_still_gets_the_rearm_note(tmp_path, monkeypatch):
     import time
     import pitstop_common as pc
     rab, typed = _live(tmp_path, monkeypatch, ctx=60_000, idle=90, confirm=False)
@@ -1068,7 +1068,7 @@ def test_live_late_restart_still_gets_the_rearm_note(tmp_path, monkeypatch):
     assert len(typed) == 2                                              # told once
 
 
-def test_live_stale_lists_are_put_away_without_typing(tmp_path, monkeypatch):
+def test_G4_23_live_stale_lists_are_put_away_without_typing(tmp_path, monkeypatch):
     import time
     rab, typed = _live(tmp_path, monkeypatch, ctx=300_000, idle=200)
     now, counts = time.time(), {"restart": 0, "compact": 0}
@@ -1084,7 +1084,7 @@ def test_live_stale_lists_are_put_away_without_typing(tmp_path, monkeypatch):
     assert typed == [] and not os.path.exists(okf)
 
 
-def test_live_typing_backoff_stops_every_typed_action(tmp_path, monkeypatch):
+def test_G4_24_live_typing_backoff_stops_every_typed_action(tmp_path, monkeypatch):
     import time
     import pitstop_common as pc
     rab, typed = _live(tmp_path, monkeypatch, ctx=60_000, idle=900)
@@ -1122,7 +1122,7 @@ def test_live_typing_backoff_stops_every_typed_action(tmp_path, monkeypatch):
     ("days", -1),
     ("days", 99999),
 ])
-def test_stop_hook_does_not_pass_on_an_ask_with_a_field_the_helper_would_not_write(tmp_path, field, bad):
+def test_G11_3_stop_hook_does_not_pass_on_an_ask_with_a_field_the_helper_would_not_write(tmp_path, field, bad):
     """Windy Boss's read of 0.2.0: the ask's text goes to Claude as an instruction,
     so its fields are checked before they are printed."""
     asks = tmp_path / "cfg" / "pit-stop" / "asks"
@@ -1137,7 +1137,7 @@ def test_stop_hook_does_not_pass_on_an_ask_with_a_field_the_helper_would_not_wri
     assert "not passed on" in (tmp_path / "cfg" / "pit-stop" / "stop.log").read_text()
 
 
-def test_idle_is_counted_from_the_newest_dated_entry_not_the_file_time(tmp_path, monkeypatch):
+def test_G3_2_idle_is_counted_from_the_newest_dated_entry_not_the_file_time(tmp_path, monkeypatch):
     """Seen on Veron 2026-11-11: a quiet lane's transcript had its file time moved
     about once an hour with nothing appended, so the idle clock never passed an hour."""
     import pitstop_common as pc
@@ -1157,7 +1157,7 @@ def test_idle_is_counted_from_the_newest_dated_entry_not_the_file_time(tmp_path,
     assert ctx == 300_000 and 5 * 3600 - 5 <= idle <= 5 * 3600 + 60
 
 
-def test_not_before_holds_a_run_until_its_time():
+def test_G4_26_not_before_holds_a_run_until_its_time():
     import restart_at_break as rab
     t = rab.utc_ts("2026-11-11T20:45:00Z")
     assert rab.too_early(["x", "--live"], now=t - 100) == 0                      # no option: runs
@@ -1168,7 +1168,7 @@ def test_not_before_holds_a_run_until_its_time():
         assert rab.too_early(bad, now=t + 5) == -1                               # unreadable: the run does nothing
 
 
-def test_a_summary_swapped_in_instantly_is_not_counted_as_mid_task(tmp_path, monkeypatch):
+def test_G1_15_a_summary_swapped_in_instantly_is_not_counted_as_mid_task(tmp_path, monkeypatch):
     """Claude Code can prepare the summary ahead and swap it in mid-tool-call in
     milliseconds (compactMetadata.precomputed); seen on Veron 2026-11-04..11."""
     import pitstop_common as pc
@@ -1191,7 +1191,7 @@ def test_a_summary_swapped_in_instantly_is_not_counted_as_mid_task(tmp_path, mon
     assert (w["instant"], w["mid_task"]) == (1, 1)
 
 
-def test_events_log_keeps_actions_and_leaves_out_skips(tmp_path, monkeypatch):
+def test_G4_25_events_log_keeps_actions_and_leaves_out_skips(tmp_path, monkeypatch):
     import restart_at_break as rab
     monkeypatch.setattr(rab, "LIVE", True)
     monkeypatch.setattr(rab, "BASE", str(tmp_path))
@@ -1214,7 +1214,7 @@ def _rl(**kw):
     return l
 
 
-def test_reload_due_only_when_the_hooks_are_missing_or_wrong_not_merely_older(tmp_path, monkeypatch):
+def test_G5_1_reload_due_only_when_the_hooks_are_missing_or_wrong_not_merely_older(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     on = dict(rab.CFG, reload_plugins=True)
     assert rab.reload_due(_rl(), rab.CFG) == (False, "off")
@@ -1231,7 +1231,7 @@ def test_reload_due_only_when_the_hooks_are_missing_or_wrong_not_merely_older(tm
     assert rab.reload_due(_rl(status="shell"), on)[0] is True                              # background jobs do not matter
 
 
-def test_reload_due_takes_cold_small_or_just_compacted_first_and_makes_big_warm_wait(tmp_path, monkeypatch):
+def test_G5_2_reload_due_takes_cold_small_or_just_compacted_first_and_makes_big_warm_wait(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     on = dict(rab.CFG, reload_plugins=True)
     assert rab.reload_due(_rl(idle=4000), on)[1].endswith("cache cold")
@@ -1259,7 +1259,7 @@ def _plugin_dir(base, version, generation=None, when=None):
     return str(root)
 
 
-def test_hook_generation_and_which_version_a_session_loaded(tmp_path, monkeypatch):
+def test_G3_6_hook_generation_and_which_version_a_session_loaded(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     import pitstop_common as pc
     cfg, now = tmp_path / "cfg", time.time()
@@ -1292,7 +1292,7 @@ def test_hook_generation_and_which_version_a_session_loaded(tmp_path, monkeypatc
     assert rab.lane_hooks(s, info) == (mid, None)                        # its folder was removed: hooks that cannot run
 
 
-def test_generation_file_was_looked_at_when_the_hook_files_last_changed():
+def test_G3_7_generation_file_was_looked_at_when_the_hook_files_last_changed():
     """If this fails, hooks/hooks.json or a hooks/*.py changed. Decide: must a session that is already
     running reload to work properly with this release? If yes, raise "generation" in hooks/generation.json.
     Either way record the new hook_files_sha256 there (the value is in the failure message)."""
@@ -1319,7 +1319,7 @@ def _live_reload(tmp_path, monkeypatch, rows, ctx=60_000, idle=4000):
     return rab, typed, {"root": new, "gen": 2, "versions": [(now - 3600, new)]}, now
 
 
-def test_live_reload_types_once_confirms_and_then_leaves_the_session_alone(tmp_path, monkeypatch):
+def test_G5_4_live_reload_types_once_confirms_and_then_leaves_the_session_alone(tmp_path, monkeypatch):
     rab, typed, info, now = _live_reload(tmp_path, monkeypatch,
                                          ["\u276f /reload-plugins",
                                           "  \u23bf  Reloaded: 1 plugin \u00b7 1 skill \u00b7 7 agents \u00b7 1 hook"])
@@ -1342,7 +1342,7 @@ def test_live_reload_types_once_confirms_and_then_leaves_the_session_alone(tmp_p
     assert typed == ["/reload-plugins"]
 
 
-def test_live_reload_not_confirmed_waits_for_the_retry_time(tmp_path, monkeypatch):
+def test_G5_5_live_reload_not_confirmed_waits_for_the_retry_time(tmp_path, monkeypatch):
     rab, typed, info, now = _live_reload(tmp_path, monkeypatch, ["some other screen"])
     counts = {"restart": 0, "compact": 0, "reload": 0}
     s = _sess(version="2.1.322", started=(now - 86400) * 1000)
@@ -1357,7 +1357,7 @@ def test_live_reload_not_confirmed_waits_for_the_retry_time(tmp_path, monkeypatc
     assert typed == ["/reload-plugins", "/reload-plugins"]
 
 
-def test_a_session_restarted_in_this_run_is_not_also_reloaded_and_off_means_nothing_typed(tmp_path, monkeypatch):
+def test_G5_6_a_session_restarted_in_this_run_is_not_also_reloaded_and_off_means_nothing_typed(tmp_path, monkeypatch):
     rab, typed, info, now = _live_reload(tmp_path, monkeypatch, [], ctx=60_000, idle=4000)
     counts = {"restart": 0, "compact": 0, "reload": 0}
     s = _sess(version="2.1.319", started=(now - 86400) * 1000)          # behind AND without the hook
@@ -1371,7 +1371,7 @@ def test_a_session_restarted_in_this_run_is_not_also_reloaded_and_off_means_noth
     assert typed == ["/restart"]
 
 
-def test_plugin_install_time_is_read_from_claude_codes_record(tmp_path):
+def test_G3_5_plugin_install_time_is_read_from_claude_codes_record(tmp_path):
     import pitstop_common as pc
     d = tmp_path / "plugins"
     d.mkdir()
@@ -1397,7 +1397,7 @@ def _m(**kw):
     return m
 
 
-def test_budget_caps_the_window_of_a_folder_that_reads_a_lot(tmp_path, monkeypatch):
+def test_G2_9_budget_caps_the_window_of_a_folder_that_reads_a_lot(tmp_path, monkeypatch):
     import pitstop_common as pc
     import optimize as op
     monkeypatch.setattr(pc, "CONFIG", str(tmp_path / "config.json"))
@@ -1429,7 +1429,7 @@ def test_budget_caps_the_window_of_a_folder_that_reads_a_lot(tmp_path, monkeypat
     assert op.recommend(very)["budget"] == "balanced"
 
 
-def test_usage_per_day_needs_a_day_of_history_and_counts_a_model_call_once(tmp_path, monkeypatch):
+def test_G2_5_usage_per_day_needs_a_day_of_history_and_counts_a_model_call_once(tmp_path, monkeypatch):
     import pitstop_common as pc
     import optimize as op
     monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
@@ -1477,7 +1477,7 @@ def _s(name, version="2.1.322", status="idle", st_age=60, started_ago=3600, now=
             "pid": os.getpid()}
 
 
-def test_needs_you_lists_who_waits_who_is_stuck_and_why(tmp_path, monkeypatch):
+def test_G8_1_needs_you_lists_who_waits_who_is_stuck_and_why(tmp_path, monkeypatch):
     pc, rab, ny = _needs(tmp_path, monkeypatch, {"allow_names": ["A", "B", "C", "D", "E"]})
     now = time.time()
     os.utime(os.path.join(pc.VERSIONS, "2.1.322"), (now - 3 * 86400, now - 3 * 86400))   # newest installed 3 days ago
@@ -1505,7 +1505,7 @@ def test_needs_you_lists_who_waits_who_is_stuck_and_why(tmp_path, monkeypatch):
     assert "Nothing needs you." in ny.render(calm, now) and ny.headline(calm) == ""
 
 
-def test_needs_you_file_is_written_hourly_and_the_person_is_told_once_per_change(tmp_path, monkeypatch):
+def test_G8_5_needs_you_file_is_written_hourly_and_the_person_is_told_once_per_change(tmp_path, monkeypatch):
     pc, rab, ny = _needs(tmp_path, monkeypatch)
     told = []
     monkeypatch.setattr(rab, "notify", lambda msg: told.append(msg))
@@ -1523,7 +1523,7 @@ def test_needs_you_file_is_written_hourly_and_the_person_is_told_once_per_change
     assert "Nothing needs you." in open(ny.OUT).read() and len(told) == 1
 
 
-def test_needs_you_counts_sessions_whose_hooks_are_missing_or_wrong(tmp_path, monkeypatch):
+def test_G8_3_needs_you_counts_sessions_whose_hooks_are_missing_or_wrong(tmp_path, monkeypatch):
     pc, rab, ny = _needs(tmp_path, monkeypatch)
     now = time.time()
     old = _plugin_dir(tmp_path / "cfg", "0.1.4", when=now - 7200)                    # generation 1
@@ -1548,7 +1548,7 @@ def test_needs_you_counts_sessions_whose_hooks_are_missing_or_wrong(tmp_path, mo
     assert ny.collect(sessions, "2.1.322", now)["unloaded"] == ["NoHook"]            # merely older is not listed
 
 
-def test_needs_you_behind_since_is_when_the_session_fell_behind_not_the_newest_release(tmp_path, monkeypatch):
+def test_G8_2_needs_you_behind_since_is_when_the_session_fell_behind_not_the_newest_release(tmp_path, monkeypatch):
     pc, rab, ny = _needs(tmp_path, monkeypatch, {"allow_names": ["Far", "Near"]})
     now = time.time()
     for v, age in (("2.1.310", 9 * 86400), ("2.1.321", 3 * 86400), ("2.1.322", 2 * 3600)):   # 322 landed 2 hours ago
@@ -1561,7 +1561,7 @@ def test_needs_you_behind_since_is_when_the_session_fell_behind_not_the_newest_r
     assert d["behind_new"] == ["Near"] and "Nothing needs you" not in ny.render(d, now)
 
 
-def test_needs_you_names_a_session_outside_tmux_and_announces_only_new_names_from_the_live_helper(tmp_path, monkeypatch):
+def test_G8_4_needs_you_names_a_session_outside_tmux_and_announces_only_new_names_from_the_live_helper(tmp_path, monkeypatch):
     pc, rab, ny = _needs(tmp_path, monkeypatch, {"allow_names": ["A", "B", "NoPane"]})
     now = time.time()
     os.utime(os.path.join(pc.VERSIONS, "2.1.322"), (now - 3 * 86400, now - 3 * 86400))
@@ -1586,7 +1586,7 @@ def test_needs_you_names_a_session_outside_tmux_and_announces_only_new_names_fro
     assert len(told) == 2
 
 
-def test_quiet_session_pit_stop_never_jumps_ahead_of_a_step_in_progress(tmp_path, monkeypatch):
+def test_G4_14_quiet_session_pit_stop_never_jumps_ahead_of_a_step_in_progress(tmp_path, monkeypatch):
     """From the review: the new rule's place in plan() was not pinned by any test."""
     rab = _rab(tmp_path, monkeypatch)
     on = dict(rab.CFG, idle_compact_after=600)
@@ -1609,7 +1609,7 @@ def test_quiet_session_pit_stop_never_jumps_ahead_of_a_step_in_progress(tmp_path
     assert rab.plan(dict(cold, call_age=700), on)[0] == "compact"
 
 
-def test_main_keeps_the_needs_you_list_only_in_a_live_run_of_the_whole_fleet(tmp_path, monkeypatch):
+def test_G8_8_main_keeps_the_needs_you_list_only_in_a_live_run_of_the_whole_fleet(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     import pitstop_common as pc
     import needs_you as ny
@@ -1636,7 +1636,7 @@ def test_main_keeps_the_needs_you_list_only_in_a_live_run_of_the_whole_fleet(tmp
     rab.main()                                                           # a failure there never fails the run
 
 
-def test_budget_limits_hold_at_the_edges(tmp_path, monkeypatch):
+def test_G2_10_budget_limits_hold_at_the_edges(tmp_path, monkeypatch):
     """From the review: the cap dropped the range's top, and said "stays" while raising."""
     import pitstop_common as pc
     import optimize as op
@@ -1665,7 +1665,7 @@ def test_budget_limits_hold_at_the_edges(tmp_path, monkeypatch):
     assert r["window"] > 400_000 and r["est_read_saving"] < 0 and any("raise this folder's cache reads" in w for w in r["why"])
 
 
-def test_analyze_survives_odd_transcript_rows(tmp_path, monkeypatch):
+def test_G2_7_analyze_survives_odd_transcript_rows(tmp_path, monkeypatch):
     import pitstop_common as pc
     import optimize as op
     monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
@@ -1697,7 +1697,7 @@ def _iso(t):
     return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + ".000Z"
 
 
-def test_cache_age_follows_the_last_model_call_not_the_last_dated_row(tmp_path, monkeypatch):
+def test_G2_24_cache_age_follows_the_last_model_call_not_the_last_dated_row(tmp_path, monkeypatch):
     """A /restart, /reload-plugins or /model writes a dated row without calling the model. The session
     then looks quiet for minutes while its cache has been cold for hours."""
     rab = _rab(tmp_path, monkeypatch)
@@ -1726,7 +1726,7 @@ def test_cache_age_follows_the_last_model_call_not_the_last_dated_row(tmp_path, 
     assert rab.call_age_of({"sessionId": "never-read"}, 77) == 77
 
 
-def test_a_restart_ready_session_that_lost_the_run_limit_is_not_reloaded_instead(tmp_path, monkeypatch):
+def test_G4_31_a_restart_ready_session_that_lost_the_run_limit_is_not_reloaded_instead(tmp_path, monkeypatch):
     rab, typed, info, now = _live_reload(tmp_path, monkeypatch, [], ctx=300_000, idle=4000)
     rab.PLANNED.clear()
     counts = {"restart": 0, "compact": 0, "reload": 0}
@@ -1738,7 +1738,7 @@ def test_a_restart_ready_session_that_lost_the_run_limit_is_not_reloaded_instead
     assert typed == ["/restart"] and counts["reload"] == 0 and "pane-b" in rab.PLANNED
 
 
-def test_type_line_itself_marks_the_pane_also_in_a_dry_run(tmp_path, monkeypatch):
+def test_G4_3_type_line_itself_marks_the_pane_also_in_a_dry_run(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     sent = []
     monkeypatch.setattr(rab, "input_empty", lambda t: True)
@@ -1756,7 +1756,7 @@ def test_type_line_itself_marks_the_pane_also_in_a_dry_run(tmp_path, monkeypatch
     assert rab.type_line("pane-3", "/restart") == (False, "busy") and "pane-3" not in rab.TYPED
 
 
-def test_not_before_equals_form_and_a_misspelled_option_never_start_a_run(tmp_path, monkeypatch):
+def test_G4_27_not_before_equals_form_and_a_misspelled_option_never_start_a_run(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     t = rab.utc_ts("2099-01-01T00:00:00Z")
     assert rab.too_early(["x", "--live", "--not-before=2099-01-01T00:00:00Z"], now=t - 50) == 50
@@ -1777,7 +1777,7 @@ def test_not_before_equals_form_and_a_misspelled_option_never_start_a_run(tmp_pa
         rab.main()                                                              # returns without looking at any session
 
 
-def test_a_number_in_restart_json_must_be_a_number(tmp_path, monkeypatch):
+def test_G3_8_a_number_in_restart_json_must_be_a_number(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     cfg, warn = dict(rab._DEFAULTS, idle_compact_after=True, cold_idle="3600", min_idle=-5, ctx_max=90_000), []
     rab._check_numbers(cfg, rab._DEFAULTS, warn)
@@ -1790,7 +1790,7 @@ def test_a_number_in_restart_json_must_be_a_number(tmp_path, monkeypatch):
     assert ok["idle_compact_after"] == 2400 and warn == []
 
 
-def test_only_the_answer_to_the_newest_reload_command_confirms_it(tmp_path, monkeypatch):
+def test_G5_3_only_the_answer_to_the_newest_reload_command_confirms_it(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     old = ["\u276f /reload-plugins", "  \u23bf  Reloaded: 1 plugin \u00b7 1 hook", "\u25cf some later reply"]
     assert rab.reloaded_row(old) == "Reloaded: 1 plugin \u00b7 1 hook"
@@ -1801,7 +1801,7 @@ def test_only_the_answer_to_the_newest_reload_command_confirms_it(tmp_path, monk
     assert rab.reloaded_row(new) == "Reloaded: 2 plugins \u00b7 3 hooks"
 
 
-def test_reload_rule_is_quiet_while_the_box_is_busy_backs_off_after_mismatches_and_a_dry_run_writes_nothing(tmp_path, monkeypatch):
+def test_G5_7_reload_rule_is_quiet_while_the_box_is_busy_backs_off_after_mismatches_and_a_dry_run_writes_nothing(tmp_path, monkeypatch):
     rab, typed, info, now = _live_reload(tmp_path, monkeypatch, [])
     counts = {"restart": 0, "compact": 0, "reload": 0}
     s = _sess(version="2.1.322", started=(now - 86400) * 1000)
@@ -1823,7 +1823,7 @@ def test_reload_rule_is_quiet_while_the_box_is_busy_backs_off_after_mismatches_a
     assert rab.reload_due(_rl(compact_age=300, idle=10, ctx=300_000, call_age=10), dict(rab.CFG, reload_plugins=True))[0] is False
 
 
-def test_main_runs_the_reload_rule_after_the_restart_path_for_each_allowed_session(tmp_path, monkeypatch):
+def test_G4_30_main_runs_the_reload_rule_after_the_restart_path_for_each_allowed_session(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     import pitstop_common as pc
     calls = []
@@ -1846,7 +1846,7 @@ def test_main_runs_the_reload_rule_after_the_restart_path_for_each_allowed_sessi
     assert calls[0] == "handle" and calls[1][1] is None
 
 
-def test_no_tmux_on_path_is_one_plain_line_not_a_traceback(tmp_path, monkeypatch):
+def test_G4_29_no_tmux_on_path_returns_without_handling_a_session(tmp_path, monkeypatch):
     """Seen on a Mac over a bare ssh shell (B-0096): tmux lives in Homebrew's folder, which was not on PATH."""
     rab = _rab(tmp_path, monkeypatch)
     import pitstop_common as pc
@@ -1878,7 +1878,7 @@ def _held(tmp_path, sid, entries, first=200_000):
     return run_hook({"trigger": "auto", "transcript_path": transcript(tmp_path, sid, entries), "session_id": sid}, tmp_path)
 
 
-def test_hook_checkpoint_break_after_half_the_room(tmp_path):
+def test_G1_9_hook_checkpoint_break_after_half_the_room(tmp_path):
     log = tmp_path / "cfg" / "pit-stop" / "precompact.log"
     # the hold began at 200K, so the ceiling is 220K and half the room is used at 210K
     code, out = _held(tmp_path, "cp-early", _step("git commit -m x", 205_000))
@@ -1898,7 +1898,7 @@ def test_hook_checkpoint_break_after_half_the_room(tmp_path):
         assert _held(tmp_path, f"cp-n{i}", _step(cmd, 212_000))[0] == 2, cmd
 
 
-def test_hook_checkpoint_needs_a_finished_step_that_did_not_fail(tmp_path):
+def test_G1_10_hook_checkpoint_needs_a_finished_step_that_did_not_fail(tmp_path):
     assert _held(tmp_path, "cp-fail", _step("git commit -m x", 212_000, err=True))[0] == 2      # nothing to commit, or a hook said no
     other = {"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": "pytest -q"}}
     assert _held(tmp_path, "cp-run", _step("git commit -m x", 212_000, extra_use=other))[0] == 2  # a second call still runs
@@ -1921,7 +1921,7 @@ def test_hook_checkpoint_needs_a_finished_step_that_did_not_fail(tmp_path):
     assert _held(tmp_path, "cp-odd", odd)[0] == 2
 
 
-def test_hook_checkpoint_can_be_switched_off_and_respects_a_wide_profile_ceiling(tmp_path):
+def test_G1_11_hook_checkpoint_can_be_switched_off_and_respects_a_wide_profile_ceiling(tmp_path):
     state = tmp_path / "cfg" / "pit-stop"
     state.mkdir(parents=True)
     (state / "config.json").write_text(json.dumps({"checkpoint_break": False}))
@@ -1940,7 +1940,7 @@ def test_hook_checkpoint_can_be_switched_off_and_respects_a_wide_profile_ceiling
     assert held("cp-wide-early", 230_000) == 2 and held("cp-wide-go", 251_000) == 0
 
 
-def test_fleet_tune_picks_the_folder_tuned_longest_ago(tmp_path, monkeypatch):
+def test_G2_18_fleet_tune_picks_the_folder_tuned_longest_ago(tmp_path, monkeypatch):
     import time
     rab = _rab(tmp_path, monkeypatch)
     import pitstop_common as pc
@@ -1976,7 +1976,7 @@ def test_fleet_tune_picks_the_folder_tuned_longest_ago(tmp_path, monkeypatch):
     assert rab.tune_due(sess, now, cfg, str(tuned)) is None
 
 
-def test_fleet_tune_starts_one_at_a_time_and_not_on_a_busy_machine(tmp_path, monkeypatch):
+def test_G2_22_fleet_tune_starts_one_at_a_time_and_not_on_a_busy_machine(tmp_path, monkeypatch):
     import time
     rab, _ = _live(tmp_path, monkeypatch)
     started = []
@@ -2003,7 +2003,7 @@ def test_fleet_tune_starts_one_at_a_time_and_not_on_a_busy_machine(tmp_path, mon
     assert rab.start_tune([], now) is None and len(started) == 2                   # nothing due
 
 
-def test_fleet_tune_runs_only_when_weekly_tuning_is_on(tmp_path, monkeypatch):
+def test_G2_23_fleet_tune_runs_only_when_tuning_is_on(tmp_path, monkeypatch):
     rab, _ = _live(tmp_path, monkeypatch)
     import pitstop_common as pc
     calls = []
@@ -2032,7 +2032,7 @@ def test_fleet_tune_runs_only_when_weekly_tuning_is_on(tmp_path, monkeypatch):
 
 # ---- 0.4.0: daily tuning that checks its own last move
 
-def test_analyze_keeps_each_compaction_with_its_time_size_and_re_reads(tmp_path, monkeypatch):
+def test_G2_6_analyze_keeps_each_compaction_with_its_time_size_and_re_reads(tmp_path, monkeypatch):
     import pitstop_common as pc
     import optimize as op
     monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
@@ -2075,7 +2075,7 @@ def _hist_m(rows, current=400_000):
     return _m(current_window=current, compaction_rereads=rows)
 
 
-def test_tuner_counts_only_what_the_new_window_alone_can_have_produced():
+def test_G2_14_tuner_counts_only_what_the_new_window_alone_can_have_produced():
     """Independent review of 0.4.0: a hold carries a compaction past where its window starts it, and a
     session keeps its old window until its restart, so size alone misattributes compactions."""
     import optimize as op
@@ -2104,7 +2104,7 @@ def test_tuner_counts_only_what_the_new_window_alone_can_have_produced():
     assert w == 170_000 and floor["value"] == 170_000 and "(10% at 170K)" in why[0]
 
 
-def test_tuner_waits_undoes_a_lowering_that_cost_context_and_keeps_a_floor():
+def test_G2_15_tuner_waits_undoes_a_lowering_that_cost_context_and_keeps_a_floor():
     import optimize as op
     now = 2_000_000_000
     t = now - 86400
@@ -2137,7 +2137,7 @@ def test_tuner_waits_undoes_a_lowering_that_cost_context_and_keeps_a_floor():
     assert w == 400_000 and why[0].startswith("waiting")
 
 
-def test_a_damaged_tune_history_never_stops_a_folder_being_tuned():
+def test_G2_13_a_damaged_tune_history_never_stops_a_folder_being_tuned():
     import optimize as op
     now = 2_000_000_000
     for bad in ({"moves": ["x"]}, {"moves": [{"at": "yesterday", "from": 1, "to": 2}]}, {"floor": 5}, {"moves": {}},
@@ -2148,7 +2148,7 @@ def test_a_damaged_tune_history_never_stops_a_folder_being_tuned():
         "moves": [{"at": 1, "from": None, "to": 400_000}], "floor": {"value": 5, "until": 2}}
 
 
-def test_recommend_and_autotune_record_the_feedback_loop(tmp_path, monkeypatch):
+def test_G2_16_recommend_and_autotune_record_the_feedback_loop(tmp_path, monkeypatch):
     import pitstop_common as pc
     import optimize as op
     import autotune as at
@@ -2178,7 +2178,7 @@ def test_recommend_and_autotune_record_the_feedback_loop(tmp_path, monkeypatch):
 
 # ---- 0.4.0: jobs that block an update for days
 
-def test_escalation_counts_from_the_first_ask_in_the_helper_and_the_stop_hook(tmp_path, monkeypatch):
+def test_G11_4_escalation_counts_from_the_first_ask_in_the_helper_and_the_stop_hook(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     import pitstop_common as pc
     now = time.time()
@@ -2223,7 +2223,7 @@ def test_escalation_counts_from_the_first_ask_in_the_helper_and_the_stop_hook(tm
 
 # ---- 0.4.0: plugins kept up to date by the helper, before its restarts
 
-def test_plugin_update_targets_and_when_they_are_due(tmp_path, monkeypatch):
+def test_G7_2_plugin_update_targets_and_when_they_are_due(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     inst = {"plugins": {
         "windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": "/x"}],
@@ -2246,7 +2246,7 @@ def test_plugin_update_targets_and_when_they_are_due(tmp_path, monkeypatch):
     assert not rab.plugin_update_due(None, 5, dict(cfg, plugin_updates="yes"))   # anything but pit-stop/all: off
 
 
-def test_update_plugins_runs_claude_codes_commands_once_and_says_what_happened(tmp_path, monkeypatch):
+def test_G7_3_update_plugins_runs_claude_codes_commands_once_and_says_what_happened(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     import pitstop_common as pc
     os.makedirs(os.path.join(rab.BASE, "state"), exist_ok=True)
@@ -2292,7 +2292,7 @@ def test_update_plugins_runs_claude_codes_commands_once_and_says_what_happened(t
     assert all(not ok for _, ok, _ in rab.update_plugins(now + 9000, 0, boom))
 
 
-def test_needs_you_names_sessions_kept_off_the_list_once_a_week_when_behind_a_week(tmp_path, monkeypatch):
+def test_G8_6_needs_you_names_sessions_kept_off_the_list_once_a_week_when_behind_a_week(tmp_path, monkeypatch):
     """Grant, 2026-11-12: a session left for weeks on an old Claude Code (Contabo Server Admin, on 2.1.318) was off
     the helper's list, so nothing ever restarted it and nobody was told."""
     pc, rab, ny = _needs(tmp_path, monkeypatch, {"allow_names": ["A"]})
@@ -2318,7 +2318,7 @@ def test_needs_you_names_sessions_kept_off_the_list_once_a_week_when_behind_a_we
     assert "  - Ghost: in a folder that is Grant's call" in open(ny.OUT).read() and "X:" not in open(ny.OUT).read()
 
 
-def test_tune_folders_narrows_tuning_to_a_test_group(tmp_path, monkeypatch):
+def test_G2_19_tune_folders_narrows_tuning_to_a_test_group(tmp_path, monkeypatch):
     import pitstop_common as pc
     a, b = tmp_path / "a", tmp_path / "b"
     a.mkdir(), b.mkdir()
@@ -2334,7 +2334,7 @@ def test_tune_folders_narrows_tuning_to_a_test_group(tmp_path, monkeypatch):
     assert rab.tune_due(sess, time.time(), dict(rab.CFG), str(tmp_path / "tuned")) == str(b)
 
 
-def test_tuning_starts_from_the_hooks_with_no_timer_only_when_on_listed_and_due(tmp_path, monkeypatch):
+def test_G2_20_tuning_starts_from_the_hooks_with_no_timer_only_when_on_listed_and_due(tmp_path, monkeypatch):
     import pitstop_common as pc
     monkeypatch.setattr(pc, "STATE_DIR", str(tmp_path / "state"))
     started = []
@@ -2363,7 +2363,7 @@ def test_tuning_starts_from_the_hooks_with_no_timer_only_when_on_listed_and_due(
     assert pc.start_tune(str(proj), on, now) is False                                            # never raises
 
 
-def test_the_stop_hook_starts_the_daily_tune_and_autotune_honours_the_list(tmp_path):
+def test_G2_21_the_stop_hook_starts_the_daily_tune_and_autotune_honours_the_list(tmp_path):
     state = tmp_path / "cfg" / "pit-stop"
     state.mkdir(parents=True)
     proj = tmp_path / "proj"
@@ -2387,7 +2387,7 @@ def test_the_stop_hook_starts_the_daily_tune_and_autotune_honours_the_list(tmp_p
     assert stamp.exists()                                                                        # the tune ran, in the background
 
 
-def test_update_plugins_never_runs_past_its_time_budget(tmp_path, monkeypatch):
+def test_G7_4_update_plugins_never_runs_past_its_time_budget(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     import pitstop_common as pc
     os.makedirs(os.path.join(rab.BASE, "state"), exist_ok=True)
@@ -2432,7 +2432,7 @@ def _checkup(tmp_path, monkeypatch):
     return pc, ck, proj
 
 
-def test_checkup_reports_waiting_behind_and_mid_task_refreshes_from_local_history(tmp_path, monkeypatch):
+def test_G9_1_checkup_reports_waiting_behind_and_mid_task_refreshes_from_local_history(tmp_path, monkeypatch):
     pc, ck, proj = _checkup(tmp_path, monkeypatch)
     now = calendar.timegm((2026, 11, 8, 0, 0, 0))   # a fixed day: _history writes 2026-11-01 (time.time() failed it from 11-15)
     sessions = [{"name": "Lane One", "cwd": proj, "version": "2.1.319", "status": "waiting",
@@ -2458,7 +2458,7 @@ def test_checkup_reports_waiting_behind_and_mid_task_refreshes_from_local_histor
     assert ck.collect(14, now, sessions)["totals"]["compactions"] == 0
 
 
-def test_checkup_modelled_saving_only_when_the_fitted_window_is_lower(tmp_path, monkeypatch):
+def test_G9_3_checkup_modelled_saving_only_when_the_fitted_window_is_lower(tmp_path, monkeypatch):
     pc, ck, proj = _checkup(tmp_path, monkeypatch)
     import optimize as op
     m = op.analyze(proj, 14)
@@ -2478,7 +2478,7 @@ def test_checkup_modelled_saving_only_when_the_fitted_window_is_lower(tmp_path, 
     assert ck.read_price("claude-sonnet-5-5") == 0.10 and ck.read_price("claude-opus-5") == 0.50 and ck.read_price(None) is None
 
 
-def test_checkup_keeps_its_first_baseline_and_shows_before_and_after_a_week_later(tmp_path, monkeypatch):
+def test_G9_4_checkup_keeps_its_first_baseline_and_shows_before_and_after_a_week_later(tmp_path, monkeypatch):
     pc, ck, proj = _checkup(tmp_path, monkeypatch)
     now = time.time()
     d1 = {"at": now - 8 * 86400, "days": 14, "newest": "2.1.320",
@@ -2497,7 +2497,7 @@ def test_checkup_keeps_its_first_baseline_and_shows_before_and_after_a_week_late
     assert "Since your first checkup" in page and "52% then, 11% now" in page
 
 
-def test_stop_hook_says_once_that_the_week_later_checkup_is_ready(tmp_path):
+def test_G9_5_stop_hook_says_once_that_the_week_later_checkup_is_ready(tmp_path):
     ck_dir = tmp_path / "cfg" / "pit-stop" / "checkup"
     ck_dir.mkdir(parents=True)
     (ck_dir / "baseline.json").write_text(json.dumps({"at": time.time() - 2 * 86400}))
@@ -2514,7 +2514,7 @@ def test_stop_hook_says_once_that_the_week_later_checkup_is_ready(tmp_path):
     assert _run("stop_pit_stop.py", {"session_id": "w-3"}, tmp_path)[:2] == (0, "")          # a damaged file: nothing
 
 
-def test_checkup_counts_only_automatic_refreshes_in_its_window_and_waits_of_two_hours(tmp_path, monkeypatch):
+def test_G9_2_checkup_counts_only_automatic_refreshes_in_its_window_and_waits_of_two_hours(tmp_path, monkeypatch):
     pc, ck, proj = _checkup(tmp_path, monkeypatch)
     import optimize as op
     now = time.time()
@@ -2539,7 +2539,7 @@ def _no_release_fetch(tmp_path, monkeypatch):
     monkeypatch.setattr(im, "BEHIND_FILE", str(tmp_path / "machine-behind.json"))
 
 
-def test_every_install_method_is_named_from_where_claude_really_lives():
+def test_G6_1_every_install_method_is_named_from_where_claude_really_lives():
     import install_method as im
     H = "/home/u"
     cases = {
@@ -2569,7 +2569,7 @@ def test_every_install_method_is_named_from_where_claude_really_lives():
         assert im.version_from_path(real, im.classify(real, exists=lambda p: False)) == v
 
 
-def test_npm_version_comes_from_its_package_file_and_unknown_installs_ask_the_program(tmp_path):
+def test_G6_3_npm_version_comes_from_its_package_file_and_unknown_installs_ask_the_program(tmp_path):
     import install_method as im
     pkg = tmp_path / "lib" / "node_modules" / "@anthropic-ai" / "claude-code"
     (pkg / "bin").mkdir(parents=True)
@@ -2580,7 +2580,7 @@ def test_npm_version_comes_from_its_package_file_and_unknown_installs_ask_the_pr
     assert im.version_by_running("/x/claude", ok) == "2.1.330" and im.version_by_running("/x/claude", bad) is None
 
 
-def test_a_version_manager_pin_is_found_nearest_folder_first(tmp_path):
+def test_G6_4_a_version_manager_pin_is_found_nearest_folder_first(tmp_path):
     import install_method as im
     home, proj = tmp_path / "home", tmp_path / "home" / "work" / "app"
     (home / ".config" / "mise").mkdir(parents=True)
@@ -2594,7 +2594,7 @@ def test_a_version_manager_pin_is_found_nearest_folder_first(tmp_path):
     assert im.tool_pin("npm", str(proj), str(home)) == (None, None)
 
 
-def test_channel_follows_the_cask_name_or_the_settings(tmp_path):
+def test_G6_5_channel_follows_the_cask_name_or_the_settings(tmp_path):
     import install_method as im
     assert im.channel("homebrew", "/opt/homebrew/Caskroom/claude-code/2.1.311/claude") == "stable"
     assert im.channel("homebrew", "/opt/homebrew/Caskroom/claude-code@latest/2.1.325/claude") == "latest"
@@ -2602,7 +2602,7 @@ def test_channel_follows_the_cask_name_or_the_settings(tmp_path):
     assert im.channel("npm", settings={}) == "latest" and im.channel("mise") == "latest"
 
 
-def test_the_newest_release_is_asked_at_most_every_six_hours_and_never_when_switched_off(tmp_path):
+def test_G6_6_the_newest_release_is_asked_at_most_every_six_hours_and_never_when_switched_off(tmp_path):
     import install_method as im
     asked = []
     fetch = lambda ch: asked.append(ch) or {"latest": "2.1.325", "stable": "2.1.311"}[ch]
@@ -2621,7 +2621,7 @@ def test_the_newest_release_is_asked_at_most_every_six_hours_and_never_when_swit
     assert im.fetch_release("latest", garbage) is None
 
 
-def test_behind_is_counted_from_the_first_time_seen_across_new_releases(tmp_path):
+def test_G6_7_behind_is_counted_from_the_first_time_seen_across_new_releases(tmp_path):
     import install_method as im
     f = str(tmp_path / "b.json")
     m = {"behind": True, "installed": "2.1.322"}
@@ -2649,7 +2649,7 @@ def _oc3(tmp_path, monkeypatch, pin='claude = "2.1.322"'):
     return im, str(home / ".local" / "bin"), str(home / "work")
 
 
-def test_oc3_a_mise_pin_is_named_as_behind_with_the_one_command_that_moves_it(tmp_path, monkeypatch):
+def test_G6_9_a_mise_pin_is_named_as_behind_with_the_one_command_that_moves_it(tmp_path, monkeypatch):
     im, path, work = _oc3(tmp_path, monkeypatch)
     m = im.machine(work, 1000, fetch=lambda ch: "2.1.325", path_env=path, allowed=True)
     assert (m["method"], m["installed"], m["released"], m["behind"], m["who"]) == ("mise", "2.1.322", "2.1.325", True, "pin")
@@ -2668,7 +2668,7 @@ def test_oc3_a_mise_pin_is_named_as_behind_with_the_one_command_that_moves_it(tm
     assert "held at" not in "\n".join(im2.describe(m2, 1000))
 
 
-def test_needs_you_names_this_machine_once_it_has_been_behind_a_day(tmp_path, monkeypatch):
+def test_G8_7_needs_you_names_this_machine_once_it_has_been_behind_a_day(tmp_path, monkeypatch):
     pc, rab, ny = _needs(tmp_path, monkeypatch)
     im, path, work = _oc3(tmp_path, monkeypatch)
     now = time.time()
@@ -2691,7 +2691,7 @@ def test_needs_you_names_this_machine_once_it_has_been_behind_a_day(tmp_path, mo
     assert len(told) == 1 and "this machine's Claude Code is 2.1.322" in told[0]
 
 
-def test_sessions_behind_on_a_machine_without_restart_say_how_to_restart_by_hand(tmp_path, monkeypatch):
+def test_G6_17_sessions_behind_on_a_machine_without_restart_say_how_to_restart_by_hand(tmp_path, monkeypatch):
     pc, rab, ny = _needs(tmp_path, monkeypatch, {"allow_names": ["D"]})
     now = time.time()
     os.utime(os.path.join(pc.VERSIONS, "2.1.322"), (now - 3 * 86400, now - 3 * 86400))
@@ -2700,7 +2700,7 @@ def test_sessions_behind_on_a_machine_without_restart_say_how_to_restart_by_hand
     assert "this machine uses npm" in d["stuck"][0][3] and "claude --resume" in d["stuck"][0][3]
 
 
-def test_newest_local_version_reads_an_npm_install_when_there_is_no_native_folder(tmp_path, monkeypatch):
+def test_G6_15_newest_local_version_reads_an_npm_install_when_there_is_no_native_folder(tmp_path, monkeypatch):
     import pitstop_common as pc
     import install_method as im
     pkg = tmp_path / "lib" / "node_modules" / "@anthropic-ai" / "claude-code"
@@ -2714,7 +2714,7 @@ def test_newest_local_version_reads_an_npm_install_when_there_is_no_native_folde
     assert pc.behind_since("2.1.322") == 5000 and pc.behind_since("2.1.325") is None
 
 
-def test_the_helper_keeps_running_without_a_native_install(tmp_path, monkeypatch):
+def test_G6_16_the_helper_keeps_running_without_a_native_install(tmp_path, monkeypatch):
     import pitstop_common as pc
     rab = _rab(tmp_path, monkeypatch)
     lines = []
@@ -2727,7 +2727,7 @@ def test_the_helper_keeps_running_without_a_native_install(tmp_path, monkeypatch
     assert any("no running sessions found" in x for x in lines)                        # it went on (0.5.1 stopped)
 
 
-def test_setup_switches_on_pit_stops_own_marketplace_updates_once_and_keeps_a_no(tmp_path, monkeypatch):
+def test_G7_1_setup_switches_on_pit_stops_own_marketplace_updates_once_and_keeps_a_no(tmp_path, monkeypatch):
     import setup as su
     cd = tmp_path / "claude"
     (cd / "plugins").mkdir(parents=True)
@@ -2752,7 +2752,7 @@ def test_setup_switches_on_pit_stops_own_marketplace_updates_once_and_keeps_a_no
 
 # ---- 0.6.0: Claude Code updated by Pit Stop, whatever installed it ----
 
-def test_classify_version_manager_shims():
+def test_G6_2_classify_version_manager_shims():
     import install_method as im
     H = "/home/x"
     # a mise shim on PATH resolves to the mise program itself (seen on two Linux machines)
@@ -2766,7 +2766,7 @@ def test_classify_version_manager_shims():
     assert im.classify(r"C:\Users\g\AppData\Local\mise\installs\claude\2.1.322\claude.exe") == "mise"
 
 
-def test_needs_admin_never_sudo():
+def test_G6_8_needs_admin_per_install_method():
     import install_method as im
     npm_sys = "/usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
     assert im.needs_admin("npm", npm_sys, access=lambda p, m: False) is True
@@ -2785,7 +2785,7 @@ def _mach(**kw):
     return base
 
 
-def test_update_plan_per_method(monkeypatch):
+def test_G6_11_update_plan_per_method(monkeypatch):
     import install_method as im
     w = {"brew": "/opt/homebrew/bin/brew", "mise": "/usr/bin/mise", "claude": "/x/claude"}.get
     assert im.update_plan(_mach(behind=False), cfg={}, which=w) == (None, "current")
@@ -2803,7 +2803,7 @@ def test_update_plan_per_method(monkeypatch):
                           which=lambda n: None)[0][0] == "/opt/m/mise"
 
 
-def test_update_plan_respects_the_owner_and_never_uses_sudo():
+def test_G6_12_update_plan_respects_the_owner_and_never_uses_sudo():
     import install_method as im
     w = lambda n: "/usr/bin/" + n   # noqa: E731
     p, why = im.update_plan(_mach(), cfg={"hold_claude_version": True}, which=w)
@@ -2825,14 +2825,14 @@ def test_update_plan_respects_the_owner_and_never_uses_sudo():
         assert p and "sudo" not in p
 
 
-def test_describe_names_an_admin_install():
+def test_G6_10_describe_names_an_admin_install():
     import install_method as im
     m = _mach(method="npm", admin=True, who="admin", update="sudo npm install -g @anthropic-ai/claude-code@latest")
     text = "\n".join(im.describe(m, now=10_000))
     assert "only an administrator" in text
 
 
-def test_claude_update_due_waits_and_retries(tmp_path, monkeypatch):
+def test_G6_13_claude_update_due_waits_and_retries(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     cfg = dict(rab.CFG)
     m, plan = _mach(released_seen=1000.0), ["/x/claude", "update"]
@@ -2847,7 +2847,7 @@ def test_claude_update_due_waits_and_retries(tmp_path, monkeypatch):
     assert rab.claude_update_due(m, plan, {"released": "2.1.325", "at": 9000.0}, 9000.0 + 60, cfg) is True
 
 
-def test_helper_updates_claude_code_live_and_dry(tmp_path, monkeypatch, capsys):
+def test_G6_14_helper_updates_claude_code_live_and_dry(tmp_path, monkeypatch, capsys):
     rab = _rab(tmp_path, monkeypatch)
     import install_method as im
     rab.CFG["claude_updates"] = "auto"
@@ -2891,7 +2891,7 @@ def test_helper_updates_claude_code_live_and_dry(tmp_path, monkeypatch, capsys):
     assert len(calls) == 1
 
 
-def test_update_plan_keeps_a_switched_off_updater_for_every_method():
+def test_G6_18_update_plan_keeps_a_switched_off_updater_for_every_method():
     """DISABLE_UPDATES / DISABLE_AUTOUPDATER (environment or settings.json) stop Pit Stop for mise and
     Homebrew too, not only where Claude Code updates itself: the README promises it for every method."""
     import install_method as im
