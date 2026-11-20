@@ -2889,3 +2889,18 @@ def test_helper_updates_claude_code_live_and_dry(tmp_path, monkeypatch, capsys):
     rab.CFG["claude_updates"] = "off"
     assert rab.update_claude_code(99_000.0, run=lambda c, t: calls.append(c) or R(0), machine=m) is None
     assert len(calls) == 1
+
+
+def test_update_plan_keeps_a_switched_off_updater_for_every_method():
+    """DISABLE_UPDATES / DISABLE_AUTOUPDATER (environment or settings.json) stop Pit Stop for mise and
+    Homebrew too, not only where Claude Code updates itself: the README promises it for every method."""
+    import install_method as im
+    w = lambda n: "/usr/bin/" + n   # noqa: E731
+    for meth in ("native", "npm", "homebrew", "mise"):
+        m = _mach(method=meth, pin=[None, "2.1.322"])
+        assert im.update_plan(m, cfg={}, which=w, env={}, settings={})[0]            # nothing said: it may act
+        for k in ("DISABLE_UPDATES", "DISABLE_AUTOUPDATER"):
+            p, why = im.update_plan(m, cfg={}, which=w, env={k: "1"}, settings={})
+            assert p is None and k in why, (meth, k)
+            p, why = im.update_plan(m, cfg={}, which=w, env={}, settings={"env": {k: "1"}})
+            assert p is None and k in why and "settings.json" in why, (meth, k)

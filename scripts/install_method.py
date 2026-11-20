@@ -321,7 +321,23 @@ def held_by_owner(cfg=None):
     return None
 
 
-def update_plan(m, cfg=None, which=shutil.which):
+def switched_off_by_owner(env=None, settings=None):
+    """DISABLE_UPDATES or DISABLE_AUTOUPDATER, in the environment or in the "env" of
+    ~/.claude/settings.json: the owner's no to updates, whatever the install method.
+    Returns the reason, or None."""
+    env = os.environ if env is None else env
+    for k in ("DISABLE_UPDATES", "DISABLE_AUTOUPDATER"):
+        if env.get(k):
+            return f"its owner switched Claude Code's updates off ({k})"
+    s = settings if settings is not None else pc.read_json(os.path.join(pc.CLAUDE_DIR, "settings.json"), {})
+    e = (s.get("env") or {}) if isinstance(s, dict) else {}
+    for k in ("DISABLE_UPDATES", "DISABLE_AUTOUPDATER"):
+        if isinstance(e, dict) and e.get(k):
+            return f"its owner switched Claude Code's updates off ({k} in settings.json)"
+    return None
+
+
+def update_plan(m, cfg=None, which=shutil.which, env=None, settings=None):
     """What Pit Stop may run to bring this machine's Claude Code to the newest release:
     (argv, None) or (None, why not). Never sudo, never a project's own pin, never against the
     owner's word (hold_claude_version, or Claude Code's updater switched off). Pure but for CFG
@@ -329,7 +345,7 @@ def update_plan(m, cfg=None, which=shutil.which):
     their version until their restart, which the helper does at a break."""
     if not m.get("behind"):
         return None, "current" if m.get("released") else "newest release not known (check off or offline)"
-    held = held_by_owner(cfg)
+    held = held_by_owner(cfg) or switched_off_by_owner(env, settings)
     if held:
         return None, held
     method, rel = m.get("method"), m.get("released")
