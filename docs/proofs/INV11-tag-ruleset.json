@@ -1,0 +1,1 @@
+{"bypass_actors":[],"conditions":{"ref_name":{"exclude":[],"include":["refs/tags/v*"]}},"enforcement":"active","name":"release tags are permanent","rules":[{"type":"deletion"},{"type":"update"},{"type":"non_fast_forward"}],"target":"tag"}
