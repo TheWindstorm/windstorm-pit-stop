@@ -1,5 +1,9 @@
 # Changelog
 
+## Plan 1.1 (2026-11-20)
+- **The restart helper can reach sessions in Herdr, opt-in** (plan change; codons G4.35 to G4.38 and G8.9 added, all open; the G4 intro names Herdr; open question 10 added). Off unless `"herdr": true` (or a path) is in `restart.json`. Then a session with no tmux pane that Herdr names by its session id gets the same break rules and typing rules through `herdr pane read`, `send-text` and `send-keys`. tmux stays first. No invariant and no Part 0 rule changes.
+- **Trigger evals gate the skill's description** (plan change; codons G12.4, G12.5 and G12.6 added, all open). Ten queries must load the pit-stop skill and ten near misses must not, each in at least 2 of 3 Sonnet runs or at most 1 of 3. Their tests fail CI when the recorded results are for another description, other queries or another run count, so a wording change needs a new run. The trials run with the installed plugin and every tool that changes files switched off. No invariant and no Part 0 rule changes.
+
 ## Plan 1.0 (2026-11-20)
 - **The DNA Strand Master Plan** (`DNA-STRAND-MASTER-PLAN.md`): Pit Stop described in arrears as 18 genes, G1 to G18, made of codons, and 12 invariants. Each codon is one claim with one test named after it. G1 to G12 are built, their tests renamed `test_G<n>_<m>_...` with no other change. G13 to G18 are open. New `tests/test_strand.py` proves the invariants and fails CI when a script, hook or helper setting has no codon, or a built codon has no test. From now on a change starts as a plan change.
 

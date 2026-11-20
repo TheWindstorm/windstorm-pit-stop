@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.0 · 2026-11-20 · The Windstorm**
+**Plan version 1.1 · 2026-11-20 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -48,6 +48,7 @@ This document is the blueprint for Windstorm Pit Stop. If you are an agent build
 - **Generation**: the number in `hooks/generation.json`, raised when a hook change means a running session must reload (G5). Its `hook_files_sha256` is rewritten after every hook change, so each change is looked at (G3.7).
 - **Compaction kind**: how `optimize.analyze` labels a `compact_boundary` row: `instant` when `compactMetadata.precomputed` is true; else `mid_task` when the newest earlier prompt, text reply, tool call or tool result was a tool call or tool result; else `idle` when it was a text reply 1800 s or more before; else `prompt`.
 - **Open**: planned, not built.
+- **Loads the skill** (trigger evals): in one trial, the Skill tool names the stand-in command that carries the description, or the trial's first tool call reads it.
 
 ## Part 3. Invariants
 
@@ -184,7 +185,7 @@ One shared module, `scripts/pitstop_common.py`, plus the hook generation file, r
 
 ### G4 Restart helper at a break
 
-The helper `scripts/restart_at_break.py` types `/compact`, `/restart` or a short note into a session's tmux pane only when the session is at a break and its input box is free, so every session moves to the newest Claude Code without a person.
+The helper `scripts/restart_at_break.py` types `/compact`, `/restart` or a short note into a session's tmux pane, or, when switched on, its Herdr pane (G4.35 to G4.38), only when the session is at a break and its input box is free, so every session moves to the newest Claude Code without a person.
 
 **G4.1 Read the input box.** `input_box_text(rows)` in `scripts/restart_at_break.py` returns the text from the last row starting with `❯` down to the next border row (10 or more `─`), rows joined by spaces, prompt removed, dimmed (`\x1b[2m`) suggestion text dropped: a box holding only a dim suggestion reads `""`, and rows with no `❯` row give `None`. `same_text(a, b)` compares with all whitespace removed, so a note wrapped over three rows matches and the same rows with added text do not. Proof: `test_G4_1_restart_helper_reads_the_input_box`.
 
@@ -253,6 +254,14 @@ The helper `scripts/restart_at_break.py` types `/compact`, `/restart` or a short
 **G4.33 Telling a person (open).** `notify(msg)` runs the list in `"notify_command"` with `msg` added as its last argument and a 30-second timeout, only in a live run; with `null` it runs nothing. Proof: `test_G4_33_notify_command_runs_only_in_a_live_run`.
 
 **G4.34 Typing the ask where the Stop hook is missing (open).** For a session with background jobs whose ask file is not delivered and whose `seen/<sessionId>` marker is absent, `handle_ask()` types the ask only after `"ask_fallback_after"` (`1800`) seconds, at idle of at least `min_idle`, with the cache warm or the context under `ctx_max`, and at most once per `"ask_again"` (`43200`) seconds (stamp `state/<key>.asked`). Proof: `test_G4_34_the_ask_is_typed_only_where_the_stop_hook_is_missing`.
+
+**G4.35 Herdr agents map to sessions (open).** `herdr_panes(agents)` in `scripts/restart_at_break.py` takes the `result.agents` list printed by `herdr agent list` and returns `{session id: "herdr://" + pane_id}` for each agent whose `agent` is `claude` and whose `agent_session.value` is set. An agent without a session id is left out, because it may be a view of a tmux pane; a session id held by two agents is left out. Proof: `test_G4_35_herdr_agents_map_to_sessions_from_a_recorded_list`, reading the recorded fixture `tests/fixtures/herdr_agent_list.json` (names replaced), with no live Herdr.
+
+**G4.36 tmux first, Herdr only when switched on (open).** `main()` targets a session's tmux pane, as today; a session without one gets its `herdr_panes()` target only when `"herdr"` in `restart.json` is `true` or a path. Missing or `false` gives no Herdr target. `herdr_bin(cfg)` returns that path, else `herdr` on PATH, else `~/.local/bin/herdr` if present, else `None`. With `None`, or when `herdr agent list` fails, takes over 20 s or is not JSON, no session gets a Herdr target; the run goes on. Herdr's `agent_status` is not read; G4.9 decides. Needs: G4.35. Proof: `test_G4_36_herdr_is_opt_in_tmux_wins_and_a_missing_herdr_changes_nothing`.
+
+**G4.37 The same typing rules through Herdr (open).** For a target starting `herdr://`, `screen()` runs `herdr pane read <pane> --lines 60`, with `--ansi` when it needs colours, `pane_in_mode()` is False, `type_line()` sends text with `herdr pane send-text <pane> <text>`, and `Enter` with `herdr pane send-keys <pane> enter` only when the box reads back the same, and `clear_ours()` sends `herdr pane send-keys <pane> ctrl+u`. A dry run calls `herdr` only to read. G4.1 to G4.7 hold unchanged, run against a fake `herdr`. Needs: G4.36. Proof: `test_G4_37_type_line_through_herdr_keeps_every_typing_rule`.
+
+**G4.38 Live through Herdr, end to end (open).** Live `handle()` for a behind `idle` session whose only target is `herdr://p9`, at context `300000` and idle `600`, types `/compact` through the fake `herdr`; once compacted `200` s ago (context `20000`, idle `90`), it types `/restart`, as in G4.18, and `restart.log` names the target `herdr://p9`. No `tmux` command runs. Needs: G4.37, G4.18. Proof: `test_G4_38_live_compact_then_restart_through_herdr`.
 
 ### G5 Hook reload
 
@@ -346,6 +355,8 @@ Pit Stop keeps a short list, `~/.claude/pit-stop/needs-you.md`, of what only a p
 
 **G8.8 Kept only by a live run of the whole fleet.** `main()` in `scripts/restart_at_break.py` calls `needs_you.refresh()` only in a live run (`--live`) without `--only` and with `"needs_you"` not false in `restart.json`; an error raised there does not stop `main()`. Proof: `test_G8_8_main_keeps_the_needs_you_list_only_in_a_live_run_of_the_whole_fleet`.
 
+**G8.9 A Herdr pane counts as a pane (open).** `collect(..., panes=...)` in `scripts/needs_you.py` gives no `tmux pane` reason to a stuck session that has a Herdr target (G4.36). A stuck session with neither gets the reason `not in a tmux pane or a Herdr pane`, so G8.4 still holds. Needs: G4.36, G8.4. Proof: `test_G8_9_needs_you_counts_a_herdr_pane_as_a_pane`.
+
 ### G9 Checkup
 
 `/pit-stop checkup` reports every session on the computer (waiting, behind, without hooks), where each project's automatic compactions landed, a modelled saving only where it can be judged, and a before-and-after a week after the first run.
@@ -391,6 +402,12 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 **G12.2 The checker for strict YAML.** `plain_scalar_problems(value)` in `tests/test_skill_spec.py` returns a non-empty list for an unquoted value that contains `: `, ends with `:`, contains ` #`, or starts with one of `!&*{}[],%@?-` or a backtick; and an empty list for a quoted value or one with none of these. Proof: `test_G12_2_the_checker_catches_what_strict_parsers_reject`.
 
 **G12.3 Every SKILL.md follows the spec.** `tests/test_skill_spec.py` checks each `skills/*/SKILL.md` (one today: `skills/pit-stop/SKILL.md`): it starts with a `---` line; every top-level frontmatter line is `key: value` and passes `plain_scalar_problems()`; `name` matches `^[a-z0-9]+(-[a-z0-9]+)*$`, has at most 64 characters and equals its folder's name; `description` has 1 to 1024 characters; `allowed-tools`, when present, does not start with `[`. It checks for what strict parsers reject; it runs no YAML parser. Needs: G12.2. Proof: `test_G12_3_frontmatter_loads_strictly_and_follows_the_spec`.
+
+**G12.4 The skill loads for the queries that need it (open).** On Sonnet, with 3 runs per query, `evals/tools/trigger_trials.py` loads the skill in at least 2 of 3 runs for each of the 10 queries in `evals/cases/g12-4-should-fire/queries.json`. The test reads the file in `results/` with the latest `finished` among files whose `model` starts with `claude-sonnet`. It fails when any query missed, when any `runs` is not 3, or when its `per_query[].query` texts or its `description` differ from `queries.json` or from `skills/pit-stop/SKILL.md`. Proof: `test_G12_4_should_fire_queries_load_the_skill`.
+
+**G12.5 The skill stays out of near misses (open).** The same run loads the skill in at most 1 of 3 runs for each of the 10 queries in `evals/cases/g12-5-near-miss/queries.json`, which share Pit Stop's words but ask for something else. The test fails as in G12.4. Needs: G12.4. Proof: `test_G12_5_near_miss_queries_do_not_load_the_skill`.
+
+**G12.6 Trials change nothing (open).** In `evals/tools/trigger_trials.py`, `command(query, model)` returns an argv holding `--settings` with `windstorm-pit-stop@thewindstorm` set to false, `--disallowedTools Bash Edit Write NotebookEdit` and `--permission-mode default`; `trial_paths(scratch, q, r)` gives each trial its own folder, with its transcript outside it. Trials run one at a time. In every results file `installed_visible` and `timed_out` are 0 and `ours_visible` equals `trials`. Proof: `test_G12_6_trigger_trials_run_isolated_and_read_only`.
 
 ### G13 Self-update for everyone (open)
 
@@ -476,6 +493,7 @@ When a prompt takes a big session in a new direction, Pit Stop offers a refresh 
 7. Which release is "the previous Pit Stop release" for G16.1, and from where is it installed? ASSUMES: no code picks one today; it is the `v*` tag before the newest one on `main` (INV11), installed from the `thewindstorm` marketplace.
 8. For G18.1, which point is the session's refresh point, and under which key is the threshold kept? ASSUMES: no code reads either today; the point is the idle point in force (`pitstop_common.points`), and the key is named together with the number of question 3.
 9. About 40 behaviours inside built files have no codon yet. ASSUMES: plan 1.1 adds each one as an open codon, then a test; until then the plan cannot regrow them.
+10. Does Herdr 0.9.5 `pane send-keys` take `enter` and `ctrl+u` as written in G4.37? ASSUMES: yes, from the names in its own help and binary; checked on a scratch Herdr pane on a test box before G4.37 is built, and the plan is changed first if not.
 
 ## Part 7. Decisions log
 
@@ -497,6 +515,8 @@ The evolution so far, oldest first. Each line gives the date and release, what w
 - 2026-11-17 (0.6.0): Pit Stop may update Claude Code itself. This is off by default, never uses sudo, never acts against the owner's no, and is tried on one machine first.
 - 2026-11-20 (plan 1.0): this plan is written in arrears from the code and tests as they are. From now on the plan leads: new work is a plan change first, then built.
 - 2026-11-20 (plan 1.0): Pit Stop is for Claude Code only. Other agents are studied (G17), not promised.
+- 2026-11-20 (plan 1.1): the skill's description is gated by trigger evals on Sonnet (G12.4 to G12.6), 10 queries that must load it and 10 near misses that must not. A description that loads at the wrong time costs every session that carries it; one that fails to load leaves the person without Pit Stop.
+- 2026-11-20 (plan 1.1): the restart helper can also reach sessions in a Herdr pane (G4.35 to G4.38, G8.9), opt-in: `"herdr": true` in `restart.json`. Typing into a Herdr pane reaches lanes whose owner has not agreed, and stability and the person's control of their agent come first (principle 10). It found sessions only through tmux, so 6 of 98 sessions on the build machine, 5 of them in Herdr, were never moved to a new Claude Code at a break. tmux stays first; Herdr is used only for a session Herdr names by its session id.
 
 ## Appendix A. Changing this plan
 
