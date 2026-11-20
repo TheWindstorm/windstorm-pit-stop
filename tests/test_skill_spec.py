@@ -37,7 +37,7 @@ def skills():
     return found
 
 
-def test_frontmatter_loads_strictly_and_follows_the_spec():
+def test_G12_3_frontmatter_loads_strictly_and_follows_the_spec():
     for path in skills():
         fields = {}
         for line in frontmatter(path):
@@ -57,7 +57,7 @@ def test_frontmatter_loads_strictly_and_follows_the_spec():
             assert not fields["allowed-tools"].strip().startswith("["), f"{path}: allowed-tools must be a string"
 
 
-def test_the_checker_catches_what_strict_parsers_reject():
+def test_G12_2_the_checker_catches_what_strict_parsers_reject():
     assert plain_scalar_problems(" Use it for the user: run the checkup")       # the 0.5.2 bug
     assert plain_scalar_problems(" a note # not a comment in Claude Code")
     assert plain_scalar_problems(" - starts like a list")
