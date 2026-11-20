@@ -1,0 +1,12 @@
+[
+ {"query": "Make me a table of Monaco Grand Prix pit stop strategies: one-stop versus two-stop, which tyre compounds, and the lap windows teams usually use.", "should_trigger": false},
+ {"query": "update all the npm packages in this project to their latest versions and tell me if any major version bumps look risky", "should_trigger": false},
+ {"query": "Write a CLAUDE.md for this repository that explains how to build it, run the tests and where the main entry points are.", "should_trigger": false},
+ {"query": "add a PreCompact hook to my settings that appends the current time to ~/compact-times.log, nothing else", "should_trigger": false},
+ {"query": "Summarize what we've done in this conversation so far in five bullets.", "should_trigger": false},
+ {"query": "How do I upgrade Node.js from 18 to 22 on Ubuntu without breaking my global packages?", "should_trigger": false},
+ {"query": "change my status line so it shows the current git branch and the time", "should_trigger": false},
+ {"query": "Which Claude model is cheapest for classifying 10,000 support tickets through the API, and roughly what would the batch cost?", "should_trigger": false},
+ {"query": "My Python script runs out of memory when it loads a 6 GB CSV. Rewrite it to stream the file in chunks instead.", "should_trigger": false},
+ {"query": "set up a cron job that runs ~/bin/backup.sh every night at 2am and emails me if it fails", "should_trigger": false}
+]

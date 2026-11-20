@@ -2904,3 +2904,178 @@ def test_G6_18_update_plan_keeps_a_switched_off_updater_for_every_method():
             assert p is None and k in why, (meth, k)
             p, why = im.update_plan(m, cfg={}, which=w, env={}, settings={"env": {k: "1"}})
             assert p is None and k in why and "settings.json" in why, (meth, k)
+
+
+# ---- plan 1.1: Herdr panes (G4.35 to G4.38, G8.9), opt-in
+
+HERDR_FIXTURE = os.path.join(ROOT, "tests", "fixtures", "herdr_agent_list.json")
+SID = "00000000-0000-4000-8000-0000000000"
+
+
+def test_G4_35_herdr_agents_map_to_sessions_from_a_recorded_list(tmp_path, monkeypatch):
+    # recorded from `herdr agent list` (herdr 0.9.5) with names, folders and ids replaced. Pane 2 has no
+    # session id (a view of a tmux pane), panes 4 and 5 claim the same id, pane 6 runs another agent.
+    rab = _rab(tmp_path, monkeypatch)
+    agents = json.load(open(HERDR_FIXTURE))["result"]["agents"]
+    assert rab.herdr_panes(agents) == {SID + "01": "herdr://w1:p1", SID + "03": "herdr://w1:p3"}
+    assert rab.herdr_panes(None) == {} and rab.herdr_panes([]) == {}
+    assert rab.herdr_panes([{"agent": "claude", "pane_id": "p7", "agent_session": {"value": ""}},
+                            {"agent": "claude", "pane_id": "p8", "agent_session": None}, "not a dict"]) == {}
+
+
+class _Run:
+    def __init__(self, stdout="", returncode=0):
+        self.stdout, self.returncode, self.stderr = stdout, returncode, ""
+
+
+def test_G4_36_herdr_is_opt_in_tmux_wins_and_a_missing_herdr_changes_nothing(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    import pitstop_common as pc
+    listed = open(HERDR_FIXTURE).read()
+    calls = []
+
+    def run(argv, **k):
+        calls.append(argv)
+        return _Run(listed)
+    monkeypatch.setattr(rab.subprocess, "run", run)
+    monkeypatch.setattr(rab.shutil, "which", lambda n: None)
+    monkeypatch.setenv("HOME", str(tmp_path))                         # no ~/.local/bin/herdr
+    # off unless switched on: missing key, false, null; nothing is run
+    for cfg in ({}, {"herdr": False}, {"herdr": None}, {"herdr": ""}):
+        assert rab.herdr_bin(cfg) is None and rab.herdr_targets(cfg) == {}
+    assert calls == [] and rab.CFG["herdr"] is False
+    # true: PATH first, then ~/.local/bin/herdr; a path is used as given
+    assert rab.herdr_bin({"herdr": True}) is None
+    local = tmp_path / ".local" / "bin" / "herdr"
+    local.parent.mkdir(parents=True)
+    local.write_text("#!/bin/sh\n")
+    local.chmod(0o755)
+    assert rab.herdr_bin({"herdr": True}) == str(local)
+    monkeypatch.setattr(rab.shutil, "which", lambda n: "/usr/bin/herdr")
+    assert rab.herdr_bin({"herdr": True}) == "/usr/bin/herdr" and rab.herdr_bin({"herdr": "/opt/h"}) == "/opt/h"
+    assert rab.herdr_targets({"herdr": "/opt/h"}) == {SID + "01": "herdr://w1:p1", SID + "03": "herdr://w1:p3"}
+    assert calls[-1] == ["/opt/h", "agent", "list"]
+    # failing, slow, not JSON, missing: no Herdr target, no exception
+    for bad in (lambda a, **k: _Run(listed, 1), lambda a, **k: _Run("not json"),
+                lambda a, **k: (_ for _ in ()).throw(subprocess.TimeoutExpired(a, 20)),
+                lambda a, **k: (_ for _ in ()).throw(FileNotFoundError(2, "herdr"))):
+        monkeypatch.setattr(rab.subprocess, "run", bad)
+        assert rab.herdr_targets({"herdr": True}) == {}
+    # main(): tmux first; a session with no tmux pane gets its Herdr pane only when switched on.
+    # Herdr says pane 3 is "working": its status is not read (G4.9 decides inside handle()).
+    monkeypatch.setattr(rab.subprocess, "run", run)
+    monkeypatch.setattr(sys, "argv", ["x"])
+    monkeypatch.setattr(pc, "newest_installed_version", lambda: "2.1.322")
+    one = dict(_sess(name="In Tmux"), sessionId=SID + "01", pid=1)       # also named by Herdr: tmux wins
+    three = dict(_sess(name="In Herdr"), sessionId=SID + "03", pid=3)
+    nine = dict(_sess(name="Nowhere"), sessionId=SID + "09", pid=9)
+    monkeypatch.setattr(pc, "live_sessions", lambda: ([one, three, nine], "registry"))
+    monkeypatch.setattr(rab, "panes", lambda: {"/dev/pts/1": "tm:0.0"})
+    monkeypatch.setattr(rab, "pid_tty", lambda pid: f"/dev/pts/{pid}")
+    monkeypatch.setattr(rab, "maybe_reload", lambda *a: None)
+    seen = []
+    monkeypatch.setattr(rab, "handle", lambda s, newest, target, now, counts: seen.append((s["name"], target)))
+    rab.CFG.pop("herdr")                                                 # the key missing from restart.json
+    rab.main()
+    assert seen == [("In Tmux", "tm:0.0")]
+    rab.CFG["herdr"] = True
+    seen.clear()
+    rab.main()
+    assert seen == [("In Herdr", "herdr://w1:p3"), ("In Tmux", "tm:0.0")]
+
+
+def _fake_herdr(rab, monkeypatch, box, echo=None):
+    """A Herdr pane whose input box holds BOX[0]. send-text puts ECHO(text) (default: the text) in the box,
+    ctrl+u clears it, enter records the box as typed. Every herdr call is kept; tmux must not run."""
+    calls, typed = [], []
+
+    def herdr(*a):
+        calls.append(a)
+        if a[:2] == ("pane", "send-text"):
+            box[0] = (echo or (lambda t: t))(a[3])
+        elif a[:2] == ("pane", "send-keys") and a[3] == "ctrl+u":
+            box[0] = ""
+        elif a[:2] == ("pane", "send-keys") and a[3] == "enter":
+            typed.append(box[0])
+            box[0] = ""
+        return _Run("some reply above\n" + rab.PROMPT + (" " + box[0] if box[0] else "") + "\n" + "─" * 20 + "\n")
+    monkeypatch.setattr(rab, "herdr", herdr)
+    monkeypatch.setattr(rab, "tmux", lambda *a: (_ for _ in ()).throw(AssertionError(f"tmux ran: {a}")))
+    monkeypatch.setattr(rab, "notify", lambda m: None)
+    monkeypatch.setattr(rab.time, "sleep", lambda n: None)
+    return calls, typed
+
+
+def test_G4_37_type_line_through_herdr_keeps_every_typing_rule(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    box = [""]
+    calls, typed = _fake_herdr(rab, monkeypatch, box)
+    t = "herdr://w1:p1"
+    rab.screen(t)
+    rab.screen(t, escapes=True)
+    assert calls == [("pane", "read", "w1:p1", "--lines", "60"), ("pane", "read", "w1:p1", "--lines", "60", "--ansi")]
+    assert rab.pane_in_mode(t) is False and rab.input_empty(t) and not rab.screen_busy(t)
+    # a dry run only reads
+    calls.clear()
+    monkeypatch.setattr(rab, "LIVE", False)
+    assert rab.type_line(t, "/restart") == (True, "") and t in rab.TYPED
+    assert {c[1] for c in calls} == {"read"}
+    # live: text, read back, Enter only on an exact match
+    monkeypatch.setattr(rab, "LIVE", True)
+    calls.clear()
+    assert rab.type_line(t, "/restart") == (True, "") and typed == ["/restart"]
+    assert ("pane", "send-text", "w1:p1", "/restart") in calls and calls[-1] == ("pane", "send-keys", "w1:p1", "enter")
+    # text in the box first: busy, nothing sent
+    box[0] = "a person's half-typed line"
+    calls.clear()
+    assert rab.type_line(t, "/restart") == (False, "busy") and {c[1] for c in calls} == {"read"}
+    # over the limit: herdr is not even called
+    box[0] = ""
+    calls.clear()
+    assert rab.type_line(t, "x" * (rab.NOTE_MAX + 1)) == (False, "too-long") and calls == []
+    # a mismatch (our text arrived cut) is cleared with ctrl+u, never Enter
+    calls, typed = _fake_herdr(rab, monkeypatch, box, echo=lambda s: s[:4])
+    assert rab.type_line(t, "/restart") == (False, "mismatch") and typed == []
+    assert ("pane", "send-keys", "w1:p1", "ctrl+u") in calls and box[0] == ""
+    # a person's text after ours: one ctrl+u at most, then hands off; never Enter
+    calls, typed = _fake_herdr(rab, monkeypatch, box, echo=lambda s: "hello from a person")
+    monkeypatch.setattr(rab, "herdr", (lambda f: lambda *a: f(*a) if a[-1] != "ctrl+u" else (calls.append(a), _Run(
+        rab.PROMPT + " hello from a person\n"))[1])(rab.herdr))
+    assert rab.type_line(t, "/restart") == (False, "mismatch") and typed == []
+    assert sum(c[-1] == "ctrl+u" for c in calls) == 1 and not any(c[-1] == "enter" for c in calls)
+
+
+def test_G4_38_live_compact_then_restart_through_herdr(tmp_path, monkeypatch):
+    import time
+    rab = _rab(tmp_path, monkeypatch)
+    monkeypatch.setattr(rab, "LIVE", True)
+    for d in ("state", "ok"):
+        os.makedirs(os.path.join(rab.BASE, d), exist_ok=True)
+    box = [""]
+    calls, typed = _fake_herdr(rab, monkeypatch, box)
+    monkeypatch.setattr(rab, "ctx_and_idle", lambda s: (300_000, 600))
+    monkeypatch.setattr(rab, "last_compact_age", lambda p, now=None: None)
+    monkeypatch.setattr(rab, "confirm_restart", lambda s, newest, wait=150: True)
+    now, counts = time.time(), {"restart": 0, "compact": 0}
+    rab.handle(_sess(), "2.1.322", "herdr://p9", now, counts)
+    assert typed == ["/compact"] and counts == {"restart": 0, "compact": 1}
+    monkeypatch.setattr(rab, "last_compact_age", lambda p, now=None: 200)
+    monkeypatch.setattr(rab, "ctx_and_idle", lambda s: (20_000, 90))
+    rab.handle(_sess(), "2.1.322", "herdr://p9", now + 300, counts)
+    assert typed == ["/compact", "/restart"]
+    assert all(c[2] == "p9" for c in calls)
+    log = open(rab.LOG).read()
+    assert "herdr://p9" in log and "RESTARTED" in log
+
+
+def test_G8_9_needs_you_counts_a_herdr_pane_as_a_pane(tmp_path, monkeypatch):
+    pc, rab, ny = _needs(tmp_path, monkeypatch, {"allow_names": ["InHerdr", "NoPane"]})
+    now = time.time()
+    os.utime(os.path.join(pc.VERSIONS, "2.1.322"), (now - 3 * 86400, now - 3 * 86400))
+    monkeypatch.setattr(rab, "pid_tty", lambda pid: "/dev/pts/1")
+    tm = {"/dev/pts/7": "elsewhere:0.0"}
+    h = _s("InHerdr", version="2.1.319", now=now)
+    d = ny.collect([h], "2.1.322", now, panes=tm, herdr={h["sessionId"]: "herdr://w1:p1"})
+    assert "tmux pane" not in d["stuck"][0][3]
+    d = ny.collect([_s("NoPane", version="2.1.319", now=now)], "2.1.322", now, panes=tm, herdr={})
+    assert "not in a tmux pane or a Herdr pane" in d["stuck"][0][3]

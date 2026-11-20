@@ -63,9 +63,10 @@ def off_reasons(cfg):
         if isinstance(r, dict) else {}
 
 
-def collect(sessions, newest, now, panes=None, machine=None, machine_behind_s=None):
+def collect(sessions, newest, now, panes=None, machine=None, machine_behind_s=None, herdr=None):
     """PANES: the helper's map of terminal -> tmux pane, when it has one. With it,
     a session the helper cannot type into (no tmux pane) is named as that.
+    HERDR: the helper's map of session id -> Herdr pane (when switched on); such a session has a pane too.
     MACHINE: install_method.machine() for this machine (and MACHINE_BEHIND_S,
     how long it has been behind the newest release), when known."""
     rab = _rab()
@@ -90,8 +91,8 @@ def collect(sessions, newest, now, panes=None, machine=None, machine_behind_s=No
                 why = (f"Claude Code's /restart works only with Anthropic's native installer on macOS or Linux, and this "
                        f"machine uses {machine.get('method') or 'another install'}: end the session and start it again "
                        f"with claude --resume")
-            elif panes and not panes.get(rab.pid_tty(s.get("pid")) or ""):
-                why = "it does not run in a tmux pane the helper can type into"
+            elif panes and not panes.get(rab.pid_tty(s.get("pid")) or "") and not (herdr or {}).get(s.get("sessionId") or ""):
+                why = "it is not in a tmux pane or a Herdr pane the helper can type into"
             elif st == "waiting":
                 why = "it is waiting on a question or permission prompt"
             elif st == "shell":
@@ -197,7 +198,7 @@ def im_ver(v):
     return bool(re.fullmatch(r"\d+\.\d+\.\d+", v or ""))
 
 
-def refresh(sessions, newest, now, force=False, panes=None):
+def refresh(sessions, newest, now, force=False, panes=None, herdr=None):
     """Called by the restart helper at the end of a live run: rewrite the file
     about once an hour, and tell notify_command when a NEW name appears on it.
     A list that only gets shorter is not news. Sessions the owner keeps off the
@@ -210,7 +211,7 @@ def refresh(sessions, newest, now, force=False, panes=None):
         pass
     rab = _rab()
     m, mb = machine_now(now, write=rab.LIVE)
-    d = collect(sessions, newest, now, panes, m, mb)
+    d = collect(sessions, newest, now, panes, m, mb, herdr=herdr)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     tmp = OUT + ".tmp-pitstop"
     with open(tmp, "w") as f:
@@ -263,11 +264,15 @@ def main():
         panes = _rab().panes()
     except Exception:
         panes = None
+    try:
+        herdr = _rab().herdr_targets(_rab().CFG)
+    except Exception:
+        herdr = None
     if "--write" in sys.argv:
-        d = refresh(sessions, newest, now, force=True, panes=panes)
+        d = refresh(sessions, newest, now, force=True, panes=panes, herdr=herdr)
     else:
         m, mb = machine_now(now, write=False)
-        d = collect(sessions, newest, now, panes, m, mb)
+        d = collect(sessions, newest, now, panes, m, mb, herdr=herdr)
     sys.stdout.write(render(d, now))
     return 0
 
