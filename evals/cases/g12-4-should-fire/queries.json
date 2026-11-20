@@ -1,0 +1,12 @@
+[
+ {"query": "run a pit stop on this machine and tell me what you find", "should_trigger": true},
+ {"query": "can you do the /pit-stop checkup for me? I want to see how my sessions are doing", "should_trigger": true},
+ {"query": "My Claude Code sessions keep auto-compacting right in the middle of a long refactor and then lose track of what they were doing. Can you make them wait until I'm between tasks?", "should_trigger": true},
+ {"query": "set the compaction window for this folder to 500K, the default compacts way too early for the kind of work I do here", "should_trigger": true},
+ {"query": "Why are my long-running claude sessions still on 2.1.300 when 2.1.330 is out? I've got about 12 of them open in tmux and none of them moved.", "should_trigger": true},
+ {"query": "I run around 20 Claude Code agents on one server and I can't babysit them. I want them all to end up on the newest Claude Code without me watching or interrupting their work.", "should_trigger": true},
+ {"query": "my MEMORY.md has gotten really long. is it even loading fully at session start anymore? trim it if it isn't", "should_trigger": true},
+ {"query": "this session is going to spend the next week triaging logs and opening tickets. which model and effort level should it run at so I'm not overpaying?", "should_trigger": true},
+ {"query": "I just installed the Windstorm Pit Stop plugin. What now?", "should_trigger": true},
+ {"query": "When a session in this repo goes quiet it compacts itself at about 200K. I'd rather it waited longer here. Can you change the idle point?", "should_trigger": true}
+]
