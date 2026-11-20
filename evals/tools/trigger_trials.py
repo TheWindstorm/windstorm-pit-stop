@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Trigger trials for the pit-stop skill: does its description make Claude load it?
 
-Modeled on the Windstorm Helix Protocol lane's evals/tools/trigger_trials.py, which follows
+Modeled on
 skill-creator's run_eval.py: the description is offered as a project command with a unique
 name, `claude -p QUERY` runs in a scratch folder of its own, and the saved stream says
 whether the skill was read.

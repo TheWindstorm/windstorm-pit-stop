@@ -5,7 +5,7 @@ and only then? Codons G12.4 to G12.6 (plan 1.1).
 
 - `cases/g12-4-should-fire/`: 10 queries that must load the skill, some naming Pit Stop and some only describing its jobs.
 - `cases/g12-5-near-miss/`: 10 queries that share its words (pit stop, update, compact, CLAUDE.md, hook, model, memory, schedule) but need something else.
-- `tools/trigger_trials.py`: the runner. It is modeled on skill-creator's `run_eval.py` and the Windstorm Helix Protocol lane's `trigger_trials.py`.
+- `tools/trigger_trials.py`: the runner. It is modeled on skill-creator's `run_eval.py`.
 
 Run it from a scratch folder, one case at a time:
 
