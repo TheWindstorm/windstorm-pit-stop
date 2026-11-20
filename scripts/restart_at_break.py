@@ -84,6 +84,7 @@ A session the helper restarts in the same run is not also reloaded.
 
 Config (optional) ~/.claude/pit-stop/restart.json:
   {"tmux_socket": null,            # tmux -L name; null = default server
+   "herdr": false,                 # true or a path: also type into Herdr panes Herdr names by session id
    "allow_names": [],              # if set, ONLY these session names
    "deny_names": [], "deny_name_globs": [], "deny_paths": [],
    "ctx_max": 100000, "min_idle": 300, "max_per_run": 1,
@@ -121,6 +122,7 @@ import fnmatch
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -135,7 +137,7 @@ if "--only" in sys.argv:
     ONLY = sys.argv[_i + 1].strip() if _i + 1 < len(sys.argv) else ""
     if not ONLY or ONLY.startswith("--"):
         sys.exit("--only needs a session name (nothing was done)")  # never fall back to the whole fleet
-CFG = {"tmux_socket": None, "allow_names": [], "deny_names": [], "deny_name_globs": [], "deny_paths": [],
+CFG = {"tmux_socket": None, "herdr": False, "allow_names": [], "deny_names": [], "deny_name_globs": [], "deny_paths": [],
        "ctx_max": 100000, "min_idle": 300, "max_per_run": 1, "notify_command": None,
        "compact_window": 1800, "min_idle_after_compact": 60, "cold_idle": 3600,
        "compact_before_restart": True, "min_idle_before_compact": 300, "cache_ttl": 3600,
@@ -218,6 +220,70 @@ def panes():
     return dict(l.split("\t") for l in r.stdout.splitlines() if "\t" in l)
 
 
+# Herdr (a terminal multiplexer for agents, often run inside a tmux pane) gives its panes their own terminals,
+# so a Claude there has no tmux pane. Opt-in ("herdr": true or a path in restart.json): typing into a Herdr pane
+# reaches sessions whose owner has not said yes (plan 1.1, G4.35 to G4.38). Targets are "herdr://<pane id>".
+HERDR = "herdr://"
+HERDR_BIN = None    # set by herdr_targets() for this run
+
+
+def is_herdr(target):
+    return isinstance(target, str) and target.startswith(HERDR)
+
+
+def herdr_bin(cfg):
+    """The herdr command, or None: off unless "herdr" is true or a path."""
+    v = cfg.get("herdr")
+    if isinstance(v, str) and v.strip():
+        return os.path.expanduser(v.strip())
+    if v is not True:
+        return None
+    found = shutil.which("herdr")
+    if found:
+        return found
+    local = os.path.expanduser("~/.local/bin/herdr")
+    return local if os.path.isfile(local) and os.access(local, os.X_OK) else None
+
+
+def herdr_panes(agents):
+    """{session id: "herdr://<pane id>"} for each Claude agent Herdr names by its session id. An agent without
+    one may be a view of a tmux pane (the tmux path owns it), and an id two agents claim is left out."""
+    seen = {}
+    for a in agents if isinstance(agents, list) else []:
+        if not isinstance(a, dict) or a.get("agent") != "claude" or not isinstance(a.get("pane_id"), str):
+            continue
+        sess = a.get("agent_session")
+        sid = sess.get("value") if isinstance(sess, dict) else None
+        if isinstance(sid, str) and sid and a["pane_id"]:
+            seen.setdefault(sid, []).append(HERDR + a["pane_id"])
+    return {sid: t[0] for sid, t in seen.items() if len(t) == 1}
+
+
+def herdr_targets(cfg):
+    """Run `herdr agent list` once, when switched on. {} when off, missing, failing, slow or not JSON."""
+    global HERDR_BIN
+    HERDR_BIN = None
+    b = herdr_bin(cfg)
+    if not b:
+        return {}
+    try:
+        r = subprocess.run([b, "agent", "list"], capture_output=True, text=True, timeout=20, stdin=subprocess.DEVNULL)
+        d = json.loads(r.stdout) if r.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        log(f"herdr: cannot list agents ({type(e).__name__}); no Herdr panes this run")
+        return {}
+    if not isinstance(d, dict):
+        log("herdr: agent list failed or is not JSON; no Herdr panes this run")
+        return {}
+    HERDR_BIN = b
+    return herdr_panes((d.get("result") or {}).get("agents") if isinstance(d.get("result"), dict) else d.get("agents"))
+
+
+def herdr(*args):
+    return subprocess.run([HERDR_BIN or "herdr"] + list(args), capture_output=True, text=True, timeout=15,
+                          stdin=subprocess.DEVNULL)
+
+
 def pid_tty(pid):
     try:
         return os.readlink(f"/proc/{pid}/fd/0")
@@ -228,8 +294,11 @@ def pid_tty(pid):
 
 
 def screen(target, escapes=False):
-    args = ["capture-pane", "-p", "-t", target] + (["-e"] if escapes else [])
-    rows = [l for l in tmux(*args).stdout.splitlines() if ANSI.sub("", l).strip()]
+    if is_herdr(target):
+        out = herdr("pane", "read", target[len(HERDR):], "--lines", "60", *(["--ansi"] if escapes else [])).stdout
+    else:
+        out = tmux(*(["capture-pane", "-p", "-t", target] + (["-e"] if escapes else []))).stdout
+    rows = [l for l in out.splitlines() if ANSI.sub("", l).strip()]
     return rows[-40:]
 
 
@@ -272,6 +341,8 @@ def rows_busy(rows):
 
 def pane_in_mode(target):
     """True when the pane is in tmux copy mode: the screen reads as usual but keys would go to tmux."""
+    if is_herdr(target):
+        return False
     return tmux("display-message", "-p", "-t", target, "#{pane_in_mode}").stdout.strip() not in ("", "0")
 
 
@@ -294,7 +365,10 @@ def type_line(target, text):
     if not LIVE:
         log(f"DRY would type into {target}: {text[:90]}")
         return True, ""
-    tmux("send-keys", "-t", target, "-l", text)
+    if is_herdr(target):
+        herdr("pane", "send-text", target[len(HERDR):], text)
+    else:
+        tmux("send-keys", "-t", target, "-l", text)
     time.sleep(1)
     # Someone may have typed in that second: press Enter only if the box holds
     # EXACTLY our text; otherwise clear the line and skip.
@@ -310,7 +384,10 @@ def type_line(target, text):
             notify(f"pit-stop: {target}: the input box may still hold text the helper typed (its check before "
                    f"Enter failed and clearing did not empty it). Look before pressing Enter; Ctrl-U clears it.")
         return False, "mismatch"
-    tmux("send-keys", "-t", target, "Enter")
+    if is_herdr(target):
+        herdr("pane", "send-keys", target[len(HERDR):], "enter")
+    else:
+        tmux("send-keys", "-t", target, "Enter")
     return True, ""
 
 
@@ -323,7 +400,10 @@ def clear_ours(target, text):
     ends empty. (0.1.4 pressed Ctrl-U once and never looked: a long note stayed.)"""
     ours = "".join(text.split())
     for _ in range(CLEAR_TRIES):
-        tmux("send-keys", "-t", target, "C-u")
+        if is_herdr(target):
+            herdr("pane", "send-keys", target[len(HERDR):], "ctrl+u")
+        else:
+            tmux("send-keys", "-t", target, "C-u")
         time.sleep(0.5)
         left = input_box_text(screen(target, escapes=True))
         if left == "":
@@ -905,7 +985,8 @@ def handle(s, newest, target, now, counts):
     name, cwd, ver = s["name"], s.get("cwd") or "", s.get("version")
     sid = pc.safe_id(s.get("sessionId"))
     behind = pc.vkey(ver) < pc.vkey(newest)
-    tag = f"{name}: {ver}->{newest}" if behind else f"{name}:"
+    shown = f"{name} [{target}]" if is_herdr(target) else name   # a Herdr pane is named in the log (G4.38)
+    tag = f"{shown}: {ver}->{newest}" if behind else f"{shown}:"
     key = lane_key(name, sid)
     st_dir = os.path.join(BASE, "state")
     lastf, mmf = os.path.join(st_dir, key + ".last"), os.path.join(st_dir, key + ".mismatch")
@@ -1040,7 +1121,7 @@ def handle(s, newest, target, now, counts):
         notify(f"pit-stop: {name} /restart not confirmed; check its pane")
         return
     jobs = rearm_list(okf)
-    log(f"{name}: RESTARTED {ver} -> {newest}, same session"
+    log(f"{shown}: RESTARTED {ver} -> {newest}, same session"
         + (f"; {len(jobs)} job(s) to start again" if jobs else "; nothing typed after (no re-arm list)"))
     if jobs:  # only now is a note worth a turn: its watchers are down until it starts them
         time.sleep(10)
@@ -1328,6 +1409,7 @@ def main():
         log(f"tmux cannot be run ({type(e).__name__}: {str(e)[:80]}); nothing done. Fleet mode needs tmux on PATH: "
             f"/pit-stop setup --fleet writes a timer with a PATH that has it")
         return
+    hmap = herdr_targets(CFG)   # {} unless "herdr" is switched on (G4.36)
     counts = {"restart": 0, "compact": 0, "reload": 0}
     if ONLY is None and CFG.get("claude_updates") == "auto":
         try:   # first: a new Claude Code on disk now is one the restarts below can move sessions onto
@@ -1352,7 +1434,7 @@ def main():
     PLANNED.clear()
     for s in sorted(sessions, key=lambda x: x["name"]):
         try:
-            target = tty_map.get(pid_tty(s.get("pid")) or "")
+            target = tty_map.get(pid_tty(s.get("pid")) or "") or hmap.get(s.get("sessionId") or "")
             if not target or not s["name"] or not s.get("version") or not s.get("sessionId"):
                 continue
             if not allowed(s["name"], s.get("cwd") or "", CFG):
@@ -1365,7 +1447,8 @@ def main():
     if LIVE and ONLY is None and CFG.get("needs_you", True):
         try:   # about once an hour: the short list of what needs a person (~/.claude/pit-stop/needs-you.md)
             import needs_you
-            needs_you.refresh(sessions, newest or pc.newest_local_version(), time.time(), panes=tty_map)
+            needs_you.refresh(sessions, newest or pc.newest_local_version(), time.time(), panes=tty_map,
+                              **({"herdr": hmap} if hmap else {}))
         except Exception as e:
             log(f"needs-you list: skip: error {type(e).__name__}: {str(e)[:120]}")
     if LIVE and ONLY is None and CFG.get("fleet_tune", True) and pc.config().get("auto_tune") is True:

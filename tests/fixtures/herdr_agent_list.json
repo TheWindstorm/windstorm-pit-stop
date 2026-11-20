@@ -1,0 +1,146 @@
+{
+ "id": "cli:agent:list",
+ "result": {
+  "agents": [
+   {
+    "agent": "claude",
+    "agent_status": "idle",
+    "cwd": "/work/lane-1",
+    "focused": false,
+    "foreground_cwd": "/work/lane-1",
+    "pane_id": "w1:p1",
+    "revision": 1,
+    "state_change_seq": 1,
+    "tab_id": "w1:t1",
+    "terminal_id": "term-1",
+    "terminal_title": "Lane 1",
+    "terminal_title_stripped": "Lane 1",
+    "tokens": {
+     "act": "idle"
+    },
+    "workspace_id": "w1",
+    "agent_session": {
+     "agent": "claude",
+     "kind": "id",
+     "source": "herdr:claude",
+     "value": "00000000-0000-4000-8000-000000000001"
+    }
+   },
+   {
+    "agent": "claude",
+    "agent_status": "done",
+    "cwd": "/work/lane-2",
+    "focused": false,
+    "foreground_cwd": "/work/lane-2",
+    "pane_id": "w1:p2",
+    "revision": 2,
+    "state_change_seq": 2,
+    "tab_id": "w1:t2",
+    "terminal_id": "term-2",
+    "terminal_title": "Lane 2",
+    "terminal_title_stripped": "Lane 2",
+    "tokens": {
+     "act": "idle"
+    },
+    "workspace_id": "w1"
+   },
+   {
+    "agent": "claude",
+    "agent_status": "working",
+    "cwd": "/work/lane-3",
+    "focused": false,
+    "foreground_cwd": "/work/lane-3",
+    "pane_id": "w1:p3",
+    "revision": 3,
+    "state_change_seq": 3,
+    "tab_id": "w1:t3",
+    "terminal_id": "term-3",
+    "terminal_title": "Lane 3",
+    "terminal_title_stripped": "Lane 3",
+    "tokens": {
+     "act": "idle"
+    },
+    "workspace_id": "w1",
+    "agent_session": {
+     "agent": "claude",
+     "kind": "id",
+     "source": "herdr:claude",
+     "value": "00000000-0000-4000-8000-000000000003"
+    }
+   },
+   {
+    "agent": "claude",
+    "agent_status": "idle",
+    "cwd": "/work/lane-4",
+    "focused": false,
+    "foreground_cwd": "/work/lane-4",
+    "pane_id": "w1:p4",
+    "revision": 4,
+    "state_change_seq": 4,
+    "tab_id": "w1:t4",
+    "terminal_id": "term-4",
+    "terminal_title": "Lane 4",
+    "terminal_title_stripped": "Lane 4",
+    "tokens": {
+     "act": "idle"
+    },
+    "workspace_id": "w1",
+    "agent_session": {
+     "agent": "claude",
+     "kind": "id",
+     "source": "herdr:claude",
+     "value": "00000000-0000-4000-8000-000000000004"
+    }
+   },
+   {
+    "agent": "claude",
+    "agent_status": "blocked",
+    "cwd": "/work/lane-5",
+    "focused": false,
+    "foreground_cwd": "/work/lane-5",
+    "pane_id": "w1:p5",
+    "revision": 5,
+    "state_change_seq": 5,
+    "tab_id": "w1:t5",
+    "terminal_id": "term-5",
+    "terminal_title": "Lane 5",
+    "terminal_title_stripped": "Lane 5",
+    "tokens": {
+     "act": "idle"
+    },
+    "workspace_id": "w1",
+    "agent_session": {
+     "agent": "claude",
+     "kind": "id",
+     "source": "herdr:claude",
+     "value": "00000000-0000-4000-8000-000000000004"
+    }
+   },
+   {
+    "agent": "codex",
+    "agent_status": "idle",
+    "cwd": "/work/lane-6",
+    "focused": false,
+    "foreground_cwd": "/work/lane-6",
+    "pane_id": "w1:p6",
+    "revision": 6,
+    "state_change_seq": 6,
+    "tab_id": "w1:t6",
+    "terminal_id": "term-6",
+    "terminal_title": "Lane 6",
+    "terminal_title_stripped": "Lane 6",
+    "tokens": {
+     "act": "idle"
+    },
+    "workspace_id": "w1",
+    "agent_session": {
+     "agent": "claude",
+     "kind": "id",
+     "source": "herdr:claude",
+     "value": "00000000-0000-4000-8000-000000000006"
+    }
+   }
+  ],
+  "type": "agent_list"
+ }
+}
