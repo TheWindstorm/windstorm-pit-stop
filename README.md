@@ -4,7 +4,7 @@
 
 Free and open source. By [The Windstorm on GitHub](https://github.com/TheWindstorm) (github.com/TheWindstorm). This page: [github.com/TheWindstorm/windstorm-pit-stop](https://github.com/TheWindstorm/windstorm-pit-stop).
 
-More from The Windstorm: [thewindstorm.ai](https://thewindstorm.ai) (the podcast) · [grantwhitmer.com](https://grantwhitmer.com) (Grant Whitmer, who built it).
+More from The Windstorm: [Pit Stop explained](https://thewindstorm.ai/plugins/pit-stop?utm_source=github&utm_medium=referral&utm_campaign=ecosystem) · [thewindstorm.ai](https://thewindstorm.ai) (the podcast) · [grantwhitmer.com](https://grantwhitmer.com) (Grant Whitmer, who built it).
 
 <img src=".claude-plugin/icon.png" width="120" alt="The Windstorm">
 
@@ -211,6 +211,8 @@ These are heuristics, not guarantees. Model and effort changes affect quality an
 Claude Code can be installed with Anthropic's native installer, npm, Homebrew, WinGet, apt, dnf or apk, or a version manager such as mise, asdf or nix. Each keeps it current differently, and a version manager holds it where its config says until someone moves it. Pit Stop does not assume one: it follows the `claude` a new session would start, reads its version there, and compares it with the newest release on your channel. `/pit-stop checkup` and the needs-you list say how it was installed, what holds it back when it is behind for a day or more, and the one command that moves it (for example "held at 2.1.322 by ~/.config/mise/config.toml. To move it: mise use -g claude@latest"). Run `python3 -I <plugin>/scripts/install_method.py` to see it alone.
 
 What works where: holding refreshes for a break, tuning, the checkup and the needs-you list work with every install method. Restarting sessions onto a new version needs Claude Code's `/restart`, which needs the native install on macOS or Linux (not WSL or Windows); on other installs, Pit Stop names the sessions that are behind and says to end each at a break and start it again with `claude --resume`.
+
+**Keeping Claude Code itself current (fleet mode, off unless you switch it on).** With `"claude_updates": "auto"` in `~/.claude/pit-stop/restart.json`, when this machine's Claude Code is behind the newest release the helper runs the one update its install method allows: `claude update` (native, or npm in a folder you own), `brew upgrade --cask` (Homebrew), or `mise use -g claude@<newest>` / `mise upgrade claude` (a pin in mise's global config). It waits two hours after a release first appears, so Claude Code's own updater goes first, and tries one release at most every six hours. It never uses sudo, never moves a pin written in a project's own file, and never acts when you said no: `"hold_claude_version": true` (or a version) in `~/.claude/pit-stop/config.json`, or `DISABLE_UPDATES` / `DISABLE_AUTOUPDATER`. System packages (apt, dnf, apk), an npm install only an administrator can change, nix, asdf and WinGet are named with their command and left to a person. Running sessions keep their version; the helper restarts them onto the new one at a break, as it always has.
 
 `/pit-stop setup` also switches on Claude Code's own auto-update for the marketplace Pit Stop came from (`"autoUpdate": true` on its `extraKnownMarketplaces` entry in `~/.claude/settings.json`; `--no-self-update` leaves it alone, and an `"autoUpdate": false` you wrote is kept). Claude Code leaves that off for marketplaces other than Anthropic's, so without it an install stays on the release it was installed with.
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0 (2026-11-17)
+- **Pit Stop can keep Claude Code itself current, however it was installed.** New `"claude_updates": "auto"` in restart.json (off by default; it is tried on one machine first): when this machine's Claude Code is behind the newest release, the helper runs the one update its install method allows (`claude update`, `brew upgrade --cask`, or moving mise's global pin), checks that the new version is there, and logs it; a failure is logged and goes to `notify_command`. It waits two hours after a release appears (Claude Code's own updater first) and tries one release at most every six hours. Never sudo, never a project's own pin, never against `"hold_claude_version"` in config.json or a switched-off updater. Sessions then move onto it at a break, as before.
+- **A switched-off updater stops it for every install method.** `DISABLE_UPDATES` or `DISABLE_AUTOUPDATER`, in the environment or in `~/.claude/settings.json`, now stops Pit Stop's Claude Code update for mise and Homebrew too, not only for native and npm installs. Found while writing the DNA strand's invariant tests.
+- **mise and asdf shims.** When `claude` on PATH is a version manager's shim, its real path is the manager itself; that read as "installed in a way Pit Stop does not know" on two Linux machines. Now it is mise (or asdf), with the version from `claude --version`.
+- **Installs only an administrator can change.** An npm install under a system folder (seen under /usr/lib) was told "claude update", which cannot work there. Pit Stop now says it needs an administrator, gives the sudo command for that person and the native installer (which needs none) as the other way, and never runs either itself.
+- README: how the Claude Code update works and how to say no; a link to the Pit Stop page on thewindstorm.ai.
+- Hooks unchanged (generation 2).
+
 ## 0.5.3 (2026-11-17)
 - **The skill loads in strict parsers.** The skill's description had an unquoted ": " ("for the user: run the checkup"). Claude Code reads it, but strict YAML parsers (the Agent Skills validator `gh skill publish`, and other tools that read skills) rejected the whole skill. The colon is gone.
 - **It cannot come back.** New `tests/test_skill_spec.py` checks every SKILL.md against the Agent Skills rules (name, folder, description length, values a strict parser would misread), and CI now also loads each one with a real YAML parser and runs `gh skill publish --dry-run`.

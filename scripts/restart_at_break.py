@@ -97,6 +97,12 @@ Config (optional) ~/.claude/pit-stop/restart.json:
    "plugin_updates": "off",        # "pit-stop": keep this plugin up to date; "all": every plugin installed for the
                                    # user; with Claude Code's own commands, before restarting anyone (see update_plugins)
    "plugin_update_every": 86400,
+   "claude_updates": "off",        # "auto": when this machine's Claude Code is behind the newest release, run the
+                                   # one update its install method allows (claude update, brew, mise; never sudo,
+                                   # never a project's pin, never against hold_claude_version in config.json or a
+                                   # switched-off updater), then restart sessions onto it at a break as usual
+   "claude_update_after": 7200,    # wait this long after Pit Stop first sees a release (Claude Code's own updater first)
+   "claude_update_retry": 21600,   # after a try, at most one more per release this often
    "off_list_reasons": {},         # {"Session name": "why it is kept off"}: shown in needs-you.md and the weekly notice
    "reload_plugins": false, "reload_only_names": [], "reload_warm": false,
    "reload_retry": 21600,
@@ -136,6 +142,7 @@ CFG = {"tmux_socket": None, "allow_names": [], "deny_names": [], "deny_name_glob
        "compact_retry": 21600, "idle_compact_after": None,
        "ask_again": 43200, "ask_fallback_after": 1800, "consent_timeout": 1800, "restart_cooldown": 21600,
        "jobs_escalate_days": 3, "plugin_updates": "off", "plugin_update_every": 86400,
+       "claude_updates": "off", "claude_update_after": 7200, "claude_update_retry": 21600,
        "reload_plugins": False, "reload_only_names": [], "reload_warm": False, "reload_retry": 21600,
        "needs_you": True, "fleet_tune": True,
        "mismatch_backoff": 1800, "mismatch_backoff_max": 43200}
@@ -1129,6 +1136,60 @@ def update_plugins(now, behind_sessions, run=None):
     return out
 
 
+def claude_update_due(m, plan, last, now, cfg):
+    """Whether to run PLAN (from install_method.update_plan) now. LAST is the previous try
+    ({"released": v, "at": t}) or None. Pure."""
+    if cfg.get("claude_updates") != "auto" or not plan:
+        return False
+    seen = m.get("released_seen")
+    if isinstance(seen, (int, float)) and now - seen < cfg["claude_update_after"]:
+        return False
+    if isinstance(last, dict) and last.get("released") == m.get("released") and \
+            isinstance(last.get("at"), (int, float)) and now - last["at"] < cfg["claude_update_retry"]:
+        return False
+    return True
+
+
+def update_claude_code(now, run=None, machine=None):
+    """When this machine's Claude Code is behind the newest release, run the one update its
+    install method allows (install_method.update_plan), before this run restarts anyone. New
+    versions land on disk; running sessions keep theirs until the helper restarts them at a
+    break. A dry run says what it would do. Returns the new installed version, or None."""
+    if CFG.get("claude_updates") != "auto":
+        return None
+    import install_method as im
+    run = run or (lambda cmd, t: subprocess.run(cmd, capture_output=True, text=True, timeout=t, stdin=subprocess.DEVNULL))
+    m = machine or im.machine(write=LIVE)
+    plan, why = im.update_plan(m)
+    stampf = os.path.join(BASE, "state", "claude-update.json")
+    last = pc.read_json(stampf, None)
+    if not plan:
+        if m.get("behind"):
+            log(f"Claude Code update: {m.get('installed')} -> {m.get('released')} not run: {why}")
+        return None
+    if not claude_update_due(m, plan, last, now, CFG):
+        return None
+    if not LIVE:
+        log(f"DRY would update Claude Code {m.get('installed')} -> {m.get('released')} ({m.get('method')}): {' '.join(plan)}")
+        return None
+    pc.write_json_atomic(stampf, {"released": m.get("released"), "at": now, "cmd": plan}, mode=0o644)  # first
+    try:
+        r = run(plan, 600)
+        ok = r.returncode == 0
+        tail = ((r.stdout or "") + (r.stderr or "")).strip().splitlines()
+        first = (tail[-1] if tail else "")[:200]
+    except Exception as e:
+        ok, first = False, f"{type(e).__name__}: {str(e)[:120]}"
+    after = im.machine(write=True)
+    got = after.get("installed")
+    if ok and got and pc.vkey(got) >= pc.vkey(m.get("released") or "0.0.0"):
+        log(f"Claude Code update: {m.get('installed')} -> {got} ({m.get('method')}, {' '.join(plan[1:])}): ok")
+        return got
+    log(f"Claude Code update: FAILED ({m.get('method')}, {' '.join(plan)}): now {got}; {first}")
+    notify(f"pit-stop: Claude Code update to {m.get('released')} failed here ({m.get('method')}): {first}")
+    return None
+
+
 def plugin_root_now():
     """The folder Claude Code has installed for this plugin now (see scripts/launcher.py), or None."""
     try:
@@ -1268,6 +1329,12 @@ def main():
             f"/pit-stop setup --fleet writes a timer with a PATH that has it")
         return
     counts = {"restart": 0, "compact": 0, "reload": 0}
+    if ONLY is None and CFG.get("claude_updates") == "auto":
+        try:   # first: a new Claude Code on disk now is one the restarts below can move sessions onto
+            if update_claude_code(now):
+                newest = pc.newest_installed_version() or newest
+        except Exception as e:
+            log(f"Claude Code update: skip: error {type(e).__name__}: {str(e)[:120]}")
     if ONLY is None and CFG.get("plugin_updates") in ("pit-stop", "all"):
         try:   # before any restart: the restart that brings a session the newest Claude Code brings the newest plugins
             behind = sum(1 for s in sessions if newest and s.get("version") and pc.vkey(s["version"]) < pc.vkey(newest)
