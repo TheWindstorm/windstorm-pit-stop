@@ -217,18 +217,18 @@ What works where: holding refreshes for a break, tuning, the checkup and the nee
 
 ## Staying up to date
 
-Pit Stop is updated by Claude Code itself, like any plugin from a marketplace. Claude Code updates a plugin only when auto-update is on for the marketplace it came from. It leaves auto-update off for marketplaces other than Anthropic's, so an install stays on the release it was installed with until something switches it on.
+Pit Stop is updated by Claude Code itself, like any plugin from a marketplace. Claude Code updates a plugin on its own only when auto-update is on for the marketplace it came from. It leaves auto-update off for marketplaces other than Anthropic's, so an install stays on the release it was installed with until something switches it on.
 
-`/pit-stop setup` switches it on for Pit Stop's marketplace: it writes `"autoUpdate": true` on the `thewindstorm` entry of `extraKnownMarketplaces` in `~/.claude/settings.json`. `--no-self-update` leaves the setting alone, and an `"autoUpdate": false` you wrote yourself is kept. From then on, Claude Code's documentation says, it checks for a new Pit Stop once in each session you start, and after an update it tells you to type `/reload-plugins` to start using it.
+`/pit-stop setup` switches it on for Pit Stop's marketplace: it writes `"autoUpdate": true` on the entry of the marketplace Pit Stop was installed from (`thewindstorm` for the standard install) under `extraKnownMarketplaces` in `~/.claude/settings.json`. `--no-self-update` leaves the setting alone, and an `"autoUpdate": false` you wrote yourself is kept. From then on, Claude Code's documentation says, it checks for a new Pit Stop once in each session you start, and after an update it tells you to type `/reload-plugins` to start using it (or it loads at your next start).
 
-**If you installed Pit Stop before 0.5.2 (November 15, 2026),** auto-update is most likely still off, because setup switches it on only from 0.5.2. To see your version, type `claude plugin list` in a terminal. To update once and switch auto-update on, type these two commands in a terminal, one at a time:
+**If you installed Pit Stop before 0.5.2 (November 15, 2026),** auto-update is most likely still off, because setup switches it on only from 0.5.2. To see your version, type `claude plugin list` in a terminal. To update it once, type these two commands in a terminal, one at a time:
 
 ```bash
 claude plugin marketplace update thewindstorm
 claude plugin update windstorm-pit-stop@thewindstorm
 ```
 
-Then, in Claude Code, type `/reload-plugins` and then `/pit-stop setup`.
+The new version loads the next time you start Claude Code, or at once in an open session when you type `/reload-plugins` there. Then type `/pit-stop setup`: that switches auto-update on, so you need not do this again.
 
 **In fleet mode** the helper can also update plugins before it restarts sessions (`"plugin_updates"`, under Fleet mode below), so a machine that runs many sessions moves to a new Pit Stop at a break without anyone typing.
 
