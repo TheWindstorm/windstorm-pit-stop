@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- README: a "Staying up to date" section. It says how Pit Stop is updated (Claude Code's auto-update for its marketplace, which `/pit-stop setup` switches on from 0.5.2, and the fleet helper's `plugin_updates`). It also gives the two commands that update an older install once, and says that `/pit-stop setup`, typed after them, switches auto-update on.
+
 ## 0.6.1 (2026-11-20)
 - **Sessions in Herdr, opt-in** (built: G4.35 to G4.38, G8.9). With `"herdr": true` (or a path to the binary) in restart.json, a session with no tmux pane of its own that Herdr names by its session id is reached through Herdr: `herdr pane read`, `send-text`, and `send-keys enter` only after an exact read-back, with `ctrl+u` to clear. These are the same breaks and the same typing rules as in tmux. tmux comes first. A missing or silent Herdr changes nothing. The needs-you list counts a Herdr pane as a pane. Off by default, because a Herdr pane can belong to someone else's agent. The key names were checked on a scratch Herdr 0.9.5 session (open question 10).
 - **Trigger evals for the skill's description** (built: G12.4 to G12.6). `evals/` holds 10 queries that must load the pit-stop skill and 10 near misses that must not, the runner, and the recorded Sonnet results for the 0.6.0 description: 10 of 10 fired and 10 of 10 stayed out, 3 runs each. `tests/test_trigger_evals.py` fails CI when the recorded results are for another description, other queries or another run count. The eval itself runs `claude -p`, so it is run by hand, never in CI.
