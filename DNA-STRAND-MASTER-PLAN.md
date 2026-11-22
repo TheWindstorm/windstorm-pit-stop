@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.1 · 2026-11-20 · The Windstorm**
+**Plan version 1.2 · 2026-11-22 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -373,6 +373,8 @@ Pit Stop keeps a short list, `~/.claude/pit-stop/needs-you.md`, of what only a p
 
 **G9.6 One line per session (open).** `python3 -I scripts/report.py` prints one line per running session: its name, the version it runs against the newest installed, its state, the idle point and window in force, its memory index line count, the date of its folder's last tune, and its folder; `--project DIR` prints that folder only. It changes nothing. Proof: `test_G9_6_report_prints_one_line_per_session`.
 
+**G9.7 An older install that wins is named (open).** When `plugins/installed_plugins.json` holds `windstorm-pit-stop@*` in two scopes and the version a folder's sessions load is lower than the newest installed, `/pit-stop checkup` shows `In <folder>, sessions load Pit Stop <old> (<scope>), not <new> (<scope>).` and the one command that removes or updates the older. Seen 2026-11-22: a user-scope 0.1.4 beat a project-scope 0.6.1. Proof: `test_G9_7_checkup_names_an_older_install_that_wins`.
+
 ### G10 Reading check
 
 `/pit-stop reading` trims a memory index that has grown past what Claude Code loads, without losing a single link.
@@ -408,6 +410,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 **G12.5 The skill stays out of near misses.** The same run loads the skill in at most 1 of 3 runs for each of the 10 queries in `evals/cases/g12-5-near-miss/queries.json`, which share Pit Stop's words but ask for something else. The test fails as in G12.4. Needs: G12.4. Proof: `test_G12_5_near_miss_queries_do_not_load_the_skill`.
 
 **G12.6 Trials change nothing.** In `evals/tools/trigger_trials.py`, `command(query, model)` returns an argv holding `--settings` with `windstorm-pit-stop@thewindstorm` set to false, `--disallowedTools Bash Edit Write NotebookEdit` and `--permission-mode default`; `trial_paths(scratch, q, r)` gives each trial its own folder, with its transcript outside it. Trials run one at a time. In every results file `installed_visible` and `timed_out` are 0 and `ours_visible` equals `trials`. Proof: `test_G12_6_trigger_trials_run_isolated_and_read_only`.
+
+**G12.7 Setup can be undone (open).** `python3 -I scripts/setup.py --undo` puts back what `--apply` and `--fleet` changed: the backed-up settings and marketplace entry, `"auto_tune"` in `pit-stop/config.json`, and the timer and launcher it installed. It lists each step, and leaves the history files in place, named. Seen 2026-11-22: after `claude plugin uninstall`, `autoUpdate: true`, `config.json` and `checkup/` stayed. Proof: `test_G12_7_setup_undo_puts_back_what_apply_changed`.
 
 ### G13 Self-update for everyone (open)
 
