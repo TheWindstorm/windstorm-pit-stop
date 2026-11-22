@@ -32,7 +32,7 @@
    "first_ship_in": "0.7.0",
    "ship_in": "0.7.0",
    "test": "",
-   "proven": "",
+   "proven": "2026-11-22, on the two machines (a macOS test machine and a Linux laptop, main users, user scope, Claude Code 2.1.330): the README's two commands, typed word for word, moved Pit Stop 0.1.4 (85274eae) to 0.6.1 at 2330ee87, main's head at that minute, each with exit 0 and 'updated from 0.1.4 to 0.6.1 for scope user. Restart to apply changes.' Settings were unchanged and nothing was restarted. After a clean reboot of the macOS machine, every session that came back ran the new hooks (resume stamps that only the new code writes) with no hook error. The README's third step (/pit-stop setup, which switches the catalog's auto-update on) was not run, on purpose: with the './' entry it would let every merge to main reach those machines by itself (row P10). That step is to be seen with 0.6.2, once the catalog pins a release. This covers the second half of the promise; the notice of G13.1 is still to build.",
    "issue": 29,
    "moved_why": "",
    "moved_by_person": ""
