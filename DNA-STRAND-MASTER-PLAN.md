@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.4 · 2026-11-22 · The Windstorm**
+**Plan version 1.5 · 2026-11-22 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -184,6 +184,8 @@ One shared module, `scripts/pitstop_common.py`, plus the hook generation file, r
 **G3.7 Generation file matches the hook files.** `hooks/generation.json` holds an int `generation` of at least 2 (now 2) and `hook_files_sha256` equal to `pitstop_common.hook_files_signature(ROOT)`: sha256 over `hooks/hooks.json` and `hooks/*.py` in name order, each fed as name, NUL, bytes with CRLF as LF, NUL. `hook_generation(ROOT)` equals `generation`. The test proves only that the file was rewritten after the last hook change; whether `generation` had to rise is the author's call (Part 2, Generation). Needs: G3.6. Proof: `test_G3_7_generation_file_was_looked_at_when_the_hook_files_last_changed`.
 
 **G3.8 A number in restart.json must be a number.** `restart_at_break._check_numbers(cfg, defaults, warnings)` resets each key with a numeric default, plus `idle_compact_after` (default None), whose value is not a non-negative non-boolean number, adding one warning naming it: `idle_compact_after: true` becomes None, `cold_idle: "3600"` 3600, `min_idle: -5` 300; `ctx_max: 90000` stays; 3 warnings. `plan()` on an up-to-date 300K session idle 2 s returns `none`. `idle_compact_after: 2400` stays, no warning. Proof: `test_G3_8_a_number_in_restart_json_must_be_a_number`.
+
+**G3.9 Backups kept to the newest five (open).** `backup(path)` in `scripts/pitstop_common.py` writes `<name>.bak-pitstop-<UTC time>` and then removes that file's older `.bak-pitstop-*` copies beyond the newest five; it removes nothing else and never the file itself. Seen 2026-11-22: 55 tuner writes left 56 backups next to one `settings.local.json`. Proof: `test_G3_9_backup_keeps_the_newest_five_per_file`.
 
 ### G4 Restart helper at a break
 
