@@ -11,7 +11,7 @@
  "rows": [
   {
    "id": "P1",
-   "seen": "2026-11-22, in an overnight stress test on a Linux laptop and an Intel Mac: a project-scope Pit Stop 0.6.1 in a test folder loaded the user-scope 0.1.4 instead; /hooks showed only 0.1.4's PreCompact hook, and nothing told the person. A session started with --plugin-dir pointing at 0.6.1 loaded 0.6.1 and no 0.1.4 hook: the start flag hides the older install; without the flag the older one wins.",
+   "seen": "2026-11-22, in an overnight stress test on a Linux laptop and an Intel Mac: a project-scope Pit Stop 0.6.1 in a test folder loaded the user-scope 0.1.4 instead; /hooks showed only 0.1.4's PreCompact hook, and nothing told the person. A session started with --plugin-dir pointing at 0.6.1 loaded 0.6.1 and no 0.1.4 hook: the start flag hides the older install; without the flag the older one wins. A restart is a second way to land on the older install: after a reboot the same session came back without its --plugin-dir flag and ran 0.1.4's hook again, with nothing said.",
    "promise": "The checkup names an older Pit Stop install that wins over a newer one in another scope, and the one command that removes or updates the older.",
    "codon": "G9.7",
    "owner": "maintainer",
@@ -62,6 +62,20 @@
    "test": "",
    "proven": "",
    "issue": 34,
+   "moved_why": "",
+   "moved_by_person": ""
+  },
+  {
+   "id": "P5",
+   "seen": "2026-11-22, in that stress test, on a Mac after a reboot: two sessions that had never taken a turn were brought back with claude --resume <id>; each printed 'No conversation found with session ID: …' and ended, so they were gone. The same restore dropped a working session's --plugin-dir flag. Pit Stop's own exit-and-resume (G15.1) is not built yet, so no install loses a session this way today; the row is dated with that build so that the gate refuses to ship it without the check.",
+   "promise": "Exit-and-resume exits only a session whose conversation exists, and starts it again with every flag it was started with.",
+   "codon": "G15.1",
+   "owner": "maintainer",
+   "first_ship_in": "0.7.0",
+   "ship_in": "0.7.0",
+   "test": "",
+   "proven": "",
+   "issue": 37,
    "moved_why": "",
    "moved_by_person": ""
   }
