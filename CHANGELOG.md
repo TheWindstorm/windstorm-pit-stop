@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.3 (2026-11-22)
+- **The tuner's context limit from the model** (plan change; G2.25 added, open). On a fresh folder the tuner guessed a 200K context for a model that has 1M, and said so. No invariant and no Part 0 rule changes.
+
 ## Plan 1.2 (2026-11-22)
 - **Two open codons from the overnight stress test** (plan change; G9.7 and G12.7 added, both open). G9.7: the checkup names an older Pit Stop install that wins over a newer one in another scope. G12.7: `setup.py --undo` puts back what setup changed. No invariant and no Part 0 rule changes.
 
