@@ -1,7 +1,7 @@
 # Changelog
 
 ## Plan 1.9 (2026-11-22)
-- **Catalog entries over HTTPS, pinned to a release** (plan change; G7.6 and G7.7 added, both open). On Claude Code 2.1.280 with no GitHub key, the catalog's `github` entry for Windstorm Pit Board went over SSH and failed, while an `https` URL entry with the same ref and sha installed on 2.1.280 and 2.1.330. Pit Stop's own entry, `./`, gave a fresh install main's code labelled 0.6.1. No invariant and no Part 0 rule changes.
+- **Catalog entries over HTTPS, pinned to a release** (plan change; G7.6, G7.7 and G7.8 added, all open). On Claude Code 2.1.280 with no GitHub key, the catalog's `github` entry for Windstorm Pit Board went over SSH and failed, while an `https` URL entry with the same ref and sha installed on 2.1.280 and 2.1.330. Pit Stop's own entry, `./`, gave a fresh install main's code labelled 0.6.1. Changing that entry changes the source of installs people already have, so G7.8 asks that they move to the pinned release with the README's update lines. No invariant and no Part 0 rule changes.
 
 ## Plan 1.8 (2026-11-22)
 - **A tool call cut off by a restart is a break** (plan change; G1.17 added, open). After a sudden reset in the middle of a tool call, the transcript ends on a `tool_use` with no result, and the hook read the waiting session as mid-task. No invariant and no Part 0 rule changes.

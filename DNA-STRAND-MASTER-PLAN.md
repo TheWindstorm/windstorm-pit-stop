@@ -345,7 +345,9 @@ Pit Stop switches on Claude Code's own updates for the marketplace it came from,
 
 **G7.6 Every catalog entry installs with no key (open).** Each plugin in `.claude-plugin/marketplace.json` has source `url` with an `https://` git URL, a `ref` and a 40-hex `sha`; no `github` or `git@` source. The README names the oldest Claude Code version its install lines were seen to work on with no GitHub key. Seen 2026-11-22: Claude Code 2.1.280 cloned a `github` entry over SSH and failed. Proof: `test_G7_6_every_catalog_entry_installs_over_https_with_no_key`.
 
-**G7.7 The catalog installs a release, not main (open).** Pit Stop's own entry pins `ref` to a tag `v<x.y.z>` and `sha` to that tag's commit, not `./`. Seen 2026-11-22: a fresh install took main's unreleased code under the label 0.6.1. Proof: `test_G7_7_pit_stops_catalog_entry_pins_a_release_tag`.
+**G7.7 The catalog installs a release, not main (open).** Pit Stop's own entry pins `ref` to a tag `v<x.y.z>` and `sha` to that tag's commit, not `./`. Once the tag `v<version in .claude-plugin/plugin.json>` exists, the entry must pin it: each release is the tag first, then the pin on main, and the test fails while a tag waits for its pin. Seen 2026-11-22: a fresh install took main's code labelled 0.6.1. Proof: `test_G7_7_pit_stops_catalog_entry_pins_a_release_tag`.
+
+**G7.8 An install from `./` moves to the pinned release (open).** On a test machine, installs of 0.1.4 and 0.6.1 made from the `./` entry reach the pinned release with the README's own update lines, with no reinstall, and keep `pit-stop/config.json` and the settings Pit Stop wrote. Needs: G7.7, G16.1. Proof: `test_G7_8_conformance_kit_sees_a_dot_install_move_to_the_pinned_release`.
 
 ### G8 Needs-you list
 
