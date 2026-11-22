@@ -3112,3 +3112,6 @@ def test_G1_16_readme_says_claude_code_asks_before_the_window():
     assert "a little before the context reaches it" in row
     assert "seen once" in row
     assert "at once" not in row
+    with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as f:
+        after = [l for l in f if l.startswith("So a session set to ")]
+    assert len(after) == 1 and "asks a little before" in after[0] and "a little past" in after[0] and "never past the ceiling" in after[0]
