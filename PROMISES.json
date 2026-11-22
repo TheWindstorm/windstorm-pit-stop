@@ -11,7 +11,7 @@
  "rows": [
   {
    "id": "P1",
-   "seen": "2026-11-22, in an overnight stress test on a Linux laptop and an Intel Mac: a project-scope Pit Stop 0.6.1 in a test folder loaded the user-scope 0.1.4 instead; /hooks showed only 0.1.4's PreCompact hook, and nothing told the person.",
+   "seen": "2026-11-22, in an overnight stress test on a Linux laptop and an Intel Mac: a project-scope Pit Stop 0.6.1 in a test folder loaded the user-scope 0.1.4 instead; /hooks showed only 0.1.4's PreCompact hook, and nothing told the person. A session started with --plugin-dir pointing at 0.6.1 loaded 0.6.1 and no 0.1.4 hook: the start flag hides the older install; without the flag the older one wins.",
    "promise": "The checkup names an older Pit Stop install that wins over a newer one in another scope, and the one command that removes or updates the older.",
    "codon": "G9.7",
    "owner": "maintainer",
@@ -48,6 +48,20 @@
    "test": "",
    "proven": "",
    "issue": 30,
+   "moved_why": "",
+   "moved_by_person": ""
+  },
+  {
+   "id": "P4",
+   "seen": "2026-11-22, in that stress test, in a fresh test folder on a model with a 1M context (its status line read 1.00M): after one prompt the tuner wrote window 150K and idle point 100K and told the person 'idle point: 100K is the lowest Claude Code allows, and the right one for a 200K context'. It had guessed the limit from the folder's peak context, 38K. For a 1M model its own rules start at window 500K and idle point 200K.",
+   "promise": "The tuner takes the context limit from the model: a [1m] id or a list of models in optimize.py. When it cannot tell, it says so ('could not tell this model's context; assumed 200K; pass --context-limit') instead of stating a guess as a fact.",
+   "codon": "G2.25",
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "",
+   "proven": "",
+   "issue": 34,
    "moved_why": "",
    "moved_by_person": ""
   }
