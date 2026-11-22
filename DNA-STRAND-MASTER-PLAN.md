@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.5 · 2026-11-22 · The Windstorm**
+**Plan version 1.6 · 2026-11-22 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -185,7 +185,7 @@ One shared module, `scripts/pitstop_common.py`, plus the hook generation file, r
 
 **G3.8 A number in restart.json must be a number.** `restart_at_break._check_numbers(cfg, defaults, warnings)` resets each key with a numeric default, plus `idle_compact_after` (default None), whose value is not a non-negative non-boolean number, adding one warning naming it: `idle_compact_after: true` becomes None, `cold_idle: "3600"` 3600, `min_idle: -5` 300; `ctx_max: 90000` stays; 3 warnings. `plan()` on an up-to-date 300K session idle 2 s returns `none`. `idle_compact_after: 2400` stays, no warning. Proof: `test_G3_8_a_number_in_restart_json_must_be_a_number`.
 
-**G3.9 Backups kept to the newest five (open).** `backup(path)` in `scripts/pitstop_common.py` writes `<name>.bak-pitstop-<UTC time>`, then removes that file's older copies beyond the newest five, newest read from the time in the name. A copy counts only when its name is exactly the file's name, `.bak-pitstop-` and a time, so `a.json` never touches `a.json.old`'s copies. Seen 2026-11-22: 55 writes left 56 backups. Proof: `test_G3_9_backup_keeps_the_newest_five_per_file`.
+**G3.9 Every apply keeps three backups (open).** `main()` in `scripts/optimize.py` with `--apply` calls `prune_backups(s)` after `apply()`, as `scripts/autotune.py` and `scripts/setup.py` already do, so each settings file keeps its newest three `.bak-pitstop-*` copies (G2.11). Seen 2026-11-22: 55 hand-run `--apply` writes left 56 copies; daily tuning prunes. Proof: `test_G3_9_optimize_apply_keeps_three_backups`.
 
 ### G4 Restart helper at a break
 
