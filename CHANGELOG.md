@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.5 (2026-11-22)
+- **Backups kept to the newest five** (plan change; G3.9 added, open). Every settings write leaves a backup that was never removed: seen in the overnight stress test, 56 next to one file. No invariant and no Part 0 rule changes.
+
 ## Plan 1.4 (2026-11-22)
 - **Exit and resume only with a transcript** (plan change; G15.1, still open, gets one sentence). A session that never took a turn has no conversation to resume: seen in the overnight stress test, where two such sessions ended after a restore that also dropped a `--plugin-dir` flag. No invariant and no Part 0 rule changes.
 
