@@ -19,6 +19,8 @@
 - **Two open codons from the overnight stress test** (plan change; G9.7 and G12.7 added, both open). G9.7: the checkup names an older Pit Stop install that wins over a newer one in another scope. G12.7: `setup.py --undo` puts back what setup changed. No invariant and no Part 0 rule changes.
 
 ## Unreleased
+- **A hand-run `optimize.py --apply` keeps three backups** (built: G3.9). Daily tuning and setup already kept the newest three copies of a settings file. The hand-run path did not, and 55 writes in the overnight stress test left 56. PROMISES.json row P6 is corrected: it first said Pit Stop never removes backups, which was wrong.
+- README: the Window row says Claude Code asks to compact a little before the context reaches the window, with the one measurement seen (built: G1.16, row P7). It said 'at once' above it.
 - README: a "Staying up to date" section. It says how Pit Stop is updated (Claude Code's auto-update for its marketplace, which `/pit-stop setup` switches on from 0.5.2, and the fleet helper's `plugin_updates`). It also gives the two commands that update an older install once, and says that `/pit-stop setup`, typed after them, switches auto-update on.
 
 ## 0.6.1 (2026-11-20)

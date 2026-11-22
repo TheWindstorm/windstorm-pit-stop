@@ -3079,3 +3079,39 @@ def test_G8_9_needs_you_counts_a_herdr_pane_as_a_pane(tmp_path, monkeypatch):
     assert "tmux pane" not in d["stuck"][0][3]
     d = ny.collect([_s("NoPane", version="2.1.319", now=now)], "2.1.322", now, panes=tm, herdr={})
     assert "not in a tmux pane or a Herdr pane" in d["stuck"][0][3]
+
+
+def test_G3_9_optimize_apply_keeps_three_backups(tmp_path, monkeypatch):
+    import glob
+    pc, op, proj = _history(tmp_path, monkeypatch)
+    sdir = os.path.join(proj, ".claude")
+    os.makedirs(sdir)
+    s = os.path.join(sdir, "settings.local.json")
+    with open(s, "w") as f:
+        json.dump({"env": {"KEEP_ME": "1"}}, f)
+    for i in range(5):
+        open(f"{s}.bak-pitstop-2026010{i}T000000Z", "w").write("old")
+    other = s + ".old"                     # a file whose name starts with the settings file's name
+    open(other, "w").write("x")
+    open(other + ".bak-pitstop-20260101T000000Z", "w").write("x")
+    monkeypatch.setattr(sys, "argv", ["optimize.py", "--project", proj, "--apply"])
+    assert op.main() == 0
+    kept = sorted(glob.glob(glob.escape(s) + ".bak-pitstop-*"))
+    assert len(kept) == 3                                            # 5 old + 1 new: the 3 oldest went
+    assert kept[0].endswith("20260103T000000Z") and kept[1].endswith("20260104T000000Z")
+    assert os.path.exists(other + ".bak-pitstop-20260101T000000Z")    # another file's copy is never touched
+    with open(s) as f:
+        assert json.load(f)["env"]["KEEP_ME"] == "1"
+
+
+def test_G1_16_readme_says_claude_code_asks_before_the_window():
+    with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as f:
+        rows = [l for l in f if l.startswith("| **Window** |")]
+    assert len(rows) == 1
+    row = rows[0]
+    assert "a little before the context reaches it" in row
+    assert "seen once" in row
+    assert "at once" not in row
+    with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as f:
+        after = [l for l in f if l.startswith("So a session set to ")]
+    assert len(after) == 1 and "asks a little before" in after[0] and "a little past" in after[0] and "never past the ceiling" in after[0]
