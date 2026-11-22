@@ -106,6 +106,20 @@
    "issue": 44,
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P8",
+   "seen": "2026-11-22, in that stress test, on a Linux laptop: a sudden reset while a session ran a 90-second Bash loop. The transcript ended on that tool_use with no result; on resume Claude Code showed 'No result recorded for 1 call' and 'Interrupted' and waited at an empty prompt, and Pit Stop's PreCompact hook still read the session as mid-task (exit 2), so its compactions were held until a person typed.",
+   "promise": "A tool call with no result, made before the session's latest resume, counts as a break; a fresh start, /clear or a compaction never turns a running tool call into one. Seen on a real machine before the release that carries it is tagged.",
+   "codon": "G1.17",
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "test_G1_17_a_tool_call_cut_off_by_a_restart_is_a_break",
+   "proven": "",
+   "issue": 47,
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

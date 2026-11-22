@@ -256,6 +256,28 @@ def clear_hold(session):
         pass
 
 
+def parse_time(s):
+    try:
+        return dt.datetime.fromisoformat(str(s).strip().replace("Z", "+00:00")).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def cut_by_restart(session, last):
+    """G1.17: the newest entry is a tool call with no result, made before this session was last resumed
+    (the SessionStart hook's stamp): the restart cut it off and the session now waits at a break."""
+    if not session:
+        return False
+    safe = "".join(ch for ch in str(session) if ch.isalnum() or ch == "-")[:64] or "unknown"
+    try:
+        with open(os.path.join(STATE, "started", safe)) as f:
+            resumed = parse_time(f.read())
+    except OSError:
+        return False
+    made = parse_time(last.get("timestamp"))
+    return resumed is not None and made is not None and made < resumed
+
+
 def decide(payload):
     trigger = payload.get("trigger", "?")
     if trigger != "auto":
@@ -276,6 +298,8 @@ def decide(payload):
         why = "mid-action:tool-result" if mid else "break:new-prompt"
     elif "tool_use" in k:
         mid, why = True, "mid-action:tool-use"
+        if cut_by_restart(payload.get("session_id"), last):
+            mid, why = False, "break:cut-by-restart"
     elif "text" in k:
         mid, why = False, "break:turn-ended"
     else:

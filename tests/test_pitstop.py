@@ -3115,3 +3115,25 @@ def test_G1_16_readme_says_claude_code_asks_before_the_window():
     with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as f:
         after = [l for l in f if l.startswith("So a session set to ")]
     assert len(after) == 1 and "asks a little before" in after[0] and "a little past" in after[0] and "never past the ceiling" in after[0]
+
+
+def test_G1_17_a_tool_call_cut_off_by_a_restart_is_a_break(tmp_path):
+    """Built from the real transcript of a sudden reset in the middle of a Bash call (fixture, text removed)."""
+    fx = os.path.join(ROOT, "tests", "fixtures", "cut_by_restart.jsonl")
+    started = tmp_path / "cfg" / "pit-stop" / "started"
+    pay = {"trigger": "auto", "transcript_path": fx, "session_id": "cut-1"}
+    assert run_hook(pay, tmp_path)[0] == 2                          # no resume stamp: still mid-task
+    for source in ("startup", "clear", "compact"):                  # only a resume stamps
+        _run("session_start.py", {"source": source, "session_id": "cut-1", "cwd": str(tmp_path)}, tmp_path)
+        assert not (started / "cut-1").exists(), source
+        assert run_hook(pay, tmp_path)[0] == 2, source
+    code, out, _ = _run("session_start.py", {"source": "resume", "session_id": "cut-1", "cwd": str(tmp_path)}, tmp_path)
+    assert code == 0 and out == "" and (started / "cut-1").exists()
+    code, out = run_hook(pay, tmp_path)                             # the call is older than the resume: a break
+    assert code == 0 and out.startswith("Pit Stop notes") and "middle of a task" not in out
+    log = (tmp_path / "cfg" / "pit-stop" / "precompact.log").read_text()
+    assert "break:cut-by-restart" in log
+    (started / "cut-1").write_text("2026-11-22T12:25:00Z\n")       # resumed BEFORE the call: it may still run
+    assert run_hook(pay, tmp_path)[0] == 2
+    (started / "cut-1").write_text("not a time\n")
+    assert run_hook(pay, tmp_path)[0] == 2
