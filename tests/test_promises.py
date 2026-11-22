@@ -2,7 +2,7 @@
 
 A lesson is a gate, not a note: these tests refuse a version while a promise due in it is not built, and the
 version after it until the promise was seen to work on a real machine. Copied from Windstorm Tardigrade's class
-Promises (Skills Boss SKILL STANDARD, 2026-11-22), with the plan's codon form and plugin.json's version."""
+Promises (the Windstorm skill standard, 2026-11-22), with the plan's codon form and plugin.json's version."""
 import json
 import os
 import re
