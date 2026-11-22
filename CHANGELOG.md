@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.10 (2026-11-22)
+- **G1.17 is a guard, not a fix** (plan change; G1.17 stays built). Plan 1.8 and the Unreleased line said the hook held a resumed session's compactions after a sudden reset. That was inferred, not seen: the hold came from running the hook by hand on a copy of the transcript, and on Claude Code 2.1.330 a resumed session that waited three hours at an empty prompt was never asked to compact. The code stays: it is small and tested, and it cannot turn a running call into a break. No invariant and no Part 0 rule changes.
+
 ## Plan 1.9 (2026-11-22)
 - **Catalog entries over HTTPS, pinned to a release** (plan change; G7.6, G7.7 and G7.8 added, all open). On Claude Code 2.1.280 with no GitHub key, the catalog's `github` entry for Windstorm Pit Board went over SSH and failed, while an `https` URL entry with the same ref and sha installed on 2.1.280 and 2.1.330. Pit Stop's own entry, `./`, gave a fresh install main's code labelled 0.6.1. Changing that entry changes the source of installs people already have, so G7.8 asks that they move to the pinned release with the README's update lines. No invariant and no Part 0 rule changes.
 
@@ -25,7 +28,7 @@
 - **Two open codons from the overnight stress test** (plan change; G9.7 and G12.7 added, both open). G9.7: the checkup names an older Pit Stop install that wins over a newer one in another scope. G12.7: `setup.py --undo` puts back what setup changed. No invariant and no Part 0 rule changes.
 
 ## Unreleased
-- **A tool call cut off by a restart is a break** (built: G1.17, row P8). After a reset in the middle of a tool call, a resumed session waits at an empty prompt, but its transcript ends on a call with no result, and the PreCompact hook held its compactions until a person typed. The SessionStart hook now stamps a resume, and a call with no result made before that stamp counts as a break. A fresh start, /clear and a compaction stamp nothing. Hooks: same generation (2); `hook_files_sha256` re-recorded.
+- **A tool call cut off by a restart counts as a break** (built: G1.17, row P8; a guard). After a reset in the middle of a tool call, a resumed session waits at an empty prompt, but its transcript ends on a call with no result, which the PreCompact hook would read as mid-task. That was seen only with the hook run by hand: Claude Code 2.1.330 did not ask to compact such a session in three hours idle. The SessionStart hook now stamps a resume, and a call with no result made before that stamp counts as a break. A fresh start, /clear and a compaction stamp nothing. Hooks: same generation (2); `hook_files_sha256` re-recorded.
 - **A hand-run `optimize.py --apply` keeps three backups** (built: G3.9). Daily tuning and setup already kept the newest three copies of a settings file. The hand-run path did not, and 55 writes in the overnight stress test left 56. PROMISES.json row P6 is corrected: it first said Pit Stop never removes backups, which was wrong.
 - README: the Window row says Claude Code asks to compact a little before the context reaches the window, with the one measurement seen (built: G1.16, row P7). It said 'at once' above it.
 - README: a "Staying up to date" section. It says how Pit Stop is updated (Claude Code's auto-update for its marketplace, which `/pit-stop setup` switches on from 0.5.2, and the fleet helper's `plugin_updates`). It also gives the two commands that update an older install once, and says that `/pit-stop setup`, typed after them, switches auto-update on.
