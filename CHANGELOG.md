@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.7 (2026-11-22)
+- **The README's window sentence** (plan change; G1.16 added, open). The README said that above the window Claude Code wants to compact at once. In the overnight stress test it asked a little before the context reached the window. No invariant and no Part 0 rule changes.
+
 ## Plan 1.6 (2026-11-22)
 - **G3.9 corrected** (plan change; still open). Plan 1.5 said settings backups were never removed. That was wrong. `prune_backups()` keeps the newest three (G2.11), and daily tuning and setup run it. Only a hand-run `optimize.py --apply` does not, and that is where 55 writes left 56 copies. G3.9 now asks that path to prune too, with three as everywhere else, not five. No invariant and no Part 0 rule changes.
 
