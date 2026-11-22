@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.12 (2026-11-22)
+- **A proof is a test that ran** (plan change; G19 added, G19.1 to G19.4 open). A real test was made unreachable four ways in a scratch branch. CI's invariant check (INV9) caught a test nested after a `return`, a skipped one and a renamed one, but not one hidden by a later definition with the same name. The PROMISES gate and the plan check found tests by name in the text, and the plan check did not run in CI. No invariant and no Part 0 rule changes.
+
 ## Plan 1.11 (2026-11-22)
 - **After an update, the files match the registry** (plan change; G7.9 added, open; G7.8 gets one clause). On Claude Code 2.1.280, an update from 0.1.4 to 0.6.1 reused a stale cache folder labelled 0.6.1 from another commit: the registry named the new commit, the folder held the old files. A fresh install overwrote such a folder. Every update step Pit Stop runs now checks the folder against the commit. No invariant and no Part 0 rule changes.
 
