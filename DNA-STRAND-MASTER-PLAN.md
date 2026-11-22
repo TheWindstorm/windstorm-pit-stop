@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.6 · 2026-11-22 · The Windstorm**
+**Plan version 1.7 · 2026-11-22 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -112,6 +112,8 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 **G1.14 Missing plugin folder lets Claude Code go on.** With `CLAUDE_PLUGIN_ROOT` set to a folder that does not exist, each of the three hook commands run by `sh -c` returns exit 0 and empty stdout. The old command without `[ -f "$F" ] || exit 0` exits 2 there. Needs: G1.12. Proof: `test_G1_14_a_hook_whose_plugin_folder_is_gone_lets_claude_code_go_on`.
 
 **G1.15 Instant summary is not mid-task.** `scripts/optimize.py` `analyze()` counts a `compact_boundary` whose `compactMetadata.precomputed` is true as `instant`, and one without it whose newest earlier prompt, reply, tool call or result was a tool call or result as `mid_task` (Part 2, Compaction kind): for one of each, `compactions_when` gives `(instant, mid_task) == (1, 1)`. Needs: G2.2. Proof: `test_G1_15_a_summary_swapped_in_instantly_is_not_counted_as_mid_task`.
+
+**G1.16 The README says Claude Code asks before the window (open).** The Window row of the table in `README.md` says Claude Code asks to compact a little before the context reaches the window, gives the one measurement seen (2026-11-22, Claude Code 2.1.330: 108K with a 23K result pending, at a 150K window) as seen once, not promised, and does not say `at once`. Seen 2026-11-22: it said "Above it, Claude Code wants to compact at once". Proof: `test_G1_16_readme_says_claude_code_asks_before_the_window`.
 
 ### G2 Refresh point tuned per folder
 `/pit-stop optimize` and a daily background tune read a folder's own session history and set its idle point, window and hook ceiling, moving one step at a time and checking each move before the next.
