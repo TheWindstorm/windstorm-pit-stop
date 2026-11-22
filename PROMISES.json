@@ -176,6 +176,48 @@
    "issue": 58,
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P13",
+   "seen": "2026-11-22, a scratch branch: a real test was made unreachable four ways. The PROMISES gate and the plan check found tests by name in the text, and the PROMISES gate looked at a row only from its due version (the plan check not running in CI is row P15). The test used as the specimen runs and passes on main.",
+   "promise": "A codon's proof and a row's test count only if the runner collected and PASSED them in a whole-suite run, at any version; a partial run says so and checks nothing; there is no switch to turn the check off. Shown by breaking a real test in a scratch branch and seeing the run fail, before the release that carries it is tagged.",
+   "codon": "G19.1",
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": "",
+   "issue": 62
+  },
+  {
+   "id": "P14",
+   "seen": "2026-11-22, a scratch branch: a real test hidden by a later definition with the same name never ran, and every gate passed, including CI's invariant check (INV9), which caught the other three ways of making a test unreachable.",
+   "promise": "No test file defines the same top-level name twice, so no test can be hidden by another; a hidden test fails the run. Shown by breaking a real test in a scratch branch, before the release that carries it is tagged.",
+   "codon": "G19.2",
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": "",
+   "issue": 62
+  },
+  {
+   "id": "P15",
+   "seen": "2026-11-22: the plan check (codon_check.py --strict --proofs tests), which ties each codon to its proof, ran only by hand; .github/workflows/tests.yml ran only pytest, so a codon whose proof was missing could merge.",
+   "promise": "Every gate that ties codons or rows to tests runs in CI on every pull request, and a pull request cannot merge while one of them fails. Seen in CI's checks on a pull request before the release that carries it is tagged.",
+   "codon": "G19.4",
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "",
+   "proven": "",
+   "issue": 62,
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
