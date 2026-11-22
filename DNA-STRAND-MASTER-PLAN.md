@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.8 · 2026-11-22 · The Windstorm**
+**Plan version 1.9 · 2026-11-22 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -342,6 +342,10 @@ Pit Stop switches on Claude Code's own updates for the marketplace it came from,
 **G7.4 A 300-second budget.** `update_plugins()` in `scripts/restart_at_break.py` gives each command `min(180, left)` seconds of `UPDATE_BUDGET = 300`, and stops with a log line containing `time budget used` when under 15 s are left. With commands that take 200 s each, the timeouts given are `[180, 100]` and only two commands run. Needs: G7.3. Proof: `test_G7_4_update_plugins_never_runs_past_its_time_budget`.
 
 **G7.5 The update line, once per version.** `hooks/stop_pit_stop.py`, when the newest folder in `~/.local/share/claude/versions` is newer than the session's version (`pitstop_common.session_version`: the `~/.claude/sessions/*.json` row whose `sessionId` is the hook's `session_id`, with a live `pid`), prints JSON whose `systemMessage` names both versions and `/restart`, and exits 0; once per version per session (stamp `pit-stop/nudged/<session>`). It prints nothing for a session on the newest version, with `"nudge": false` in `pit-stop/config.json`, or when `pit-stop/restart/restart.log` changed in the last hour. Proof: `test_G7_5_stop_hook_update_line_once_per_version`.
+
+**G7.6 Every catalog entry installs with no key (open).** Each plugin in `.claude-plugin/marketplace.json` has source `url` with an `https://` git URL, a `ref` and a 40-hex `sha`; no `github` or `git@` source. The README names the oldest Claude Code version its install lines were seen to work on with no GitHub key. Seen 2026-11-22: Claude Code 2.1.280 cloned a `github` entry over SSH and failed. Proof: `test_G7_6_every_catalog_entry_installs_over_https_with_no_key`.
+
+**G7.7 The catalog installs a release, not main (open).** Pit Stop's own entry pins `ref` to a tag `v<x.y.z>` and `sha` to that tag's commit, not `./`. Seen 2026-11-22: a fresh install took main's unreleased code under the label 0.6.1. Proof: `test_G7_7_pit_stops_catalog_entry_pins_a_release_tag`.
 
 ### G8 Needs-you list
 
