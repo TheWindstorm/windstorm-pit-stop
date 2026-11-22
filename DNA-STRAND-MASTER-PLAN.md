@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.2 · 2026-11-22 · The Windstorm**
+**Plan version 1.3 · 2026-11-22 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -163,6 +163,8 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 **G2.23 The fleet tune needs tuning on.** `restart_at_break.main()` calls `start_tune` only when `"auto_tune": true` is in `config.json`, `fleet_tune` in `restart.json` is not false (default true), and the run is live (`LIVE`); a dry run starts nothing. Needs: G2.22. Proof: `test_G2_23_fleet_tune_runs_only_when_tuning_is_on`.
 
 **G2.24 Cache age follows the last model call.** `restart_at_break.ctx_and_idle(s)` also records the age of the last model call (an assistant row with usage, or a compaction); `call_age_of(s, idle)` returns `max(call_age, idle)`, or `idle` if none was seen. A `/reload-plugins` row 2500 s ago after a call 5 h ago: idle about 2500 s, call age 5 h. `cache_warm(age, cfg)` is `0 <= age <= cache_ttl * 0.8` (`cache_ttl` `3600`). `plan()` on a behind 300K session gives `restart` with `cache cold` (with call age set to idle, warm: `compact`); `reload_due` True, at idle 30 False. Needs: G2.18. Proof: `test_G2_24_cache_age_follows_the_last_model_call_not_the_last_dated_row`.
+
+**G2.25 The context limit from the model (open).** `recommend()` in `scripts/optimize.py`, with no `--context-limit`, takes the limit from the newest model in the folder's history (a `[1m]` id, or one whose context is 1M) before guessing from `max_context`: a fresh folder on a 1M model starts at window 500K and idle point 200K. The why line names where the limit came from. Seen 2026-11-22: a 1M Haiku folder got 150K and "the right one for a 200K context". Proof: `test_G2_25_the_context_limit_comes_from_the_model`.
 
 ### G3 Shared readers
 One shared module, `scripts/pitstop_common.py`, plus the hook generation file, reads Claude Code's transcripts, session listings, plugin records and Pit Stop's own state the same way for every part of the plugin.
