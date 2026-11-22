@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.6 (2026-11-22)
+- **G3.9 corrected** (plan change; still open). Plan 1.5 said settings backups were never removed. That was wrong. `prune_backups()` keeps the newest three (G2.11), and daily tuning and setup run it. Only a hand-run `optimize.py --apply` does not, and that is where 55 writes left 56 copies. G3.9 now asks that path to prune too, with three as everywhere else, not five. No invariant and no Part 0 rule changes.
+
 ## Plan 1.5 (2026-11-22)
 - **Backups kept to the newest five** (plan change; G3.9 added, open). Every settings write leaves a backup that was never removed: seen in the overnight stress test, 56 next to one file. No invariant and no Part 0 rule changes.
 
