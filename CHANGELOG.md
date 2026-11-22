@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.8 (2026-11-22)
+- **A tool call cut off by a restart is a break** (plan change; G1.17 added, open). After a sudden reset in the middle of a tool call, the transcript ends on a `tool_use` with no result, and the hook read the waiting session as mid-task. No invariant and no Part 0 rule changes.
+
 ## Plan 1.7 (2026-11-22)
 - **The README's window sentence** (plan change; G1.16 added, open). The README said that above the window Claude Code wants to compact at once. In the overnight stress test it asked a little before the context reached the window. No invariant and no Part 0 rule changes.
 
