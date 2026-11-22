@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.3 · 2026-11-22 · The Windstorm**
+**Plan version 1.4 · 2026-11-22 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -441,7 +441,7 @@ An agent in any harness, told "add Windstorm Pit Stop", can do it from one file.
 
 Sessions on Windows, WSL and non-native installs also move to a new Claude Code at a break.
 
-**G15.1 Exit and resume (open).** Where `/restart` is not available, `scripts/restart_at_break.py` types `/exit` into an idle session at a break, waits until its process has ended, then starts `claude --resume <session id>` in the same tmux pane with the session's own launch arguments (their source is not named yet: open question 5). Proof: `test_G15_1_exit_and_resume_keeps_the_session_and_its_arguments`.
+**G15.1 Exit and resume (open).** Where `/restart` is not available, `scripts/restart_at_break.py` types `/exit` into an idle session at a break, waits until its process has ended, then starts `claude --resume <session id>` in the same tmux pane with the session's own launch arguments (their source is not named yet: open question 5). It exits only a session whose transcript exists, since `--resume` of one that never took a turn finds no conversation and ends; seen 2026-11-22, when a restore also dropped a `--plugin-dir` flag. Proof: `test_G15_1_exit_and_resume_keeps_the_session_and_its_arguments`.
 
 **G15.2 Nothing resumed twice (open).** The helper resumes a session id only when no running process holds it. Needs: G15.1. Proof: `test_G15_2_never_resumes_a_session_another_process_holds`.
 

@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.4 (2026-11-22)
+- **Exit and resume only with a transcript** (plan change; G15.1, still open, gets one sentence). A session that never took a turn has no conversation to resume: seen in the overnight stress test, where two such sessions ended after a restore that also dropped a `--plugin-dir` flag. No invariant and no Part 0 rule changes.
+
 ## Plan 1.3 (2026-11-22)
 - **The tuner's context limit from the model** (plan change; G2.25 added, open). On a fresh folder the tuner guessed a 200K context for a model that has 1M, and said so. No invariant and no Part 0 rule changes.
 
