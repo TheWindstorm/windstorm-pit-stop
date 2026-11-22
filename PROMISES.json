@@ -109,14 +109,14 @@
   },
   {
    "id": "P8",
-   "seen": "2026-11-22, in that stress test, on a Linux laptop: a sudden reset while a session ran a 90-second Bash loop. The transcript ended on that tool_use with no result; on resume Claude Code showed 'No result recorded for 1 call' and 'Interrupted' and waited at an empty prompt, and Pit Stop's PreCompact hook still read the session as mid-task (exit 2), so its compactions were held until a person typed.",
-   "promise": "A tool call with no result, made before the session's latest resume, counts as a break; a fresh start, /clear or a compaction never turns a running tool call into one. Seen on a real machine before the release that carries it is tagged.",
+   "seen": "2026-11-22, in that stress test, on a Linux laptop: a sudden reset cut a session in the middle of a 90-second Bash loop. The transcript ends on that tool_use with no result; on resume Claude Code shows 'No result recorded for 1 call' and 'Interrupted' and waits at an empty prompt. Pit Stop 0.6.1's PreCompact hook, run by hand on a copy of that transcript, answers hold (exit 2). Inferred and NOT seen: that Claude Code asks to compact such a session before a person types. On a macOS test machine on Claude Code 2.1.330, a session cut in the middle of a tool call by a clean reboot (not a sudden reset), leaving the same transcript shape, was resumed and waited three hours idle at an empty prompt, at 109K tokens with a 150K window and a 100K idle minimum, and was never asked.",
+   "promise": "A tool call with no result, made before the session's latest resume, counts as a break; a fresh start, /clear or a compaction never turns a running tool call into one. A guard for a case the transcript makes possible, not seen to occur on the Claude Code version tested.",
    "codon": "G1.17",
    "owner": "maintainer",
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G1_17_a_tool_call_cut_off_by_a_restart_is_a_break",
-   "proven": "",
+   "proven": "Not seen on a real machine: on Claude Code 2.1.330 a resumed session cut in a tool call was not asked to compact in three hours idle (2026-11-22), so the hook was never called. What would count: a precompact.log line 'ALLOW break:cut-by-restart' from a real session, on any Claude Code version. This written reason does not hold 0.6.2 (accepted by the maintainers' reviewer, 2026-11-22).",
    "issue": 47,
    "moved_why": "",
    "moved_by_person": ""
@@ -137,7 +137,7 @@
   },
   {
    "id": "P10",
-   "seen": "2026-11-22: Pit Stop's catalog entry is './', so a fresh install on Claude Code 2.1.280 took main's commit 634d860d under the label 0.6.1, while the v0.6.1 tag is 36f536a1.",
+   "seen": "2026-11-22: Pit Stop's catalog entry is './', so a fresh install on Claude Code 2.1.280 took main's commit 634d860d under the label 0.6.1, while the v0.6.1 tag is 36f536a1. A './' entry is copied to the cache, and the hooks run from the cache, never from the catalog clone, so a catalog refresh alone changes no running code (seen on Claude Code 2.1.280 and 2.1.330, on Linux and macOS).",
    "promise": "The catalog installs a released, tagged commit of Pit Stop, never main; each release is the tag first, then the pin on main, and the tests fail while a tag waits for its pin. Seen in a clean account before the release that carries it is tagged.",
    "codon": "G7.7",
    "issue": 52,
