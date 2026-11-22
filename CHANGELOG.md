@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.2 (2026-11-22)
+- **Two open codons from the overnight stress test** (plan change; G9.7 and G12.7 added, both open). G9.7: the checkup names an older Pit Stop install that wins over a newer one in another scope. G12.7: `setup.py --undo` puts back what setup changed. No invariant and no Part 0 rule changes.
+
 ## Unreleased
 - README: a "Staying up to date" section. It says how Pit Stop is updated (Claude Code's auto-update for its marketplace, which `/pit-stop setup` switches on from 0.5.2, and the fleet helper's `plugin_updates`). It also gives the two commands that update an older install once, and says that `/pit-stop setup`, typed after them, switches auto-update on.
 
