@@ -137,7 +137,7 @@
   },
   {
    "id": "P10",
-   "seen": "2026-11-22: Pit Stop's catalog entry is './', so a fresh install on Claude Code 2.1.280 took main's commit 634d860d under the label 0.6.1, while the v0.6.1 tag is 36f536a1. A './' entry is copied to the cache, and the hooks run from the cache, never from the catalog clone, so a catalog refresh alone changes no running code (seen on Claude Code 2.1.280 and 2.1.330, on Linux and macOS).",
+   "seen": "2026-11-22: Pit Stop's catalog entry is './', so a fresh install on Claude Code 2.1.280 took main's commit 634d860d under the label 0.6.1, while the v0.6.1 tag is 36f536a1. A './' entry is copied to the cache, and the hooks run from the cache, never from the catalog clone, so a catalog refresh alone changes no running code (seen on Claude Code 2.1.280 and 2.1.330, on Linux and macOS). On Claude Code 2.1.280, with an orphaned cache folder labelled 0.6.1 from another commit present: a fresh install overwrote it, but an update from 0.1.4 to 0.6.1 reused it, so the registry named the new commit while the folder held the old commit's files (2026-11-22, a clean test account).",
    "promise": "The catalog installs a released, tagged commit of Pit Stop, never main; each release is the tag first, then the pin on main, and the tests fail while a tag waits for its pin. Seen in a clean account before the release that carries it is tagged.",
    "codon": "G7.7",
    "issue": 52,
@@ -160,6 +160,20 @@
    "ship_in": "0.6.2",
    "test": "",
    "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
+  },
+  {
+   "id": "P12",
+   "seen": "2026-11-22, a clean test account, Claude Code 2.1.280: with a stale cache folder labelled 0.6.1 from another commit present, 'claude plugin update' from 0.1.4 to 0.6.1 printed 'updated from 0.1.4 to 0.6.1', and installed_plugins.json named the new commit, but the folder held the old commit's files byte for byte. A fresh install overwrote such a folder. 2.1.330 not yet tested.",
+   "promise": "Every plugin update Pit Stop runs compares the cache folder's files with the commit the registry names. When they differ, Pit Stop reports it and stops there: it does not repair another program's cache by itself, and the line it prints gives the person the two commands that put it right (uninstall, then install, of that plugin at that scope). Seen on a real machine before the release that carries it is tagged.",
+   "codon": "G7.9",
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "",
+   "proven": "",
+   "issue": 58,
    "moved_why": "",
    "moved_by_person": ""
   }
