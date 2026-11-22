@@ -176,6 +176,34 @@
    "issue": 58,
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P13",
+   "seen": "2026-11-22, a scratch branch: a real test was made unreachable four ways. The PROMISES gate and the plan check found tests by name in the text, the PROMISES gate looked at a row only from its due version, and the plan check did not run in CI. The test used as the specimen runs and passes on main.",
+   "promise": "A codon or a PROMISES row counts as proven only by a test that the runner collected and PASSED in a whole-suite run, at any version; a partial run says so and checks nothing; there is no switch to turn the check off. Shown by breaking a real test in a scratch branch and seeing the run fail, before the release that carries it is tagged.",
+   "codon": "G19.1",
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": "",
+   "issue": 62
+  },
+  {
+   "id": "P14",
+   "seen": "2026-11-22, a scratch branch: a real test hidden by a later definition with the same name never ran, and every gate passed, including CI's invariant check (INV9), which caught the other three ways of making a test unreachable.",
+   "promise": "No test file defines the same top-level name twice, so no test can be hidden by another; a hidden test fails the run. Shown by breaking a real test in a scratch branch, before the release that carries it is tagged.",
+   "codon": "G19.2",
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": "",
+   "issue": 62
   }
  ],
  "declined": []
