@@ -1,0 +1,56 @@
+{
+ "about": "What real machines, and the people using them, showed must change in Windstorm Pit Stop, and the version each change is due in. A lesson here is a gate, not a note: tests/test_promises.py refuses a version while a row due in it is not built, and refuses the version after it until the row says where it was proven on a real machine. Copied from Windstorm Tardigrade's PROMISES.json (the Windstorm skill standard, 2026-11-22).",
+ "how_to_use": [
+  "A new lesson gets a row the day it is learned: what was seen, the promise, a codon in DNA-STRAND-MASTER-PLAN.md, the version it is due in, and a tracking issue.",
+  "When it is built: put the name of its test in 'test'. The test must exist and be the codon's Proof in the plan.",
+  "When it has been seen to work on a real machine: say which machine, which version and when in 'proven'.",
+  "'ship_in' moves only with a reason in 'moved_why'. A row whose owner is 'person' was seen by the person the plugin is for, on their own machine: its date moves only by their word, restated in 'moved_by_person'.",
+  "A row is never deleted. A promise that turns out wrong is closed by a row that says why.",
+  "A lesson that was heard and not taken goes under 'declined' with the reason, so that nothing is dropped without a word."
+ ],
+ "rows": [
+  {
+   "id": "P1",
+   "seen": "2026-11-22, in an overnight stress test on a Linux laptop and an Intel Mac: a project-scope Pit Stop 0.6.1 in a test folder loaded the user-scope 0.1.4 instead; /hooks showed only 0.1.4's PreCompact hook, and nothing told the person.",
+   "promise": "The checkup names an older Pit Stop install that wins over a newer one in another scope, and the one command that removes or updates the older.",
+   "codon": "G9.7",
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "",
+   "proven": "",
+   "issue": 28,
+   "moved_why": "",
+   "moved_by_person": ""
+  },
+  {
+   "id": "P2",
+   "seen": "2026-11-22: two machines of ours have run Pit Stop 0.1.4 since 2026-11-10 while the release is 0.6.1. 0.1.4 predates setup's switch-on of marketplace auto-update (0.5.2), Claude Code leaves auto-update off for marketplaces other than Anthropic's (unset on both), and neither runs the fleet helper, so nothing moved them.",
+   "promise": "From the release that builds G13.1, every install tells its person once that a newer Pit Stop exists, with the command. Installs from before that are told by the README's 'Staying up to date' section; the two machines are updated with Claude Code's own plugin commands in the second wave of that test (2026-11-22), which is this row's proof.",
+   "codon": "G13.1",
+   "owner": "maintainer",
+   "first_ship_in": "0.7.0",
+   "ship_in": "0.7.0",
+   "test": "",
+   "proven": "",
+   "issue": 29,
+   "moved_why": "",
+   "moved_by_person": ""
+  },
+  {
+   "id": "P3",
+   "seen": "2026-11-22, in that stress test, in a clean test account on a Mac: after setup --apply and claude plugin uninstall, autoUpdate true on the marketplace entry, pit-stop/config.json (auto_tune true), released.json, checkup/ and the cache folder all stayed.",
+   "promise": "setup.py --undo puts back what --apply and --fleet changed and names the history files it leaves.",
+   "codon": "G12.7",
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "",
+   "proven": "",
+   "issue": 30,
+   "moved_why": "",
+   "moved_by_person": ""
+  }
+ ],
+ "declined": []
+}
