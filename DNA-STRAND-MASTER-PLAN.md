@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.10 · 2026-11-22 · The Windstorm**
+**Plan version 1.11 · 2026-11-22 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -347,7 +347,9 @@ Pit Stop switches on Claude Code's own updates for the marketplace it came from,
 
 **G7.7 The catalog installs a release, not main (open).** Pit Stop's own entry pins `ref` to a tag `v<x.y.z>` and `sha` to that tag's commit, not `./`. Once the tag `v<version in .claude-plugin/plugin.json>` exists, the entry must pin it: each release is the tag first, then the pin on main, and the test fails while a tag waits for its pin. Seen 2026-11-22: a fresh install took main's code labelled 0.6.1. Proof: `test_G7_7_pit_stops_catalog_entry_pins_a_release_tag`.
 
-**G7.8 An install from `./` moves to the pinned release (open).** On a test machine, installs of 0.1.4 and 0.6.1 made from the `./` entry reach the pinned release with the README's own update lines, with no reinstall, and keep `pit-stop/config.json` and the settings Pit Stop wrote. Needs: G7.7, G16.1. Proof: `test_G7_8_conformance_kit_sees_a_dot_install_move_to_the_pinned_release`.
+**G7.8 An install from `./` moves to the pinned release (open).** On a test machine, installs of 0.1.4 and 0.6.1 made from the `./` entry reach the pinned release with the README's own update lines, with no reinstall, keep `pit-stop/config.json` and the settings Pit Stop wrote, and the cache folder's files match the commit the registry names. Needs: G7.7, G16.1. Proof: `test_G7_8_conformance_kit_sees_a_dot_install_move_to_the_pinned_release`.
+
+**G7.9 After an update, the files match the registry (open).** After every plugin update Pit Stop runs (`update_plugins()` in `scripts/restart_at_break.py`), it compares the files in the cache folder that `plugins/installed_plugins.json` names with the commit that row names, read from the marketplace clone, and when they differ logs and notifies `cache folder <path> does not hold <sha>`. Seen 2026-11-22: Claude Code 2.1.280 updated into a stale folder of the same version from another commit. Proof: `test_G7_9_update_checks_the_cache_folder_against_the_registry_commit`.
 
 ### G8 Needs-you list
 

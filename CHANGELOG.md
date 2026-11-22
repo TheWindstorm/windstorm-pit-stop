@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.11 (2026-11-22)
+- **After an update, the files match the registry** (plan change; G7.9 added, open; G7.8 gets one clause). On Claude Code 2.1.280, an update from 0.1.4 to 0.6.1 reused a stale cache folder labelled 0.6.1 from another commit: the registry named the new commit, the folder held the old files. A fresh install overwrote such a folder. Every update step Pit Stop runs now checks the folder against the commit. No invariant and no Part 0 rule changes.
+
 ## Plan 1.10 (2026-11-22)
 - **G1.17 is a guard, not a fix** (plan change; G1.17 stays built). Plan 1.8 and the Unreleased line said the hook held a resumed session's compactions after a sudden reset. That was inferred, not seen: the hold came from running the hook by hand on a copy of the transcript, and on Claude Code 2.1.330 a resumed session that waited three hours at an empty prompt was never asked to compact. The code stays: it is small and tested, and it cannot turn a running call into a break. No invariant and no Part 0 rule changes.
 
