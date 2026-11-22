@@ -78,6 +78,20 @@
    "issue": 37,
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P6",
+   "seen": "2026-11-22, in that stress test, on a Mac: the tuner's --apply ran 55 times on one test folder, across a reboot that landed during its writes, and left 56 settings.local.json.bak-pitstop-* files next to the file; Pit Stop never removed one. The file itself came back whole each time.",
+   "promise": "Each settings file keeps only its newest five Pit Stop backups, newest read from the time in the name; copies of another file with a longer name are never touched.",
+   "codon": "G3.9",
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "",
+   "proven": "",
+   "issue": 40,
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
