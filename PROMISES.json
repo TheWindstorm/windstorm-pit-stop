@@ -81,15 +81,29 @@
   },
   {
    "id": "P6",
-   "seen": "2026-11-22, in that stress test, on a Mac: the tuner's --apply ran 55 times on one test folder, across a reboot that landed during its writes, and left 56 settings.local.json.bak-pitstop-* files next to the file; Pit Stop never removed one. The file itself came back whole each time.",
-   "promise": "Each settings file keeps only its newest five Pit Stop backups, newest read from the time in the name; copies of another file with a longer name are never touched.",
+   "seen": "2026-11-22, in that stress test, on a Mac: the hand-run optimize.py --apply ran 55 times on one test folder, across a reboot that landed during its writes, and left 56 settings.local.json.bak-pitstop-* files. Daily tuning (autotune.py) and setup.py prune to the newest three after each write; the hand-run path did not. (This row first said Pit Stop never removes backups; that was wrong.) The file itself came back whole each time.",
+   "promise": "A hand-run optimize.py --apply keeps the newest three backups of the settings file, as daily tuning and setup do.",
    "codon": "G3.9",
    "owner": "maintainer",
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
-   "test": "",
+   "test": "test_G3_9_optimize_apply_keeps_three_backups",
    "proven": "",
    "issue": 40,
+   "moved_why": "",
+   "moved_by_person": ""
+  },
+  {
+   "id": "P7",
+   "seen": "2026-11-22, in that stress test, on a Mac, Claude Code 2.1.330, window 150K set by the tuner: Claude Code asked for an automatic compaction at 108,006 tokens with a file read of about 23K pending, before the context reached the window. The README said 'Above it, Claude Code wants to compact at once'.",
+   "promise": "The README says Claude Code asks to compact a little before the context reaches the window, gives that measurement as seen once, not as a promise, and never says 'at once'.",
+   "codon": "G1.16",
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "test_G1_16_readme_says_claude_code_asks_before_the_window",
+   "proven": "",
+   "issue": 44,
    "moved_why": "",
    "moved_by_person": ""
   }

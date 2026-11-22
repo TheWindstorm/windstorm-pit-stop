@@ -628,6 +628,7 @@ def main():
                   f"({lane['prompts']} prompts, {lane['compactions']} compactions, topic change {lane['topic_change']})")
     if a.apply:
         s, b, prof = apply(a.project, rec, m, lanes)
+        pc.prune_backups(s)   # as autotune.py and setup.py do: the newest three copies (G3.9)
         print(f"Applied: {s} (backup {b}); profile {prof}"
               + (f"; {len(lanes)} lane profile(s) in {pc.LANES}" if lanes else "")
               + ". Both points take effect at each session's next start (a restart counts); to move the window of a "
