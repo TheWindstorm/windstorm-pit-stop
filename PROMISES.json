@@ -137,7 +137,7 @@
   },
   {
    "id": "P10",
-   "seen": "2026-11-22: Pit Stop's catalog entry is './', so a fresh install on Claude Code 2.1.280 took main's commit 634d860d under the label 0.6.1, while the v0.6.1 tag is 36f536a1.",
+   "seen": "2026-11-22: Pit Stop's catalog entry is './', so a fresh install on Claude Code 2.1.280 took main's commit 634d860d under the label 0.6.1, while the v0.6.1 tag is 36f536a1. A './' entry is copied to the cache, and the hooks run from the cache, never from the catalog clone, so a catalog refresh alone changes no running code (seen on Claude Code 2.1.280 and 2.1.330, on Linux and macOS).",
    "promise": "The catalog installs a released, tagged commit of Pit Stop, never main; each release is the tag first, then the pin on main, and the tests fail while a tag waits for its pin. Seen in a clean account before the release that carries it is tagged.",
    "codon": "G7.7",
    "issue": 52,
