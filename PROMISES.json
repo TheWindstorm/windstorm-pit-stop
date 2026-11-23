@@ -213,7 +213,7 @@
    "owner": "maintainer",
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
-   "test": "",
+   "test": "test_G19_4_ci_runs_the_plan_check",
    "proven": "",
    "issue": 62,
    "moved_why": "",

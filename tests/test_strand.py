@@ -212,3 +212,158 @@ def test_INV10_wording():
         for phrase in BANNED:
             words = r"\s+".join(map(re.escape, phrase.split()))
             assert not re.search(r"\b" + words + r"\b", t, re.I), f"{os.path.relpath(p, ROOT)}: {phrase!r}"
+
+
+# G19.4: the plan's own form, checked here and in CI on every push and pull request (written in this
+# repository; the vague-word list stays the lane's hand check, not CI's). Each check takes the plan's text,
+# so the test can plant a bad copy and see it refused.
+ID = re.compile(r"(?<![\w.])(G\d+\.\d+|INV\d+)(?![\w])")
+WORD_CAP = 80
+
+
+def _sections(text):
+    """{'## heading': [(line number, line), ...]} for each level-2 part of the plan."""
+    out, current = {}, None
+    for n, line in enumerate(text.split("\n"), 1):
+        if line.startswith("## "):
+            current = line
+            out[current] = []
+        elif current:
+            out[current].append((n, line))
+    return out
+
+
+def _part(text, word):
+    return next((lines for head, lines in _sections(text).items() if word in head), [])
+
+
+def plan_form_problems(text, changelog):
+    problems = []
+    # 1. the version line
+    m = re.search(r"^\*\*Plan version (\d+\.\d+) · (\d{4}-\d{2}-\d{2}) · ", text, re.M)
+    if not m:
+        problems.append("no version line '**Plan version X.Y · YYYY-MM-DD · ...**'")
+    # 2, 3, 5. genes under Genes, codons of the right form under their own gene, numbers 1, 2, 3 with no gaps
+    genes, gene, codons, seen_genes = {}, None, [], []
+    for n, line in _part(text, "Genes"):
+        g = re.match(r"^### G(\d+) ", line)
+        if g:
+            gene = int(g.group(1))
+            if gene in genes:
+                problems.append(f"line {n}: gene G{gene} is named twice")
+            genes[gene] = []
+            seen_genes.append(gene)
+            continue
+        if re.match(r"^\*\*G\d", line):
+            c = CODON.match(line)
+            if not c:
+                problems.append(f"line {n}: starts like a codon but is not '**G<n>.<m> Title.** ...'")
+                continue
+            if gene is None or int(c.group(1)[1:]) != gene:
+                problems.append(f"line {n}: {c.group(1)}.{c.group(2)} is not under the heading of gene {c.group(1)}")
+            else:
+                genes[gene].append(int(c.group(2)))
+            codons.append((n, f"{c.group(1)}.{c.group(2)}", c.group(3), line))
+    for g in [x for x in re.findall(r"^### G(\d+) ", text, re.M) if not any(n for n, ln in _part(text, "Genes")
+                                                                              if ln.startswith(f"### G{x} "))]:
+        problems.append(f"gene G{g} is not under a heading that contains 'Genes'")
+    if seen_genes != list(range(1, len(seen_genes) + 1)):
+        problems.append(f"genes do not run G1, G2, G3 with no gaps or repeats: {seen_genes}")
+    for g, nums in genes.items():
+        if nums != list(range(1, len(nums) + 1)):
+            problems.append(f"codons of G{g} do not run 1, 2, 3 with no gaps or repeats: {nums}")
+    # 4, 5. every invariant has a Proof, numbered 1, 2, 3
+    invs = [(n, int(i.group(1)), line) for n, line in _part(text, "Invariants")
+            for i in [re.match(r"^\*\*INV(\d+) ", line)] if i]
+    for n, num, line in invs:
+        if not re.search(r"Proof: (`test_INV" + str(num) + r"(_\w+)?`|by hand)", line):
+            problems.append(f"line {n}: INV{num} has no Proof: naming test_INV{num} or 'by hand'")
+    if [num for _, num, _ in invs] != list(range(1, len(invs) + 1)):
+        problems.append("invariants do not run INV1, INV2, INV3 with no gaps or repeats")
+    # 6. every codon and invariant named anywhere exists
+    have = {cid for _, cid, _, _ in codons} | {f"INV{num}" for _, num, _ in invs}
+    for n, line in enumerate(text.split("\n"), 1):
+        for name in ID.findall(line):
+            if name not in have:
+                problems.append(f"line {n}: {name} is named but not in the plan")
+    # 7. Needs: names codons that exist, and no chain loops back
+    needs = {}
+    for n, cid, _, line in codons:
+        nd = re.search(r"Needs: (.*?)(?:\. Proof:|$)", line)
+        if nd:
+            targets = ID.findall(nd.group(1))
+            if not targets:
+                problems.append(f"line {n}: Needs: in {cid} names no codon")
+            needs[cid] = [t for t in targets if t in have]
+    state = {}
+
+    def loops(c, path):
+        if state.get(c) == "done":
+            return None
+        if c in path:
+            return path[path.index(c):] + [c]
+        for t in needs.get(c, []):
+            hit = loops(t, path + [c])
+            if hit:
+                return hit
+        state[c] = "done"
+        return None
+    for cid in sorted(needs):
+        hit = loops(cid, [])
+        if hit:
+            problems.append("Needs: loops: " + " -> ".join(hit))
+            break
+    # 8. every gene is in Milestones or Open questions
+    later = "\n".join(ln for part in ("Milestones", "Open questions") for _, ln in _part(text, part))
+    for g in seen_genes:
+        if not re.search(rf"(?<![\w.])G{g}(?![\d])", later):
+            problems.append(f"gene G{g} is not in Milestones or Open questions")
+    # 9. every open question has ASSUMES:
+    for n, line in _part(text, "Open questions"):
+        if re.match(r"^\d+\. ", line) and "ASSUMES:" not in line:
+            problems.append(f"line {n}: open question has no ASSUMES:")
+    # 10. the changelog's newest Plan entry is the plan's version
+    newest = re.search(r"^## Plan (\d+\.\d+) ", changelog, re.M)
+    if not newest:
+        problems.append("CHANGELOG.md has no '## Plan X.Y' heading")
+    elif m and newest.group(1) != m.group(1):
+        problems.append(f"CHANGELOG.md's newest Plan entry is {newest.group(1)}, the plan is {m.group(1)}")
+    # 11. the word cap: a codon's words, code spans blanked
+    for n, cid, _, line in codons:
+        words = len(re.sub(r"`[^`\n]*`", " ", line).split())
+        if words > WORD_CAP:
+            problems.append(f"line {n}: {cid} has {words} words, over the cap of {WORD_CAP}")
+    return problems
+
+
+def test_G19_4_ci_runs_the_plan_check():
+    """CI runs this file on every push and pull request; the real plan has no problem; a planted fault of each kind
+    is refused."""
+    with open(os.path.join(ROOT, ".github", "workflows", "tests.yml"), encoding="utf-8") as f:
+        ci = f.read()
+    assert re.search(r"^on: \[push, pull_request\]$", ci, re.M), "CI must run on every push and pull request"
+    assert re.search(r"-m pytest .*\btests/", ci), "CI must run the tests folder, which holds this file"
+    text = plan_text()
+    with open(os.path.join(ROOT, "CHANGELOG.md"), encoding="utf-8") as f:
+        changelog = f.read()
+    assert plan_form_problems(text, changelog) == []
+    first = codons()[0][2]                                       # the G1.1 line
+    inv1 = next(ln for ln in text.split("\n") if ln.startswith("**INV1 "))
+    planted = {
+        "no version line": text.replace("**Plan version ", "**Plan ", 1),
+        "starts like a codon": text.replace(first, first.replace(".**", "**", 1)),
+        "is not under the heading of gene": text.replace(first, first.replace("**G1.1 ", "**G2.1 ", 1)),
+        "do not run 1, 2, 3": text.replace(first, first.replace("**G1.1 ", "**G1.99 ", 1)),
+        "has no Proof: naming test_INV1": text.replace(inv1, re.sub(r" Proof: `[^`]+`\.?", "", inv1)),
+        "G99.1 is named but not in the plan": text.replace(first, first + " See G99.1."),
+        "Needs: loops": text.replace(first, first.replace(" Proof:", " Needs: G1.1. Proof:", 1)),
+        "is not in Milestones or Open questions": text.replace("- M0 (released 0.1 to 0.5): G1,", "- M0: ,"),
+        "open question has no ASSUMES:": text.replace("## Part 6. Open questions\n",
+                                                      "## Part 6. Open questions\n\n99. A question?\n", 1),
+        "newest Plan entry": text.replace("**Plan version ", "**Plan version 9", 1),
+        "over the cap of 80": text.replace(first, first + " word" * 90),
+    }
+    for want, bad in planted.items():
+        assert bad != text, want
+        got = plan_form_problems(bad, changelog)
+        assert any(want in p for p in got), (want, got)
