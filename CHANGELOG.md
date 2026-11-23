@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.13 (2026-11-22)
+- **The auto-update proof needs an interactive session** (plan change; G13.4 and G16.1 clarified, both open). In a signed-in test run on Claude Code 2.1.280, a headless `claude -p` session did not refresh the plugin catalog, so the kit's auto-update check could not pass; and the kit's two prompts reached 25K tokens of a 100K window, so no compaction was asked. G16.1 now starts an interactive session and fills it past the window. No invariant and no Part 0 rule changes.
+
 ## Plan 1.12 (2026-11-22)
 - **A proof is a test that ran** (plan change; G19 added, G19.1 to G19.4 open). A real test was made unreachable four ways in a scratch branch. CI's invariant check (INV9) caught a test nested after a `return`, a skipped one and a renamed one, but not one hidden by a later definition with the same name. The PROMISES gate and the plan check found tests by name in the text, and the plan check did not run in CI. No invariant and no Part 0 rule changes.
 
