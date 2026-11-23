@@ -15,7 +15,12 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: pip install pytest
-      - run: python -m pytest -q tests/
+      # G19.3: -v gives every test its own line with its outcome and a skip's reason; never with -q (it cancels -v),
+      # and -rA alone folds skips into a count. COLUMNS and the classic style keep a long test id from pushing a
+      # skip's reason off the line. tests/test_gate.py fails if any of the three is reverted.
+      - run: python -m pytest -v -o console_output_style=classic tests/
+        env:
+          COLUMNS: "4096"
   skill-spec:
     runs-on: ubuntu-latest
     steps:
