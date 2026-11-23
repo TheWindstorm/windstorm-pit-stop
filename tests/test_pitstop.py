@@ -700,7 +700,12 @@ def test_G12_8_nothing_runs_once_the_plugin_is_gone(tmp_path, monkeypatch, capsy
         reg.write_text(content)
         monkeypatch.setattr(sys, "argv", ["pit-stop-restart", "--live"])
         assert launcher.main() == 0 and ran == []
-        assert word in (tmp_path / "pit-stop" / "restart" / "restart.log").read_text().splitlines()[-1]
+        last = (tmp_path / "pit-stop" / "restart" / "restart.log").read_text().splitlines()[-1]
+        assert word in last
+        if word == "not installed":                      # the line a person reads under fleet mode names the command
+            assert last.endswith("take it off: " + launcher.timer_off()), last
+        else:
+            assert "take it off" not in last, last
     reg.write_text(json.dumps({"plugins": {"windstorm-pit-stop@thewindstorm": [row("0.6.2")]}}))
     launcher.main()
     _g12_8_the_helper_changes_no_session(tmp_path / "h", monkeypatch, capsys)

@@ -1341,12 +1341,9 @@ def update_claude_code(now, run=None, machine=None):
 
 
 def timer_off_command():
-    """The one command that takes off the timer /pit-stop setup --fleet installed: the one `setup.py --undo` runs
-    (held to setup's own words by the G12.8 test). On macOS no such command has been run as printed yet, so the
-    line points to the README instead."""
-    if sys.platform == "darwin":
-        return None
-    return "systemctl --user disable --now pit-stop-restart.timer"
+    """The command that takes off the fleet timer (launcher.timer_off()), or None on macOS."""
+    import launcher
+    return launcher.timer_off()
 
 
 def gone_line(here=None):
@@ -1367,9 +1364,7 @@ def gone_line(here=None):
     if st == "orphaned" and rows:
         return (f"plugin folder {here}: {launcher.SAY['orphaned']}; nothing done. Pit Stop is installed elsewhere: "
                 f"point this timer at {os.path.join(pc.STATE_DIR, 'bin', 'pit-stop-restart')} (/pit-stop setup does)")
-    off = timer_off_command()
-    return (f"{launcher.SAY['gone']}; nothing done (a copy run with --plugin-dir or from a working folder has no row "
-            f"either). If a timer runs this, take it off: " + (off or "see \"Leaving Pit Stop\" in Pit Stop's README"))
+    return f"{launcher.SAY['gone']}; nothing done {launcher.gone_advice()}"
 
 
 def plugin_root_now():

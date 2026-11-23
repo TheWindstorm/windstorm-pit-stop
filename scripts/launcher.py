@@ -96,6 +96,20 @@ def find(claude_dir=None):
     return None, ("orphaned" if any(orphaned(p) for p in paths) else "missing")
 
 
+def timer_off():
+    """The one command that takes off the timer /pit-stop setup --fleet installed: the one `setup.py --undo` runs
+    (held to setup's own words by the G12.8 test). On macOS none has been run as printed yet: None."""
+    if sys.platform == "darwin":
+        return None
+    return "systemctl --user disable --now pit-stop-restart.timer"
+
+
+def gone_advice():
+    """What a run that found Pit Stop gone tells the person, after saying so."""
+    return ("(a copy run with --plugin-dir or from a working folder has no row either). If a timer runs this, take it off: "
+            + (timer_off() or "see \"Leaving Pit Stop\" in Pit Stop's README"))
+
+
 def plugin_root(claude_dir=None):
     return find(claude_dir)[0]
 
@@ -121,7 +135,7 @@ def note(line, claude_dir=None):
 def main():
     root, why = find()
     if not root:
-        note(f"pit-stop launcher: nothing run: {SAY[why]}")
+        note(f"pit-stop launcher: nothing run: {SAY[why]}" + (" " + gone_advice() if why == "gone" else ""))
         return 0
     env = dict(os.environ, PIT_STOP_LAUNCHER="1")   # the helper then knows it follows plugin updates
     os.execve(sys.executable, [sys.executable, "-I", os.path.join(root, SCRIPT)] + sys.argv[1:], env)
