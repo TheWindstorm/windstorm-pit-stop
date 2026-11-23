@@ -1,4 +1,6 @@
 import calendar
+import glob
+import html
 import json
 import os
 import subprocess
@@ -514,6 +516,7 @@ def _history(tmp_path, monkeypatch, cycles=4, per=30, gap_min=1, start=300000, p
     monkeypatch.setattr(pc, "STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(pc, "FOLDERS", str(tmp_path / "state" / "folders"))
     monkeypatch.setattr(pc, "LANES", str(tmp_path / "state" / "lanes"))
+    monkeypatch.setattr(pc, "CONFIG", str(tmp_path / "state" / "config.json"))   # never the person's own switches
     proj = tmp_path / "work"
     proj.mkdir(exist_ok=True)
     d = projects / pc.project_key(str(proj))
@@ -1726,6 +1729,53 @@ def test_G2_24_cache_age_follows_the_last_model_call_not_the_last_dated_row(tmp_
     assert rab.call_age_of({"sessionId": "never-read"}, 77) == 77
 
 
+def test_G2_25_the_context_limit_comes_from_the_model(tmp_path, monkeypatch):
+    """Seen 2026-11-22: a 1M Haiku folder that had peaked at 38K was told 150K/100K, "the right one for a
+    200K context". The limit comes from the folder's newest model; off the list, it is said to be assumed."""
+    import pitstop_common as pc
+    import optimize as op
+    monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
+    monkeypatch.setattr(pc, "CONFIG", str(tmp_path / "config.json"))
+    now = time.time()
+
+    def folder(name, models):
+        cwd = str(tmp_path / name)
+        rows = []
+        for i, mdl in enumerate(models):
+            rows.append({"type": "user", "timestamp": _iso(now - 3600 + i * 60), "message": {"content": "go"}})
+            rows.append({"type": "assistant", "timestamp": _iso(now - 3590 + i * 60), "message": {
+                "id": f"msg-{i}", "model": mdl, "content": [{"type": "text", "text": "ok"}],
+                "usage": {"input_tokens": 1000, "cache_read_input_tokens": 37_000}}})
+        _transcript(pc, cwd, "sid-" + name, rows)
+        m = op.analyze(cwd, 7)
+        return m, op.recommend(m)
+
+    # the stress test's folder: Haiku 5.5 is 1M, so its own rules for a 1M context apply, and no guess is stated
+    m, rec = folder("haiku", ["claude-haiku-5-5"])
+    assert m["model"] == "claude-haiku-5-5" and m["max_context"] == 38_000
+    assert rec["context_limit"] == 1_000_000 and rec["window"] == 500_000 and rec["idle_point"] >= 200_000
+    assert not rec["context_limit_assumed"] and not any("200K context" in w or "assumed" in w for w in rec["why"])
+    # the NEWEST model decides: a folder that moved from an unknown model to a [1m] one
+    m, rec = folder("moved", ["claude-sonnet-5-5", "claude-opus-5-5[1m]"])
+    assert m["model"] == "claude-opus-5-5[1m]" and rec["context_limit"] == 1_000_000
+    # a dated id is the same model
+    assert op.model_context("claude-fable-5-2-20261101") == 1_000_000 and op.model_context("<synthetic>") is None
+    # off the list: 200K, said to be assumed, never "the right one for a 200K context"
+    m, rec = folder("unknown", ["claude-sonnet-5-5"])
+    assert rec["context_limit"] == 200_000 and rec["context_limit_assumed"]
+    assert op.UNKNOWN_CONTEXT == "could not tell this model's context; assumed 200K; pass --context-limit"
+    assert op.UNKNOWN_CONTEXT in rec["why"] and not any("right one for" in w for w in rec["why"])
+    # --context-limit wins over the model, and then nothing is assumed
+    rec = op.recommend(m, context_limit=1_000_000)
+    assert rec["context_limit"] == 1_000_000 and not rec["context_limit_assumed"] and op.UNKNOWN_CONTEXT not in rec["why"]
+    # a peak above 200K proves a 1M model even when the id is not on the list
+    rec = op.recommend(dict(m, max_context=450_000))
+    assert rec["context_limit"] == 1_000_000 and not rec["context_limit_assumed"]
+    # the daily tuner's log says so too
+    import autotune
+    assert "op.UNKNOWN_CONTEXT if rec.get(\"context_limit_assumed\")" in open(autotune.__file__).read()
+
+
 def test_G4_31_a_restart_ready_session_that_lost_the_run_limit_is_not_reloaded_instead(tmp_path, monkeypatch):
     rab, typed, info, now = _live_reload(tmp_path, monkeypatch, [], ctx=300_000, idle=4000)
     rab.PLANNED.clear()
@@ -2429,6 +2479,7 @@ def _checkup(tmp_path, monkeypatch):
     monkeypatch.setattr(ck, "DIR", str(tmp_path / "state" / "checkup"))
     monkeypatch.setattr(ck, "BASELINE", str(tmp_path / "state" / "checkup" / "baseline.json"))
     monkeypatch.setattr(ck, "hookless", lambda sessions, now: ["Lane Two"])
+    monkeypatch.setattr(pc, "CLAUDE_DIR", str(tmp_path / "claude"))      # never the person's own plugin registry
     return pc, ck, proj
 
 
@@ -2512,6 +2563,60 @@ def test_G9_5_stop_hook_says_once_that_the_week_later_checkup_is_ready(tmp_path)
     (ck_dir / "baseline.json").write_text("not json")
     os.remove(ck_dir / "week-told")
     assert _run("stop_pit_stop.py", {"session_id": "w-3"}, tmp_path)[:2] == (0, "")          # a damaged file: nothing
+
+
+def test_G9_7_checkup_names_an_older_install_that_wins(tmp_path, monkeypatch):
+    """Seen 2026-11-22: in a test folder with a project-scope 0.6.1, sessions loaded the user-scope 0.1.4,
+    and nothing said so. Which one loads is read from the running code, not from a guess at scope order."""
+    pc, ck, proj = _checkup(tmp_path, monkeypatch)
+    cdir = tmp_path / "claude"
+    key = "windstorm-pit-stop@thewindstorm"
+
+    def install(ver):
+        r = tmp_path / "cache" / ver
+        (r / ".claude-plugin").mkdir(parents=True)
+        (r / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "windstorm-pit-stop", "version": ver}))
+        return str(r)
+
+    old, new = install("0.6.2"), install("0.6.3")
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+
+    def registry(rows):
+        (cdir / "plugins").mkdir(parents=True, exist_ok=True)
+        (cdir / "plugins" / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": rows}))
+
+    registry({key: [{"scope": "user", "installPath": old, "version": "0.6.2"},
+                    {"scope": "project", "projectPath": proj, "installPath": new, "version": "0.6.3"}]})
+    o = ck.older_install(proj, root=old)
+    assert o == {"folder": proj, "old": "0.6.2", "old_scope": "user", "new": "0.6.3", "new_scope": "project",
+                 "command": f"claude plugin update {key} --scope user"}
+    lines = ck.older_install_lines(o)
+    assert lines[0] == f"In {proj}, sessions load Pit Stop 0.6.2 (user), not 0.6.3 (project)."
+    assert lines[1] == f"To end it: claude plugin update {key} --scope user"
+    assert proj not in " ".join(ck.older_install_lines(o, share=True))           # the page to share names no path
+    # the same in a folder under the project, and in the checkup's text and page
+    sub = os.path.join(proj, "src")
+    os.makedirs(sub)
+    assert ck.older_install(sub, root=old)["new"] == "0.6.3"
+    monkeypatch.chdir(proj)
+    monkeypatch.setattr(ck, "HERE", os.path.join(old, "scripts"))
+    d = ck.collect(14, time.time(), [])
+    assert lines[0] in ck.render_text(d, []) and html.escape(lines[0]) in ck.render_html(d, [])
+    # the newer one loads: nothing to say; a newer install for ANOTHER folder is not this folder's business
+    assert ck.older_install(proj, root=new) is None
+    registry({key: [{"scope": "user", "installPath": old, "version": "0.6.2"},
+                    {"scope": "project", "projectPath": str(other), "installPath": new, "version": "0.6.3"}]})
+    assert ck.older_install(proj, root=old) is None
+    # the older is from another catalog: it is removed, from the folder it belongs to
+    registry({"windstorm-pit-stop@dev": [{"scope": "local", "projectPath": proj, "installPath": old, "version": "0.6.2"}],
+              key: [{"scope": "user", "installPath": new, "version": "0.6.3"}]})
+    o = ck.older_install(proj, root=old)
+    assert (o["old_scope"], o["new_scope"]) == ("local", "user")
+    assert o["command"] == f"cd {proj} && claude plugin uninstall windstorm-pit-stop@dev --scope local"
+    # an odd registry never stops the checkup
+    (cdir / "plugins" / "installed_plugins.json").write_text("{not json")
+    assert ck.older_install(proj, root=old) is None
 
 
 def test_G9_2_checkup_counts_only_automatic_refreshes_in_its_window_and_waits_of_two_hours(tmp_path, monkeypatch):
@@ -2749,6 +2854,123 @@ def test_G7_1_setup_switches_on_pit_stops_own_marketplace_updates_once_and_keeps
     sp.write_text("{not json")
     assert "NOT changed" in su.self_update(True, str(sp), str(cd)) and sp.read_text() == "{not json"
 
+
+
+def test_G12_7_setup_undo_puts_back_what_apply_changed(tmp_path, monkeypatch, capsys):
+    """Seen 2026-11-22: after claude plugin uninstall, autoUpdate true, config.json and checkup/ stayed.
+    setup --undo puts back what --apply and --fleet changed, step by step, and names what it leaves."""
+    pc, op, proj = _history(tmp_path, monkeypatch)
+    import setup as su
+    import install_method as im
+    cd, st = tmp_path / "claude", tmp_path / "state"
+    (cd / "plugins").mkdir(parents=True)
+    (cd / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user"}]}}))
+    src = {"source": "github", "repo": "TheWindstorm/windstorm-pit-stop"}
+    (cd / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thewindstorm": {"source": src}}))
+    sp = cd / "settings.json"
+    person = {"env": {"X": "1"}, "extraKnownMarketplaces": {"other": {"source": {"source": "github", "repo": "a/b"}}}}
+    sp.write_text(json.dumps(person))
+    st.mkdir(exist_ok=True)
+    (st / "config.json").write_text(json.dumps({"nudge": False}))
+    local = os.path.join(proj, ".claude", "settings.local.json")
+    os.makedirs(os.path.dirname(local))
+    with open(local, "w") as f:
+        json.dump({"env": {pc.WINDOW_ENV: "600000"}, "permissions": {"allow": ["Bash(ls)"]}}, f)
+    units, bin_ = tmp_path / "units", st / "bin" / "pit-stop-restart"
+    for mod, k, v in ((pc, "CLAUDE_DIR", str(cd)), (pc, "STATE_DIR", str(st)), (pc, "CONFIG", str(st / "config.json")),
+                      (su, "SETTINGS", str(sp)), (su, "UNDO", str(st / "setup-undo.json")), (su, "BIN", str(bin_)),
+                      (su, "UNIT_DIR", str(units)), (su, "PLIST", str(tmp_path / "none.plist"))):
+        monkeypatch.setattr(mod, k, v)
+    ran = []
+    monkeypatch.setattr(su, "run", lambda cmd, timeout=30: ran.append(cmd) or None)
+    monkeypatch.setattr(su, "tmux_servers", lambda: {})
+    monkeypatch.setattr(su.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(su.shutil, "which", lambda n: "/usr/bin/" + n)
+    monkeypatch.setattr(im, "machine", lambda *a, **k: (_ for _ in ()).throw(OSError("not read in a test")))
+    monkeypatch.setattr(pc, "live_sessions", lambda *a, **k: ([], "registry"))
+    monkeypatch.setattr(pc, "newest_local_version", lambda: None)
+    monkeypatch.chdir(proj)
+    before = {"settings": json.loads(sp.read_text()), "config": json.loads((st / "config.json").read_text()),
+              "local": json.load(open(local))}
+
+    monkeypatch.setattr(sys, "argv", ["setup.py", "--apply", "--fleet", "--budget", "economy"])
+    assert su.main() == 0
+    assert json.loads(sp.read_text())["extraKnownMarketplaces"]["thewindstorm"]["autoUpdate"] is True
+    assert json.loads((st / "config.json").read_text()) == {"nudge": False, "auto_tune": True, "budget": "economy"}
+    assert json.load(open(local))["env"][pc.IDLE_ENV]
+    assert bin_.exists() and (units / "pit-stop-restart.timer").exists() and (st / "restart.json").exists()
+    # history a person's use leaves behind
+    (st / "checkup").mkdir()
+    (st / "autotune.log").write_text("x\n")
+    # a second --apply never overwrites what was there before the first
+    assert su.main() == 0
+    capsys.readouterr()
+
+    monkeypatch.setattr(sys, "argv", ["setup.py", "--undo"])
+    assert su.main() == 0
+    out = capsys.readouterr().out
+    assert json.loads(sp.read_text()) == before["settings"]
+    assert json.loads((st / "config.json").read_text()) == before["config"]
+    assert json.load(open(local)) == before["local"]
+    assert not bin_.exists() and not (units / "pit-stop-restart.timer").exists()
+    assert not (units / "pit-stop-restart.service").exists() and not (st / "restart.json").exists()
+    assert ["systemctl", "--user", "disable", "--now", "pit-stop-restart.timer"] in ran
+    for step in ("1. timer: stopped and removed", "   launcher: removed", "2. restart.json: removed",
+                 "3. config.json: auto_tune removed (it was not set), budget removed (it was not set)",
+                 "4. marketplace entry thewindstorm: put back as it was before setup", "window and idle point put back"):
+        assert step in out, step
+    left = next(x for x in out.splitlines() if x.startswith("Left in place"))
+    assert "checkup" in left and "autotune.log" in left and "/bin" not in left and "setup-undo.json" not in left and not (st / "setup-undo.json").exists()
+    assert glob.glob(str(sp) + ".bak-pitstop-*")                                   # backed up before each put-back
+
+    # a value the person changed after setup is theirs: the undo leaves it and says so, and puts back the rest
+    monkeypatch.setattr(sys, "argv", ["setup.py", "--apply", "--fleet", "--budget", "economy"])
+    assert su.main() == 0
+    c = json.loads((st / "config.json").read_text())
+    (st / "config.json").write_text(json.dumps(dict(c, budget="roomy")))
+    t = json.loads(sp.read_text())
+    t["extraKnownMarketplaces"]["thewindstorm"]["autoUpdate"] = False
+    sp.write_text(json.dumps(t))
+    loc = json.load(open(local))
+    loc["env"][pc.WINDOW_ENV] = "123456"
+    with open(local, "w") as f:
+        json.dump(loc, f)
+    capsys.readouterr()
+    monkeypatch.setattr(sys, "argv", ["setup.py", "--undo"])
+    assert su.main() == 0
+    out = capsys.readouterr().out
+    assert "auto_tune removed (it was not set), budget left as you set it since (roomy)" in out
+    assert json.loads((st / "config.json").read_text()) == {"nudge": False, "budget": "roomy"}
+    assert "4. marketplace entry thewindstorm: left as you set it since (autoUpdate false)" in out
+    assert json.loads(sp.read_text()) == t
+    assert "window and idle point left as you set them since (123456, " in out and json.load(open(local)) == loc
+    assert not bin_.exists() and not (units / "pit-stop-restart.timer").exists()
+    (st / "config.json").write_text(json.dumps(before["config"]))
+    sp.write_text(json.dumps(before["settings"]))
+
+    # a setup from before 0.6.2 kept no record: the entry comes from the newest backup that has it off
+    for b in glob.glob(str(sp) + ".bak-pitstop-*"):
+        os.remove(b)
+    on = dict(before["settings"], extraKnownMarketplaces=dict(before["settings"]["extraKnownMarketplaces"],
+                                                              thewindstorm={"source": src}))
+    sp.write_text(json.dumps(on))
+    pc.backup(str(sp))
+    on["extraKnownMarketplaces"]["thewindstorm"]["autoUpdate"] = True
+    sp.write_text(json.dumps(on))
+    (st / "config.json").write_text(json.dumps({"auto_tune": True}))
+    assert su.main() == 0
+    out = capsys.readouterr().out
+    assert "no record of the first setup here" in out and "4. marketplace entry thewindstorm: put back" in out
+    assert json.loads(sp.read_text())["extraKnownMarketplaces"]["thewindstorm"] == {"source": src}
+    assert json.loads((st / "config.json").read_text()) == {}
+    assert "no record of which folders setup tuned" in out
+    # no record and no backup: it says so and how, and changes nothing
+    for b in glob.glob(str(sp) + ".bak-pitstop-*"):
+        os.remove(b)
+    sp.write_text(json.dumps(on))
+    assert su.main() == 0
+    assert "left ON: no record and no backup" in capsys.readouterr().out and json.loads(sp.read_text()) == on
 
 # ---- 0.6.0: Claude Code updated by Pit Stop, whatever installed it ----
 

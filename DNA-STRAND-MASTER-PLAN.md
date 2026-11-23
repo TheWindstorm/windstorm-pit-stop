@@ -168,7 +168,7 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 
 **G2.24 Cache age follows the last model call.** `restart_at_break.ctx_and_idle(s)` also records the age of the last model call (an assistant row with usage, or a compaction); `call_age_of(s, idle)` returns `max(call_age, idle)`, or `idle` if none was seen. A `/reload-plugins` row 2500 s ago after a call 5 h ago: idle about 2500 s, call age 5 h. `cache_warm(age, cfg)` is `0 <= age <= cache_ttl * 0.8` (`cache_ttl` `3600`). `plan()` on a behind 300K session gives `restart` with `cache cold` (with call age set to idle, warm: `compact`); `reload_due` True, at idle 30 False. Needs: G2.18. Proof: `test_G2_24_cache_age_follows_the_last_model_call_not_the_last_dated_row`.
 
-**G2.25 The context limit from the model (open).** With no `--context-limit`, `recommend()` in `scripts/optimize.py` takes the limit from the folder's newest model: a `[1m]` id, or an id on a list of models and their limits in that file, which goes stale as models change. Claude Code gives the real size only to the status line, which Pit Stop does not own. Off the list: `could not tell this model's context; assumed 200K; pass --context-limit`. Seen 2026-11-22: a 1M Haiku folder was told "the right one for a 200K context". Proof: `test_G2_25_the_context_limit_comes_from_the_model`.
+**G2.25 The context limit from the model.** With no `--context-limit`, `recommend()` in `scripts/optimize.py` takes the limit from the folder's newest model: a `[1m]` id, or an id on a list in that file of sizes seen on a machine, which goes stale as models change. Claude Code gives the real size only to the status line, which Pit Stop does not own. Off the list: `could not tell this model's context; assumed 200K; pass --context-limit`. Seen 2026-11-22: a 1M Haiku folder was told "the right one for a 200K context". Proof: `test_G2_25_the_context_limit_comes_from_the_model`.
 
 ### G3 Shared readers
 One shared module, `scripts/pitstop_common.py`, plus the hook generation file, reads Claude Code's transcripts, session listings, plugin records and Pit Stop's own state the same way for every part of the plugin.
@@ -393,7 +393,7 @@ Pit Stop keeps a short list, `~/.claude/pit-stop/needs-you.md`, of what only a p
 
 **G9.6 One line per session (open).** `python3 -I scripts/report.py` prints one line per running session: its name, the version it runs against the newest installed, its state, the idle point and window in force, its memory index line count, the date of its folder's last tune, and its folder; `--project DIR` prints that folder only. It changes nothing. Proof: `test_G9_6_report_prints_one_line_per_session`.
 
-**G9.7 An older install that wins is named (open).** When `plugins/installed_plugins.json` holds `windstorm-pit-stop@*` in two scopes and the version a folder's sessions load is lower than the newest installed, `/pit-stop checkup` shows `In <folder>, sessions load Pit Stop <old> (<scope>), not <new> (<scope>).` and the one command that removes or updates the older. Seen 2026-11-22: a user-scope 0.1.4 beat a project-scope 0.6.1. Proof: `test_G9_7_checkup_names_an_older_install_that_wins`.
+**G9.7 An older install that wins is named.** When `plugins/installed_plugins.json` holds `windstorm-pit-stop@*` in two scopes and the version a folder's sessions load is lower than the newest installed, `/pit-stop checkup` shows `In <folder>, sessions load Pit Stop <old> (<scope>), not <new> (<scope>).` and the one command that removes or updates the older. Seen 2026-11-22: a user-scope 0.1.4 beat a project-scope 0.6.1. Proof: `test_G9_7_checkup_names_an_older_install_that_wins`.
 
 ### G10 Reading check
 
@@ -431,7 +431,7 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.6 Trials change nothing.** In `evals/tools/trigger_trials.py`, `command(query, model)` returns an argv holding `--settings` with `windstorm-pit-stop@thewindstorm` set to false, `--disallowedTools Bash Edit Write NotebookEdit` and `--permission-mode default`; `trial_paths(scratch, q, r)` gives each trial its own folder, with its transcript outside it. Trials run one at a time. In every results file `installed_visible` and `timed_out` are 0 and `ours_visible` equals `trials`. Proof: `test_G12_6_trigger_trials_run_isolated_and_read_only`.
 
-**G12.7 Setup can be undone (open).** `python3 -I scripts/setup.py --undo` puts back what `--apply` and `--fleet` changed: the backed-up settings and marketplace entry, `"auto_tune"` in `pit-stop/config.json`, and the timer and launcher it installed. It lists each step, and leaves the history files in place, named. Seen 2026-11-22: after `claude plugin uninstall`, `autoUpdate: true`, `config.json` and `checkup/` stayed. Proof: `test_G12_7_setup_undo_puts_back_what_apply_changed`.
+**G12.7 Setup can be undone.** `python3 -I scripts/setup.py --undo` puts back what `--apply` and `--fleet` changed: the backed-up settings and marketplace entry, `"auto_tune"` in `pit-stop/config.json`, and the timer and launcher it installed. It lists each step, and leaves the history files in place, named. Seen 2026-11-22: after `claude plugin uninstall`, `autoUpdate: true`, `config.json` and `checkup/` stayed. Proof: `test_G12_7_setup_undo_puts_back_what_apply_changed`.
 
 ### G13 Self-update for everyone (open)
 
