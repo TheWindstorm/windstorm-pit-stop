@@ -96,11 +96,14 @@ def _world(tmp_path, tests_text, proofs, rows=()):
     return root
 
 
-def _pytest(root, *args, seconds=120):
-    """Run pytest on a planted world, in its own process group, stopped by its own group id at the limit."""
+def _pytest(root, *args, seconds=120, ci=False):
+    """Run pytest on a planted world, in its own process group, stopped by its own group id at the limit.
+    The planted run is in CI only when asked (`ci`), whatever this run is."""
+    env = {k: v for k, v in os.environ.items() if k != "CI"}
+    env.update(COLUMNS="4096", **({"CI": "true"} if ci else {}))
     p = subprocess.Popen([sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-o", "console_output_style=classic",
                           *args, str(root / "tests")], cwd=str(root), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT, start_new_session=True, env=dict(os.environ, COLUMNS="4096"))
+                         stderr=subprocess.STDOUT, start_new_session=True, env=env)
     try:
         out = p.communicate(timeout=seconds)[0].decode("utf-8", "replace")
     except subprocess.TimeoutExpired:
@@ -160,18 +163,25 @@ def test_G19_3_a_skip_is_listed_and_never_counts_as_passed(tmp_path):
             '@pytest.mark.skipif(not shutil.which("no-such-program-pit-stop"), reason="no such program here")\n'
             'def test_G1_2_needs_a_program():\n    assert True\n\n\n'
             'def test_G1_3_skips_with_no_reason():\n    if os.name:\n        pytest.skip()\n')
-    root = _world(tmp_path, text, {"1": "good", "2": "needs_a_program"})
+    honest = text.split("def test_G1_3_")[0]
+    # outside CI: an honest skip of a built proof is listed and does not fail the run
+    root = _world(tmp_path / "honest", honest, {"1": "good", "2": "needs_a_program"})
     code, out = _pytest(root, "-v")
     assert "not run here: test_G1_2_needs_a_program (no such program here)" in out, out
-    assert code == 1, out
-    lines = _gate_lines(out)
-    assert "test_G1_2_needs_a_program (codon G1.2) was not run here (no such program here), " \
-           "and a skip never counts as passed" in lines
-    assert "test_G1_3_skips_with_no_reason: skipped with no reason" in lines
-    assert any("test_G1_3_skips_with_no_reason: skips with no reason" in ln for ln in lines)
-    # a skip with no reason fails even a partial run
-    code, out = _pytest(root, "-v", "-k", "no_reason")
-    assert code == 1 and "test_G1_3_skips_with_no_reason: skipped with no reason" in _gate_lines(out), out
+    assert code == 0 and _gate_lines(out) == [], out
+    # in CI: the same skip fails it, since every built proof must pass there
+    code, out = _pytest(root, "-v", ci=True)
+    assert code == 1 and _gate_lines(out) == ["test_G1_2_needs_a_program (codon G1.2) was not run in CI "
+                                              "(no such program here), and a skip never counts as passed"], out
+    # a skip with no reason fails every run, in CI or not, whole or partial
+    root = _world(tmp_path / "bare", text, {"1": "good", "2": "needs_a_program"})
+    for ci in (False, True):
+        code, out = _pytest(root, "-v", ci=ci)
+        lines = _gate_lines(out)
+        assert code == 1 and "test_G1_3_skips_with_no_reason: skipped with no reason" in lines, out
+        assert any("test_G1_3_skips_with_no_reason: skips with no reason" in ln for ln in lines), out
+        code, out = _pytest(root, "-v", "-k", "no_reason", ci=ci)
+        assert code == 1 and "test_G1_3_skips_with_no_reason: skipped with no reason" in _gate_lines(out), out
 
 
 def test_G19_3_the_ci_log_names_every_test_and_every_skip_reason():

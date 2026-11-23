@@ -1,6 +1,7 @@
 """G19.1 and G19.3: count what the test runner reports as PASSED, and fail a whole-suite run in which a built
 codon's Proof or a PROMISES row's test did not pass. A skip is listed as `not run here: <test> (<reason>)` and
-never counts as a pass; a skip with no reason fails any run. There is no switch."""
+never counts as a pass: outside CI it does not fail the run, and in CI (CI=true) a built proof that did not pass
+does. A skip with no reason fails any run. There is no switch."""
 import os
 import sys
 
@@ -59,7 +60,8 @@ def pytest_sessionfinish(session, exitstatus):
     if exitstatus not in (pytest.ExitCode.OK, pytest.ExitCode.TESTS_FAILED):
         return                                         # interrupted, usage error, nothing collected: not counted
     results = {n: list(c.values()) for n, c in _run["results"].items()}
-    whole, problems, here = _gate.verdict(ROOT, HERE, _run["collected"], _run["deselected"], results)
+    whole, problems, here = _gate.verdict(ROOT, HERE, _run["collected"], _run["deselected"], results,
+                                          ci=_gate.in_ci(os.environ))
     _run["whole"] = whole
     _run["lines"] = here + (["partial run: rows and codons not checked"] if not whole else []) + \
         [f"G19 gate: {p}" for p in problems]

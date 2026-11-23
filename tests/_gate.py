@@ -162,10 +162,16 @@ def outcome(cases):
     return ("passed",) if cases else None
 
 
-def verdict(root, tests_dir, collected, deselected, results):
+def in_ci(environ):
+    """G19.3: the run is in CI when the environment variable CI is `true` (GitHub Actions sets it)."""
+    return str(environ.get("CI", "")).strip().lower() == "true"
+
+
+def verdict(root, tests_dir, collected, deselected, results, ci=False):
     """(whole, problems, not_run_here) for one run. `collected`: top-level test names the runner collected;
     `results`: {name: [(kind, reason?)...]} from its reports. Problems only from a whole-suite run, except a skip
-    with no reason, which fails any run."""
+    with no reason, which fails any run. A built proof skipped on a condition of the machine is listed, and fails
+    the run only in CI, where every built proof must pass."""
     got = {n: outcome(c) for n, c in results.items()}
     no_reason = [f"{n}: skipped with no reason" for n, o in sorted(got.items()) if o and o[0] == "skipped"
                  and o[1].strip() in NO_REASON]
@@ -182,6 +188,6 @@ def verdict(root, tests_dir, collected, deselected, results):
             problems.append(f"{t} ({why}) did not run: it is not a test the runner collects")
         elif o[0] == "failed":
             problems.append(f"{t} ({why}) failed")
-        elif o[0] == "skipped" and o[1].strip() not in NO_REASON:   # with no reason: already named above
-            problems.append(f"{t} ({why}) was not run here ({o[1]}), and a skip never counts as passed")
+        elif o[0] == "skipped" and o[1].strip() not in NO_REASON and ci:   # with no reason: already named above
+            problems.append(f"{t} ({why}) was not run in CI ({o[1]}), and a skip never counts as passed")
     return True, problems, here

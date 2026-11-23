@@ -499,11 +499,11 @@ When a prompt takes a big session in a new direction, Pit Stop offers a refresh 
 
 A codon or a PROMISES row counts as proven only by a test the runner collected and passed in this run, never by a name found in a file.
 
-**G19.1 Counted from the run.** `tests/conftest.py` records every test that PASSED in the session. On a whole-suite run, it fails the run when a built codon's Proof or a PROMISES row's `test` is missing from that set, at any version. A whole-suite run is one that collected every top-level `test_*` function in `tests/test_*.py` and deselected none; any other run prints `partial run: rows and codons not checked` and checks nothing. There is no switch. Proof: `test_G19_1_a_built_proof_that_did_not_pass_fails_the_whole_run`.
+**G19.1 Counted from the run.** `tests/conftest.py` records every test that PASSED in the session. On a whole-suite run, it fails the run when a built codon's Proof or a PROMISES row's `test` failed or was not collected, at any version; one skipped on a condition of the machine fails it only in CI (G19.3). A whole-suite run is one that collected every top-level `test_*` function in `tests/test_*.py` and deselected none; any other run prints `partial run: rows and codons not checked` and checks nothing. There is no switch. Proof: `test_G19_1_a_built_proof_that_did_not_pass_fails_the_whole_run`.
 
 **G19.2 One name, one test.** No `tests/test_*.py` file defines the same top-level name twice, because a later definition hides the earlier test, which then never runs. Seen 2026-11-22: a test hidden this way still satisfied every name check. Proof: `test_G19_2_no_test_file_defines_a_name_twice`.
 
-**G19.3 A skip says why and is not a pass.** A skipped test never counts as passed. The session summary lists it as `not run here: <test> (<reason>)`, and a skip with no reason fails the run. A built row's test that can run only on another system needs a CI job on that system. Proof: `test_G19_3_a_skip_is_listed_and_never_counts_as_passed`.
+**G19.3 A skip says why and is not a pass.** A skipped test never counts as passed. The summary lists it as `not run here: <test> (<reason>)`. Outside CI, a skip on a condition of the machine, with its reason, does not fail the run; in CI (the environment variable `CI` is `true`), a built proof that did not pass fails it. A skip with no reason, or on no condition of the machine, fails every run. Proof: `test_G19_3_a_skip_is_listed_and_never_counts_as_passed`.
 
 **G19.4 The plan check runs in CI (open).** `.github/workflows/tests.yml` runs `codon_check.py --strict --proofs tests` on the plan, and it finds tests the way G19.1 counts them, at the top level only. Proof: `test_G19_4_ci_runs_the_plan_check`.
 
