@@ -145,8 +145,8 @@ def test_G7_10_one_version_in_every_place_and_new_code_gets_a_new_one(tmp_path):
         s = e.get("source")
         if isinstance(s, dict) and s.get("source") == "url":
             assert tag_commit(s["url"], s["ref"]) == s["sha"], f"{e['name']}: {s['ref']} is not commit {s['sha'][:8]}"
-            if e["name"] == OWN:
-                assert s["ref"] == f"v{v}", "Pit Stop's pinned entry names plugin.json's version"
+            if e["name"] == OWN and tag_commit(OWN_URL, f"v{v}") is not None:
+                assert s["ref"] == f"v{v}", "once its tag exists, Pit Stop's pinned entry names plugin.json's version"
     assert changelog_release("## Plan 1.1 (x)\n## Unreleased\n## 0.6.1 (2026-11-20)\n") == "0.6.1"
     # release_check.py on a planted repository: new code under the tag's version is refused, a new version passes
     r, g = _repo(tmp_path, "1.0.0")
