@@ -1340,6 +1340,32 @@ def update_claude_code(now, run=None, machine=None):
     return None
 
 
+def timer_off_command():
+    """The one command that takes off the timer /pit-stop setup --fleet installed (setup.py --undo runs the same)."""
+    if sys.platform == "darwin":
+        plist = "~/Library/LaunchAgents/ai.thewindstorm.pit-stop-restart.plist"
+        return f"launchctl bootout gui/{os.getuid()} {plist} && rm {plist}"
+    return "systemctl --user disable --now pit-stop-restart.timer"
+
+
+def gone_line(here=None):
+    """None while Pit Stop is installed and HERE (this helper's plugin folder) is not one Claude Code left
+    behind; else the one line a pass logs before it does nothing (G12.8). Seen 2026-11-23 (Claude Code
+    2.1.280): `claude plugin uninstall` empties the registry row and leaves the cache folder, marked
+    .orphaned_at. A registry that cannot be read is not "gone": that pass changes no session either."""
+    import launcher
+    here = here or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    st = launcher.state(here, pc.CLAUDE_DIR)
+    if st == "installed":
+        return None
+    if st == "unreadable":
+        return f"plugin registry: {launcher.SAY['unreadable']}"
+    if st == "orphaned" and launcher.registry_rows(pc.CLAUDE_DIR):
+        return (f"plugin folder {here}: {launcher.SAY['orphaned']}; nothing done. Pit Stop is installed elsewhere: "
+                f"point this timer at {os.path.join(pc.STATE_DIR, 'bin', 'pit-stop-restart')} (/pit-stop setup does)")
+    return f"{launcher.SAY['gone']}; nothing done. To take this timer off: {timer_off_command()}"
+
+
 def plugin_root_now():
     """The folder Claude Code has installed for this plugin now (see scripts/launcher.py), or None."""
     try:
@@ -1451,6 +1477,10 @@ def main():
     bad = unknown_options()
     if bad:
         log(f"unknown option(s) {' '.join(bad)}; nothing done (known: {' '.join(KNOWN_OPTIONS)})")
+        return
+    gone = gone_line()
+    if gone:   # G12.8: once the plugin is gone (or its registry cannot be read), no session is touched
+        log(gone)
         return
     for w in CFG_WARNINGS:
         log(w)

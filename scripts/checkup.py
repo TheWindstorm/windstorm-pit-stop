@@ -179,6 +179,15 @@ def older_install_lines(o, share=False):
             "To end it: " + (o["command"] if not share else o["command"].replace(o["folder"], where))]
 
 
+def registry_lines(claude_dir=None):
+    """G12.8: while Claude Code's plugin registry cannot be read, the fleet helper changes no session; say so."""
+    import launcher
+    if launcher.state(None, claude_dir or pc.CLAUDE_DIR) != "unreadable":
+        return []
+    return ["Claude Code's plugin registry (plugins/installed_plugins.json) could not be read: the fleet helper "
+            "changes no session until it can, and reads it again every pass."]
+
+
 def collect(days=14, now=None, sessions=None):
     now = now or time.time()
     if sessions is None:
@@ -208,7 +217,8 @@ def collect(days=14, now=None, sessions=None):
                        "saving_usd_month": sum(s.get("saving_usd_month") or 0 for s in stats),
                        "saving_tokens_day": sum(s.get("saving_tokens_day") or 0 for s in stats)},
             "pitstop": {"auto_tune": cfg.get("auto_tune") is True, "fleet": pc.fleet_active()},
-            "machine": machine_info(now), "older_install": older_install(os.getcwd())}
+            "machine": machine_info(now), "older_install": older_install(os.getcwd()),
+            "registry": registry_lines()}
 
 
 def machine_info(now):
@@ -263,6 +273,8 @@ def render_text(d, cmp_lines):
         out += [""] + d["machine"]["lines"]
     if d.get("older_install"):
         out += [""] + older_install_lines(d["older_install"])
+    if d.get("registry"):
+        out += [""] + d["registry"]
     waiting = sorted((r for r in d["sessions"] if r["waiting_s"] is not None), key=lambda r: -r["waiting_s"])
     if waiting:
         out += ["", "Waiting on you (a question or permission prompt on screen):"]
@@ -366,7 +378,7 @@ def render_html(d, cmp_lines, share=False):
               f"An estimate from your own history, not a measurement.</p>" if t["saving_usd_month"] > 0 else "")
     m = d.get("machine") or {}
     lines = (m.get("lines") if not share else m.get("share_lines")) or []
-    lines = lines + older_install_lines(d.get("older_install"), share)
+    lines = lines + older_install_lines(d.get("older_install"), share) + (d.get("registry") or [])
     mach = ("<div class='card'><h2>Claude Code on this machine</h2><ul>" + "".join(f"<li>{e(x)}</li>" for x in lines)
             + "</ul></div>") if lines else ""
     sent = ("Pit Stop asked Anthropic's download server for the newest version number; like any web request, "
