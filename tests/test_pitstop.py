@@ -3137,3 +3137,78 @@ def test_G1_17_a_tool_call_cut_off_by_a_restart_is_a_break(tmp_path):
     assert run_hook(pay, tmp_path)[0] == 2
     (started / "cut-1").write_text("not a time\n")
     assert run_hook(pay, tmp_path)[0] == 2
+
+
+def test_G7_9_update_checks_the_cache_folder_against_the_registry_commit(tmp_path, monkeypatch):
+    """After an update the helper runs, the cache folder the registry names must hold the files of the commit it
+    names. A stale folder is reported (log and notify, with the uninstall and install lines) and the update counts
+    as not done; nothing is repaired. A matching folder, or one that cannot be checked, says nothing."""
+    import shutil
+    import subprocess as sp
+    rab = _rab(tmp_path, monkeypatch)
+    import pitstop_common as pc
+    os.makedirs(os.path.join(rab.BASE, "state"), exist_ok=True)
+    cfg = tmp_path / "cfg"
+    clone = cfg / "plugins" / "marketplaces" / "thewindstorm"
+    clone.mkdir(parents=True)
+    g = ["git", "-C", str(clone), "-c", "user.name=t", "-c", "user.email=t@localhost"]
+    sp.run(["git", "init", "-q", str(clone)], check=True)
+    (clone / "note.txt").write_text("A\n")
+    (clone / "hooks").mkdir()
+    (clone / "hooks" / "h.py").write_text("print(1)\n")
+    sp.run(g + ["add", "-A"], check=True)
+    sp.run(g + ["commit", "-qm", "A"], check=True)
+    old = sp.run(g + ["rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    (clone / "note.txt").write_text("B\n")
+    sp.run(g + ["commit", "-qam", "B"], check=True)
+    new = sp.run(g + ["rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    cache = cfg / "plugins" / "cache" / "thewindstorm" / "windstorm-pit-stop" / "0.6.2"
+    shutil.copytree(clone, cache, ignore=shutil.ignore_patterns(".git"))
+    (cache / "__pycache__").mkdir()
+    (cache / "__pycache__" / "x.pyc").write_bytes(b"\0")            # not in the commit: not counted
+    reg = cfg / "plugins" / "installed_plugins.json"
+
+    def registry(sha, scope="user"):
+        reg.write_text(json.dumps({"plugins": {"windstorm-pit-stop@thewindstorm": [
+            {"scope": scope, "version": "0.6.2", "installPath": str(cache), "gitCommitSha": sha}]}}))
+    monkeypatch.setattr(pc, "CLAUDE_DIR", str(cfg))
+    logged, told = [], []
+    monkeypatch.setattr(rab, "log", lambda m: logged.append(m))
+    monkeypatch.setattr(rab, "notify", lambda m: told.append(m))
+    registry(new)
+    assert rab.cache_problems("windstorm-pit-stop@thewindstorm") == []                   # the folder holds B
+    (cache / "note.txt").write_text("A\n")                                               # a stale folder from A
+    got = rab.cache_problems("windstorm-pit-stop@thewindstorm")
+    assert len(got) == 1 and got[0].startswith(f"cache folder {cache} does not hold {new[:12]}: 1 of 2 files differ")
+    assert "note.txt" in got[0] and "Claude Code's cache is not Pit Stop's to repair" in got[0]
+    assert "claude plugin uninstall windstorm-pit-stop@thewindstorm --scope user, then claude plugin install " \
+           "windstorm-pit-stop@thewindstorm --scope user" in got[0]
+    assert (cache / "note.txt").read_text() == "A\n"                                     # nothing repaired
+    registry(old)
+    assert rab.cache_problems("windstorm-pit-stop@thewindstorm") == []                   # it holds A: right for A
+    registry("f" * 40)
+    assert rab.cache_problems("windstorm-pit-stop@thewindstorm") == [] and "not in the marketplace clone" in logged[-1]
+    registry(new, scope="project")
+    assert rab.cache_problems("windstorm-pit-stop@thewindstorm") == []                   # user scope only, as updated
+    # in update_plugins: the update is reported as not done, with the cache line, and notified once
+    registry(new)
+    rab.CFG.update(plugin_updates="pit-stop")
+    monkeypatch.setattr(rab, "LIVE", True)
+    monkeypatch.setattr(rab, "plugin_root_now", lambda: None)
+
+    class R:
+        returncode, stdout, stderr = 0, "updated", ""
+    now = time.time()
+    out = rab.update_plugins(now, 0, lambda cmd, t: R())
+    assert out == [("windstorm-pit-stop@thewindstorm", False, got[0][:200])]
+    assert told == [f"pit-stop: {got[0]}"]
+    # the same state the next day: logged again, not notified again (once per distinct state)
+    n_logged = sum(1 for m in logged if "does not hold" in m)
+    out = rab.update_plugins(now + 90000, 0, lambda cmd, t: R())
+    assert out[0][1] is False and len(told) == 1 and sum(1 for m in logged if "does not hold" in m) == n_logged + 1
+    # put right (the folder holds the commit): quiet, and a later stale state is told again
+    (cache / "note.txt").write_text("B\n")
+    assert rab.update_plugins(now + 180000, 0, lambda cmd, t: R()) == [("windstorm-pit-stop@thewindstorm", True, "updated")]
+    (cache / "note.txt").write_text("A\n")
+    rab.update_plugins(now + 270000, 0, lambda cmd, t: R())
+    assert len(told) == 2

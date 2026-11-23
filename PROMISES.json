@@ -171,7 +171,7 @@
    "owner": "maintainer",
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
-   "test": "",
+   "test": "test_G7_9_update_checks_the_cache_folder_against_the_registry_commit",
    "proven": "",
    "issue": 58,
    "moved_why": "",

@@ -1206,14 +1206,83 @@ def update_plugins(now, behind_sessions, run=None):
             ok, first = False, f"{type(e).__name__}: {str(e)[:120]}"
         log(f"plugin update: {' '.join(cmd[2:])}: {'ok' if ok else 'FAILED'}: {first}")
         if cmd[2] == "update":
+            if ok:   # G7.9: the files must be the commit the registry now names; report and stop, never repair
+                toldf = os.path.join(BASE, "state", "cache-told.json")
+                told = pc.read_json(toldf, {}) or {}
+                problems = cache_problems(cmd[3])
+                for line in problems:
+                    log(f"plugin update: {cmd[3]}: {line}")
+                    if told.get(cmd[3]) != line:   # notify once per distinct state; the log says it every run
+                        notify(f"pit-stop: {line}")
+                    ok, first = False, line[:200]
+                new_told = dict(told, **({cmd[3]: problems[-1]} if problems else {}))
+                if not problems:
+                    new_told.pop(cmd[3], None)
+                if new_told != told:
+                    pc.write_json_atomic(toldf, new_told)
             out.append((cmd[3], ok, first))
-            if not ok:
+            if not ok and not first.startswith("cache folder "):
                 notify(f"pit-stop: plugin update failed for {cmd[3]}: {first}")
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     newest = plugin_root_now()
     if newest and os.path.realpath(newest) != os.path.realpath(here) and not os.environ.get("PIT_STOP_LAUNCHER"):
         log(f"plugin update: this timer runs {here}, not the installed {newest}; to follow updates, point it at "
             f"{os.path.join(pc.STATE_DIR, 'bin', 'pit-stop-restart')} (/pit-stop setup does)")
+    return out
+
+
+def cache_problems(plugin, run=None):
+    """G7.9: after an update, compare the cache folder each user-scope row of PLUGIN names in
+    plugins/installed_plugins.json with the commit that row names, read from the marketplace clone (blob ids
+    from `git ls-tree`, so nothing is copied). Returns one line per row whose folder does not hold that
+    commit's files. A row it cannot check (no folder, no sha, the commit not in the clone) is logged, not
+    reported. Files the commit does not have (such as __pycache__) are not counted. Reads only."""
+    import hashlib
+    run = run or (lambda cmd, t: subprocess.run(cmd, capture_output=True, timeout=t, stdin=subprocess.DEVNULL))
+    reg = pc.read_json(os.path.join(pc.CLAUDE_DIR, "plugins", "installed_plugins.json"), {}) or {}
+    market = plugin.split("@", 1)[-1]
+    clone = os.path.join(pc.CLAUDE_DIR, "plugins", "marketplaces", market)
+    out = []
+    for row in ((reg.get("plugins") or {}).get(plugin) or []):
+        if not isinstance(row, dict) or row.get("scope", "user") != "user":
+            continue
+        path, sha = row.get("installPath") or "", row.get("gitCommitSha") or ""
+        if not (path and sha and os.path.isdir(path) and os.path.isdir(clone)):
+            log(f"plugin update: {plugin}: cache not checked (no folder, no commit or no marketplace clone)")
+            continue
+        try:
+            r = run(["git", "-C", clone, "ls-tree", "-r", "-z", sha], 30)
+        except Exception as e:
+            log(f"plugin update: {plugin}: cache not checked ({type(e).__name__})")
+            continue
+        if r.returncode != 0:
+            log(f"plugin update: {plugin}: cache not checked (commit {sha[:12]} is not in the marketplace clone)")
+            continue
+        differ, total = [], 0
+        for entry in (r.stdout or b"").split(b"\0"):
+            if not entry:
+                continue
+            meta, name = entry.split(b"\t", 1)
+            kind, blob = meta.split()[1], meta.split()[2].decode()
+            if kind != b"blob":
+                continue
+            total += 1
+            rel = name.decode("utf-8", "replace")
+            f = os.path.join(path, rel)
+            try:
+                with open(f, "rb") as fh:
+                    data = fh.read()
+                got = hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+            except OSError:
+                got = None
+            if got != blob:
+                differ.append(rel)
+        if differ:
+            scope = row.get("scope", "user")
+            out.append(f"cache folder {path} does not hold {sha[:12]}: {len(differ)} of {total} files differ "
+                       f"(e.g. {', '.join(differ[:3])}). Claude Code's cache is not Pit Stop's to repair; to put it "
+                       f"right: claude plugin uninstall {plugin} --scope {scope}, then claude plugin install "
+                       f"{plugin} --scope {scope}")
     return out
 
 
