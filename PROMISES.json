@@ -218,6 +218,20 @@
    "issue": 62,
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P16",
+   "seen": "2026-11-22: every place that states Pit Stop's version said 0.6.1 at the v0.6.1 tag and on main, but main had taken 28 more commits (5 files, 57 lines in hooks and scripts) under that label, and through the './' entry four different commits were installed as 0.6.1 on real and test machines. A sister plugin whose manifest named an old version saw 'claude plugin update' say 'already at the latest version' and keep the old code (Claude Code 2.1.330); not yet seen with Pit Stop.",
+   "promise": "One version names one release: the changelog's top release, plugin.json and Pit Stop's pinned catalog ref agree; every entry in the catalog has a ref that is a tag and a sha that is that tag's own commit; and no release ships new code under the last release's version. Held by a test in this repository.",
+   "codon": "G7.10",
+   "issue": 66,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.14 (2026-11-23)
+- **One version in every place, and new code gets a new one** (plan change; G7.10 added, open). Every place that states Pit Stop's version said 0.6.1, but main's code had moved 28 commits past the v0.6.1 tag under that label, and four different commits were installed as 0.6.1. A sister plugin saw `claude plugin update` keep old code when the label did not change. A test now holds the changelog, plugin.json and the catalog's pins to one version, with every catalog entry pinned to a tag's own commit, and a release check refuses new code under the last tag's version. No invariant and no Part 0 rule changes.
+
 ## Plan 1.13 (2026-11-22)
 - **The auto-update proof needs an interactive session** (plan change; G13.4 and G16.1 clarified, both open). In a signed-in test run on Claude Code 2.1.280, a headless `claude -p` session did not refresh the plugin catalog, so the kit's auto-update check could not pass; and the kit's two prompts reached 25K tokens of a 100K window, so no compaction was asked. G16.1 now starts an interactive session and fills it past the window. No invariant and no Part 0 rule changes.
 

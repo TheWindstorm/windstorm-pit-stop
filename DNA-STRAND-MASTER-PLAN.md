@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.13 · 2026-11-22 · The Windstorm**
+**Plan version 1.14 · 2026-11-23 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -351,6 +351,8 @@ Pit Stop switches on Claude Code's own updates for the marketplace it came from,
 
 **G7.9 After an update, the files match the registry (open).** After every plugin update Pit Stop runs (`update_plugins()` in `scripts/restart_at_break.py`), it compares the files in the cache folder that `plugins/installed_plugins.json` names with the commit that row names, read from the marketplace clone, and when they differ logs and notifies `cache folder <path> does not hold <sha>`. Seen 2026-11-22: Claude Code 2.1.280 updated into a stale folder of the same version from another commit. Proof: `test_G7_9_update_checks_the_cache_folder_against_the_registry_commit`.
 
+**G7.10 One version, and new code gets a new one (open).** A test holds that the first release heading in `CHANGELOG.md` equals `version` in `.claude-plugin/plugin.json`; that Pit Stop's pinned catalog entry has `ref` `v<version>`; that every catalog entry's `ref` is a tag and its `sha` that tag's commit (`git ls-remote`); and that `scripts/release_check.py` fails when `hooks/`, `scripts/` or `skills/` differ from the newest tag still named in `plugin.json`. Seen 2026-11-22: main moved 28 commits past v0.6.1, still labelled 0.6.1. Needs: G7.7. Proof: `test_G7_10_one_version_in_every_place_and_new_code_gets_a_new_one`.
+
 ### G8 Needs-you list
 
 Pit Stop keeps a short list, `~/.claude/pit-stop/needs-you.md`, of what only a person can fix (sessions waiting on a prompt, sessions it cannot update and why, sessions without its hooks, this machine's Claude Code held behind), and tells the person when a new name appears.
@@ -510,7 +512,7 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 - M0 (released 0.1 to 0.5): G1, G2, G3, G4, G5, G7 (fleet), G8, G9, G10, G11, G12.
 - M1 (0.6.0): G6. Claude Code updates are off by default, and are tried on one machine before any other.
 - M2 (0.6.1): G13, G14, G15.
-- M2.1 (0.6.2): G19, with the open G7 codons (G7.6 to G7.9).
+- M2.1 (0.6.2): G19, with the open G7 codons (G7.6 to G7.10).
 - M3 (0.7): G16, then G17 from the kit's results.
 - M4 (0.8): G18.
 - M5 (1.0): the skill is renamed `windstorm-pit-stop`, with a notice in the update line and both names in the README for that release.
