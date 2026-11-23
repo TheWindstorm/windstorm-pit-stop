@@ -21,6 +21,15 @@ jobs:
       - run: python -m pytest -v -o console_output_style=classic tests/
         env:
           COLUMNS: "4096"
+  release-check:
+    # G7.10: only on the release pull request (head branch release-*), and by hand before a tag; not on every push.
+    if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 -I scripts/release_check.py
   skill-spec:
     runs-on: ubuntu-latest
     steps:

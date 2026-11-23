@@ -121,6 +121,8 @@ Claude can run the two terminal commands below for you. Then type `/reload-plugi
 /plugin install windstorm-pit-stop@thewindstorm
 ```
 
+Steps 1 and 2 were seen to work with no GitHub key and no sign-in on Claude Code 2.1.280 (Linux) and 2.1.330 (Linux and macOS); every entry in the catalog is fetched over https.
+
 **Step 3.** Copy this line, paste it and press Enter. It sets Pit Stop up for your projects. It shows a plan first and changes nothing until you say yes. It switches daily tuning on, fits every running session's folder now, and (if you use tmux) offers fleet mode.
 
 ```text

@@ -130,7 +130,7 @@
    "owner": "maintainer",
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
-   "test": "",
+   "test": "test_G7_6_every_catalog_entry_installs_over_https_with_no_key",
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
@@ -144,7 +144,7 @@
    "owner": "maintainer",
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
-   "test": "",
+   "test": "test_G7_7_pit_stops_catalog_entry_pins_a_release_tag",
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
@@ -228,7 +228,7 @@
    "owner": "maintainer",
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
-   "test": "",
+   "test": "test_G7_10_one_version_in_every_place_and_new_code_gets_a_new_one",
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
