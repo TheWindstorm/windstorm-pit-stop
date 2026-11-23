@@ -3198,6 +3198,17 @@ def test_G7_9_update_checks_the_cache_folder_against_the_registry_commit(tmp_pat
 
     class R:
         returncode, stdout, stderr = 0, "updated", ""
-    out = rab.update_plugins(time.time(), 0, lambda cmd, t: R())
+    now = time.time()
+    out = rab.update_plugins(now, 0, lambda cmd, t: R())
     assert out == [("windstorm-pit-stop@thewindstorm", False, got[0][:200])]
     assert told == [f"pit-stop: {got[0]}"]
+    # the same state the next day: logged again, not notified again (once per distinct state)
+    n_logged = sum(1 for m in logged if "does not hold" in m)
+    out = rab.update_plugins(now + 90000, 0, lambda cmd, t: R())
+    assert out[0][1] is False and len(told) == 1 and sum(1 for m in logged if "does not hold" in m) == n_logged + 1
+    # put right (the folder holds the commit): quiet, and a later stale state is told again
+    (cache / "note.txt").write_text("B\n")
+    assert rab.update_plugins(now + 180000, 0, lambda cmd, t: R()) == [("windstorm-pit-stop@thewindstorm", True, "updated")]
+    (cache / "note.txt").write_text("A\n")
+    rab.update_plugins(now + 270000, 0, lambda cmd, t: R())
+    assert len(told) == 2

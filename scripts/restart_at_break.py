@@ -1207,10 +1207,19 @@ def update_plugins(now, behind_sessions, run=None):
         log(f"plugin update: {' '.join(cmd[2:])}: {'ok' if ok else 'FAILED'}: {first}")
         if cmd[2] == "update":
             if ok:   # G7.9: the files must be the commit the registry now names; report and stop, never repair
-                for line in cache_problems(cmd[3]):
+                toldf = os.path.join(BASE, "state", "cache-told.json")
+                told = pc.read_json(toldf, {}) or {}
+                problems = cache_problems(cmd[3])
+                for line in problems:
                     log(f"plugin update: {cmd[3]}: {line}")
-                    notify(f"pit-stop: {line}")
+                    if told.get(cmd[3]) != line:   # notify once per distinct state; the log says it every run
+                        notify(f"pit-stop: {line}")
                     ok, first = False, line[:200]
+                new_told = dict(told, **({cmd[3]: problems[-1]} if problems else {}))
+                if not problems:
+                    new_told.pop(cmd[3], None)
+                if new_told != told:
+                    pc.write_json_atomic(toldf, new_told)
             out.append((cmd[3], ok, first))
             if not ok and not first.startswith("cache folder "):
                 notify(f"pit-stop: plugin update failed for {cmd[3]}: {first}")
