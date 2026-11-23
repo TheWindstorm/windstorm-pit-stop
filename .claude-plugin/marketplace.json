@@ -8,7 +8,12 @@
   "plugins": [
     {
       "name": "windstorm-pit-stop",
-      "source": "./",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/TheWindstorm/windstorm-pit-stop.git",
+        "ref": "v0.6.1",
+        "sha": "36f536a1301b8bc2dbda1eefdde0a435a9f90aa6"
+      },
       "description": "Windstorm Pit Stop, a context optimizer for Claude Code: compact at a break, at points fitted to each folder; restart onto the newest version at a break; clean reload."
     },
     {
