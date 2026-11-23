@@ -1368,8 +1368,8 @@ def gone_line(here=None):
         return (f"plugin folder {here}: {launcher.SAY['orphaned']}; nothing done. Pit Stop is installed elsewhere: "
                 f"point this timer at {os.path.join(pc.STATE_DIR, 'bin', 'pit-stop-restart')} (/pit-stop setup does)")
     off = timer_off_command()
-    return (f"{launcher.SAY['gone']}; nothing done. To take this timer off: "
-            + (off or "see \"Leaving Pit Stop\" in Pit Stop's README"))
+    return (f"{launcher.SAY['gone']}; nothing done (a copy run with --plugin-dir or from a working folder has no row "
+            f"either). If a timer runs this, take it off: " + (off or "see \"Leaving Pit Stop\" in Pit Stop's README"))
 
 
 def plugin_root_now():
