@@ -433,7 +433,7 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.7 Setup can be undone.** `python3 -I scripts/setup.py --undo` puts back what `--apply` and `--fleet` changed: the backed-up settings and marketplace entry, `"auto_tune"` in `pit-stop/config.json`, and the timer and launcher it installed. It lists each step, and leaves the history files in place, named. Seen 2026-11-22: after `claude plugin uninstall`, `autoUpdate: true`, `config.json` and `checkup/` stayed. Proof: `test_G12_7_setup_undo_puts_back_what_apply_changed`.
 
-**G12.8 Nothing runs once the plugin is gone (open).** `state()` in `scripts/launcher.py` answers `installed`, `orphaned` (the folder carries Claude Code's `.orphaned_at`), `gone` (the registry reads fine and has no Pit Stop row) or `unreadable`. Unless `installed`, the launcher starts nothing and the helper changes no session; each logs one line saying which, `gone` with the command that takes the timer off. Checkup names `unreadable`. After a `plugin update` the new folder runs. Proof: `test_G12_8_nothing_runs_once_the_plugin_is_gone`.
+**G12.8 Nothing runs once the plugin is gone.** `state()` in `scripts/launcher.py` answers `installed`, `orphaned` (the folder carries Claude Code's `.orphaned_at`), `gone` (the registry reads fine and has no Pit Stop row) or `unreadable`. Unless `installed`, the launcher starts nothing and the helper changes no session; each logs one line saying which, `gone` with the command that takes the timer off. Checkup names `unreadable`. After a `plugin update` the new folder runs. Proof: `test_G12_8_nothing_runs_once_the_plugin_is_gone`.
 
 ### G13 Self-update for everyone (open)
 
