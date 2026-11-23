@@ -186,7 +186,8 @@ def test_INV9_every_built_codon_has_its_test():
         src = open(p, encoding="utf-8").read()
         assert not re.search(r"mark\.(skip|skipif|xfail)|pytest\.xfail\(", src), f"{p}: a skipped test"
         for m in re.finditer(r"pytest\.skip\(([^)]*)\)", src):
-            assert m.group(1) == '"needs a POSIX sh"', f"{p}: pytest.skip({m.group(1)})"
+            assert m.group(1) in ('"needs a POSIX sh"', '"no git, or no road to github.com from this machine"'), \
+                f"{p}: pytest.skip({m.group(1)})"
     cs = codons()
     assert len(cs) >= 100
     for cid, _, line, is_open in cs:

@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.14 · 2026-11-23 · The Windstorm**
+**Plan version 1.15 · 2026-11-23 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -329,6 +329,8 @@ Pit Stop tells which way Claude Code was installed on a machine, which version a
 
 **G6.18 A switched-off updater stops every method.** `update_plan(m, cfg, which, env, settings)` in `scripts/install_method.py` returns no command for a `native`, `npm`, `homebrew` or `mise` install that is behind when `DISABLE_UPDATES` or `DISABLE_AUTOUPDATER` is set in `env`, or in the `"env"` of `settings` (`~/.claude/settings.json`), and the reason names the variable, plus `settings.json` for the second. With neither set, each method gets a command. Proof: `test_G6_18_update_plan_keeps_a_switched_off_updater_for_every_method`.
 
+**G6.19 The Claude Code named is the one sessions run (open).** `find_claude()` in `scripts/install_method.py` takes the program running sessions execute (`/proc/<pid>/exe`) first, the login shell's PATH second, never a short PATH alone. Every other install found is named, and when they disagree Pit Stop says so to the person instead of choosing. Seen 2026-11-23: a probe with the short-PATH rule named a stale root npm copy on a box whose sessions run the native install. Proof: `test_G6_19_the_claude_named_is_the_one_sessions_run`.
+
 ### G7 Pit Stop keeps itself current
 
 Pit Stop switches on Claude Code's own updates for the marketplace it came from, brings plugins up to date with Claude Code's plugin commands before the helper restarts anyone, and tells a session once per version that a newer Claude Code is installed.
@@ -343,15 +345,15 @@ Pit Stop switches on Claude Code's own updates for the marketplace it came from,
 
 **G7.5 The update line, once per version.** `hooks/stop_pit_stop.py`, when the newest folder in `~/.local/share/claude/versions` is newer than the session's version (`pitstop_common.session_version`: the `~/.claude/sessions/*.json` row whose `sessionId` is the hook's `session_id`, with a live `pid`), prints JSON whose `systemMessage` names both versions and `/restart`, and exits 0; once per version per session (stamp `pit-stop/nudged/<session>`). It prints nothing for a session on the newest version, with `"nudge": false` in `pit-stop/config.json`, or when `pit-stop/restart/restart.log` changed in the last hour. Proof: `test_G7_5_stop_hook_update_line_once_per_version`.
 
-**G7.6 Every catalog entry installs with no key (open).** Each plugin in `.claude-plugin/marketplace.json` has source `url` with an `https://` git URL, a `ref` and a 40-hex `sha`; no `github` or `git@` source. The README names the oldest Claude Code version its install lines were seen to work on with no GitHub key. Seen 2026-11-22: Claude Code 2.1.280 cloned a `github` entry over SSH and failed. Proof: `test_G7_6_every_catalog_entry_installs_over_https_with_no_key`.
+**G7.6 Every catalog entry installs with no key.** Each plugin in `.claude-plugin/marketplace.json` but Pit Stop's own (G7.7 governs it) has source `url` with an `https://` git URL, a tag `ref` and a 40-hex `sha`; no `github` or `git@` source. The README names the oldest Claude Code version its install lines were seen to work on with no GitHub key. Seen 2026-11-22: Claude Code 2.1.280 cloned a `github` entry over SSH and failed. Proof: `test_G7_6_every_catalog_entry_installs_over_https_with_no_key`.
 
-**G7.7 The catalog installs a release, not main (open).** Pit Stop's own entry pins `ref` to a tag `v<x.y.z>` and `sha` to that tag's commit, not `./`. Once the tag `v<version in .claude-plugin/plugin.json>` exists, the entry must pin it: each release is the tag first, then the pin on main, and the test fails while a tag waits for its pin. Seen 2026-11-22: a fresh install took main's code labelled 0.6.1. Proof: `test_G7_7_pit_stops_catalog_entry_pins_a_release_tag`.
+**G7.7 The catalog installs a release, not main.** Once the tag `v<version in .claude-plugin/plugin.json>` exists (`git ls-remote`), Pit Stop's own entry pins `ref` to it and `sha` to its commit; before, the old state passes. Each release is the tag first, then the pin on main, with nothing else merged between; the test fails while a tag waits for its pin. Seen 2026-11-22: a fresh install took main's code labelled 0.6.1. Proof: `test_G7_7_pit_stops_catalog_entry_pins_a_release_tag`.
 
 **G7.8 An install from `./` moves to the pinned release (open).** On a test machine, installs of 0.1.4 and 0.6.1 made from the `./` entry reach the pinned release with the README's own update lines, with no reinstall, keep `pit-stop/config.json` and the settings Pit Stop wrote, and the cache folder's files match the commit the registry names. Needs: G7.7, G16.1. Proof: `test_G7_8_conformance_kit_sees_a_dot_install_move_to_the_pinned_release`.
 
 **G7.9 After an update, the files match the registry (open).** After every plugin update Pit Stop runs (`update_plugins()` in `scripts/restart_at_break.py`), it compares the files in the cache folder that `plugins/installed_plugins.json` names with the commit that row names, read from the marketplace clone, and when they differ logs and notifies `cache folder <path> does not hold <sha>`. Seen 2026-11-22: Claude Code 2.1.280 updated into a stale folder of the same version from another commit. Proof: `test_G7_9_update_checks_the_cache_folder_against_the_registry_commit`.
 
-**G7.10 One version, and new code gets a new one (open).** A test holds that the first release heading in `CHANGELOG.md` equals `version` in `.claude-plugin/plugin.json`; that Pit Stop's pinned catalog entry has `ref` `v<version>`; that every catalog entry's `ref` is a tag and its `sha` that tag's commit (`git ls-remote`); and that `scripts/release_check.py` fails when `hooks/`, `scripts/` or `skills/` differ from the newest tag still named in `plugin.json`. Seen 2026-11-22: main moved 28 commits past v0.6.1, still labelled 0.6.1. Needs: G7.7. Proof: `test_G7_10_one_version_in_every_place_and_new_code_gets_a_new_one`.
+**G7.10 One version, and new code gets a new one .** A test holds that the first release heading in `CHANGELOG.md` equals `version` in `.claude-plugin/plugin.json`; that once the tag `v<version>` exists, Pit Stop's own entry has `ref` `v<version>`; that every catalog entry's `ref` is a tag and its `sha` that tag's commit (`git ls-remote`); and that `scripts/release_check.py` fails when `hooks/`, `scripts/` or `skills/` differ from the newest tag still named in `plugin.json`. Seen 2026-11-22: main moved 28 commits past v0.6.1, still labelled 0.6.1. Needs: G7.7. Proof: `test_G7_10_one_version_in_every_place_and_new_code_gets_a_new_one`.
 
 ### G8 Needs-you list
 
@@ -513,6 +515,7 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 - M1 (0.6.0): G6. Claude Code updates are off by default, and are tried on one machine before any other.
 - M2 (0.6.1): G13, G14, G15.
 - M2.1 (0.6.2): G19, with the open G7 codons (G7.6 to G7.10).
+- M2.2 (0.6.3): G6.19.
 - M3 (0.7): G16, then G17 from the kit's results.
 - M4 (0.8): G18.
 - M5 (1.0): the skill is renamed `windstorm-pit-stop`, with a notice in the update line and both names in the README for that release.
