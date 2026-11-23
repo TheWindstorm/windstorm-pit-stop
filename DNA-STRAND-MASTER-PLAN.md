@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.15 · 2026-11-23 · The Windstorm**
+**Plan version 1.16 · 2026-11-23 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -471,9 +471,11 @@ Sessions on Windows, WSL and non-native installs also move to a new Claude Code 
 
 One script proves Pit Stop in any Claude Code surface in about ten minutes.
 
-**G16.1 The kit (open).** `scripts/conformance.py` installs the previous Pit Stop release (the `v*` tag before the newest; open question 7) with auto-update on, starts one interactive session with `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set low and fills it past that window, and then prints, for each check, `PASS` only when its file shows it and `FAIL` otherwise, reading files only: a `HOLD` and an `ALLOW` line in `precompact.log`; the Stop hook's `seen/<session_id>` stamp; a Pit Stop version in `installed_plugins.json` newer than the one installed. Proof: `test_G16_1_conformance_checks_read_files_only`.
+**G16.1 The kit (open).** `kit/conformance.py`, a test tool outside `scripts/` (INV6), installs the previous Pit Stop release (the `v*` tag before the newest; open question 7) with auto-update on, starts one interactive session with `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set low and fills it past that window, and then prints, for each check, `PASS` only when its file shows it and `FAIL` otherwise, reading files only: a `HOLD` and an `ALLOW` line in `precompact.log`; the Stop hook's `seen/<session_id>` stamp; a Pit Stop version in `installed_plugins.json` newer than the one installed. Proof: `test_G16_1_conformance_checks_read_files_only`.
 
 **G16.2 Same kit everywhere (open).** The kit runs unchanged on macOS, Linux and Windows (Git Bash), and its output is one line per check in the form `<check>: PASS|FAIL <evidence file>`. Needs: G16.1. Proof: `test_G16_2_conformance_output_format`.
+
+**G16.3 The kit shows its own fill.** Its first check, `fill`, reads the run's own transcripts: PASS only when a model call's context reached the window. The session takes turns of new filler until `precompact.log` shows a HOLD and an ALLOW or the context stops growing. Each turn's peak goes to an evidence file, numbers only. A fill FAIL exits 3. Seen 2026-11-22: a run reached 25K of 100K, unsaid. Proof: `test_G16_3_the_kit_shows_its_own_fill`.
 
 ### G17 Harness verdicts and adapter study (open)
 
