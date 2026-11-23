@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.16 · 2026-11-23 · The Windstorm**
+**Plan version 1.17 · 2026-11-23 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -419,7 +419,7 @@ Two hooks speak at the edges of a turn: SessionStart gives a short checklist aft
 
 The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.2, G12.3; CI also loads it with PyYAML), and a fixed launcher path lets a timer run whichever plugin version is installed now.
 
-**G12.1 The launcher finds the installed plugin.** `plugin_root(claude_dir)` in `scripts/launcher.py` returns the `installPath` recorded for `windstorm-pit-stop@*` in `plugins/installed_plugins.json` (user scope first) whose `scripts/restart_at_break.py` exists; with no record, the version folder under `plugins/cache/*/windstorm-pit-stop/` with the highest x.y.z (`0.10.0` over `0.2.0`) holding that script; `None` when there is neither. Proof: `test_G12_1_launcher_finds_the_installed_plugin`.
+**G12.1 The launcher finds the installed plugin.** `plugin_root(claude_dir)` in `scripts/launcher.py` returns the `installPath` recorded for `windstorm-pit-stop@*` in `plugins/installed_plugins.json` (user scope first) whose `scripts/restart_at_break.py` exists and whose folder carries no `.orphaned_at`; when no recorded path holds it, the version folder under `plugins/cache/*/windstorm-pit-stop/` with the highest x.y.z (`0.10.0` over `0.2.0`) holding that script and no `.orphaned_at`; `None` when there is neither, and when the registry has no Pit Stop row or cannot be read (G12.8). Proof: `test_G12_1_launcher_finds_the_installed_plugin`.
 
 **G12.2 The checker for strict YAML.** `plain_scalar_problems(value)` in `tests/test_skill_spec.py` returns a non-empty list for an unquoted value that contains `: `, ends with `:`, contains ` #`, or starts with one of `!&*{}[],%@?-` or a backtick; and an empty list for a quoted value or one with none of these. Proof: `test_G12_2_the_checker_catches_what_strict_parsers_reject`.
 
@@ -432,6 +432,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 **G12.6 Trials change nothing.** In `evals/tools/trigger_trials.py`, `command(query, model)` returns an argv holding `--settings` with `windstorm-pit-stop@thewindstorm` set to false, `--disallowedTools Bash Edit Write NotebookEdit` and `--permission-mode default`; `trial_paths(scratch, q, r)` gives each trial its own folder, with its transcript outside it. Trials run one at a time. In every results file `installed_visible` and `timed_out` are 0 and `ours_visible` equals `trials`. Proof: `test_G12_6_trigger_trials_run_isolated_and_read_only`.
 
 **G12.7 Setup can be undone.** `python3 -I scripts/setup.py --undo` puts back what `--apply` and `--fleet` changed: the backed-up settings and marketplace entry, `"auto_tune"` in `pit-stop/config.json`, and the timer and launcher it installed. It lists each step, and leaves the history files in place, named. Seen 2026-11-22: after `claude plugin uninstall`, `autoUpdate: true`, `config.json` and `checkup/` stayed. Proof: `test_G12_7_setup_undo_puts_back_what_apply_changed`.
+
+**G12.8 Nothing runs once the plugin is gone (open).** `state()` in `scripts/launcher.py` answers `installed`, `orphaned` (the folder carries Claude Code's `.orphaned_at`), `gone` (the registry reads fine and has no Pit Stop row) or `unreadable`. Unless `installed`, the launcher starts nothing and the helper changes no session; each logs one line saying which, `gone` with the command that takes the timer off. Checkup names `unreadable`. After a `plugin update` the new folder runs. Proof: `test_G12_8_nothing_runs_once_the_plugin_is_gone`.
 
 ### G13 Self-update for everyone (open)
 
@@ -516,7 +518,7 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 - M0 (released 0.1 to 0.5): G1, G2, G3, G4, G5, G7 (fleet), G8, G9, G10, G11, G12.
 - M1 (0.6.0): G6. Claude Code updates are off by default, and are tried on one machine before any other.
 - M2 (0.6.1): G13, G14, G15.
-- M2.1 (0.6.2): G19, with the open G7 codons (G7.6 to G7.10).
+- M2.1 (0.6.2): G19, with the open G7 codons (G7.6 to G7.10), and G12.8.
 - M2.2 (0.6.3): G6.19.
 - M3 (0.7): G16, then G17 from the kit's results.
 - M4 (0.8): G18.
@@ -557,6 +559,7 @@ The evolution so far, oldest first. Each line gives the date and release, what w
 - 2026-11-20 (plan 1.0): Pit Stop is for Claude Code only. Other agents are studied (G17), not promised.
 - 2026-11-20 (plan 1.1): the skill's description is gated by trigger evals on Sonnet (G12.4 to G12.6), 10 queries that must load it and 10 near misses that must not. A description that loads at the wrong time costs every session that carries it; one that fails to load leaves the person without Pit Stop.
 - 2026-11-20 (plan 1.1): the restart helper can also reach sessions in a Herdr pane (G4.35 to G4.38, G8.9), opt-in: `"herdr": true` in `restart.json`. Typing into a Herdr pane reaches lanes whose owner has not agreed, and stability and the person's control of their agent come first (principle 10). It found sessions only through tmux, so 6 of 98 sessions on the build machine, 5 of them in Herdr, were never moved to a new Claude Code at a break. tmux stays first; Herdr is used only for a session Herdr names by its session id.
+- 2026-11-23 (plan 1.17): Pit Stop does nothing once Claude Code has uninstalled it (G12.8), and "the registry could not be read" is not "gone": that pass changes no session either, and the next one reads it again. A person who leaves by Claude Code's own uninstall must not be driven by code they removed (principle 10: the person's control of their agent).
 
 ## Appendix A. Changing this plan
 

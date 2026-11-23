@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.17 (2026-11-23)
+- **Nothing runs once the plugin is gone** (plan change; G12.8 added, open, due 0.6.2 in milestone M2.1; G12.1's fallback narrowed). On a Linux test account with Claude Code 2.1.280, `claude plugin uninstall` emptied Pit Stop's row in the plugin registry but left its cache folder, marked `.orphaned_at`. Pit Stop's launcher then found that folder, so a timer from `/pit-stop setup --fleet` kept running the uninstalled restart helper every 5 minutes. A sister plugin saw the same marker on 2.1.330. From now on the launcher and the helper change no session when the folder is marked, when the registry has no Pit Stop row, or when it cannot be read; each pass says which in one line. No invariant and no Part 0 rule changes.
+
 ## Plan 1.16 (2026-11-23)
 - **The kit shows its own fill** (plan change; G16.3 added; G16.1's path changes). On 2026-11-22 a signed-in kit run on Claude Code 2.1.280 reached 25K tokens of a 100K window, so `hold` and `allow` failed for the kit's reason, not Pit Stop's, and nothing said so; the transcript that would have told why was gone with the test account's cleanup. G16.3 gives the kit a `fill` check read from the session's own transcript, a turn-by-turn record of the peak that outlives the account, and its own exit code. G16.1's file moves to `kit/conformance.py`: it is a test tool that starts `claude -p`, and INV6 keeps that out of `scripts/` and `hooks/`. G16.1 stays open: its interactive session is not built. No invariant and no Part 0 rule changes.
 
