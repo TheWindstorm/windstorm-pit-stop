@@ -495,7 +495,7 @@ When a prompt takes a big session in a new direction, Pit Stop offers a refresh 
 
 **G18.2 Acting needs the person's yes (open).** Only when the folder profile has `"topic_switch_compact": true`, which only `/pit-stop setup` writes after the person says yes, the helper (`scripts/restart_at_break.py`) types `/compact` at the next break in a session the hook flagged. A hook cannot compact by itself. Needs: G18.1. Proof: `test_G18_2_topic_switch_acts_only_when_switched_on`.
 
-### G19 A proof is a test that ran (open)
+### G19 A proof is a test that ran
 
 A codon or a PROMISES row counts as proven only by a test the runner collected and passed in this run, never by a name found in a file.
 
@@ -505,7 +505,7 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 
 **G19.3 A skip says why and is not a pass.** A skipped test never counts as passed. The summary lists it as `not run here: <test> (<reason>)`. Outside CI, a skip on a condition of the machine, with its reason, does not fail the run; in CI (the environment variable `CI` is `true`), a built proof that did not pass fails it. A skip with no reason, or on no condition of the machine, fails every run. Proof: `test_G19_3_a_skip_is_listed_and_never_counts_as_passed`.
 
-**G19.4 The plan check runs in CI (open).** `.github/workflows/tests.yml` runs `codon_check.py --strict --proofs tests` on the plan, and it finds tests the way G19.1 counts them, at the top level only. Proof: `test_G19_4_ci_runs_the_plan_check`.
+**G19.4 The plan check runs in CI.** CI runs `tests/test_strand.py` on every push and pull request. Its checks, written in this repository: version line; genes under Genes; codon form, heading, numbering; invariant Proofs; named ids exist; no loop in what codons need; genes in Milestones; ASSUMES: on open questions; the changelog's newest Plan entry; the 80-word cap. A built codon's test must pass (G19.1); an open one only names it. Vague words are the lane's hand check, not CI's. Proof: `test_G19_4_ci_runs_the_plan_check`.
 
 ## Part 5. Milestones
 
