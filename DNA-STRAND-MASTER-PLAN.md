@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.12 · 2026-11-22 · The Windstorm**
+**Plan version 1.13 · 2026-11-22 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -439,7 +439,7 @@ Every install, not only fleet mode, moves to a new Pit Stop release by itself an
 
 **G13.3 Auto-update switched off is named (open).** When `DISABLE_UPDATES`, `DISABLE_AUTOUPDATER` or `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` is set and `FORCE_AUTOUPDATE_PLUGINS` is not `1`, `/pit-stop checkup` shows the line `Plugin auto-update is off on this computer (<variable>), so Pit Stop updates only when you update it.` Proof: `test_G13_3_checkup_names_switched_off_plugin_updates`.
 
-**G13.4 Proven on a fresh install (open).** On a test machine, an install of the previous release with auto-update on for `thewindstorm` reaches the newest release within one interactive session plus ten minutes, and the person sees Claude Code's `Plugin updated` line. Needs: G16.1. Proof: `test_G13_4_conformance_kit_sees_the_plugin_update`.
+**G13.4 Proven on a fresh install (open).** On a test machine, an install of the previous release with auto-update on for `thewindstorm` reaches the newest release within one interactive session plus ten minutes, and the person sees Claude Code's `Plugin updated` line. Seen 2026-11-22 on Claude Code 2.1.280: a headless `claude -p` session did not refresh the catalog, so only an interactive one counts. Needs: G16.1. Proof: `test_G13_4_conformance_kit_sees_the_plugin_update`.
 
 ### G14 Agent install file (open)
 
@@ -467,7 +467,7 @@ Sessions on Windows, WSL and non-native installs also move to a new Claude Code 
 
 One script proves Pit Stop in any Claude Code surface in about ten minutes.
 
-**G16.1 The kit (open).** `scripts/conformance.py` installs the previous Pit Stop release (the `v*` tag before the newest; open question 7) with auto-update on, starts one session with `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set low, and then prints, for each check, `PASS` only when its file shows it and `FAIL` otherwise, reading files only: a `HOLD` and an `ALLOW` line in `precompact.log`; the Stop hook's `seen/<session_id>` stamp; a Pit Stop version in `installed_plugins.json` newer than the one installed. Proof: `test_G16_1_conformance_checks_read_files_only`.
+**G16.1 The kit (open).** `scripts/conformance.py` installs the previous Pit Stop release (the `v*` tag before the newest; open question 7) with auto-update on, starts one interactive session with `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set low and fills it past that window, and then prints, for each check, `PASS` only when its file shows it and `FAIL` otherwise, reading files only: a `HOLD` and an `ALLOW` line in `precompact.log`; the Stop hook's `seen/<session_id>` stamp; a Pit Stop version in `installed_plugins.json` newer than the one installed. Proof: `test_G16_1_conformance_checks_read_files_only`.
 
 **G16.2 Same kit everywhere (open).** The kit runs unchanged on macOS, Linux and Windows (Git Bash), and its output is one line per check in the form `<check>: PASS|FAIL <evidence file>`. Needs: G16.1. Proof: `test_G16_2_conformance_output_format`.
 
