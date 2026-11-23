@@ -246,6 +246,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P18",
+   "seen": "2026-11-22, in a signed-in conformance kit run on a Linux test account with Claude Code 2.1.280: the kit's session reached 25K tokens of a 100K window, so its hold and allow checks failed, and nothing told \"the kit did not fill\" from \"Pit Stop failed\". On 2026-11-23 the cause could no longer be read: the session's transcript was gone with the test account's cleanup.",
+   "promise": "The kit shows its own fill: its first check, fill, reads the session's own transcript and passes only when a model call's context reached the window; the session takes turns of new filler until precompact.log shows a HOLD and an ALLOW or the context stops growing; each turn's peak goes to an evidence file, numbers only, kept off the test account; a fill FAIL exits 3.",
+   "codon": "G16.3",
+   "issue": 81,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "test": "test_G16_3_the_kit_shows_its_own_fill",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
