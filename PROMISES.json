@@ -271,7 +271,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G12_8_nothing_runs_once_the_plugin_is_gone",
-   "proven": "",
+   "proven": "2026-11-23, on a stock Ubuntu 24.04.5 virtual machine with Claude Code 2.1.330 and no sign-in, from this row's code at the pull request's head 0b06cc6 (scripts/ there differs from the merged release branch only in gone_line(), which a timer's run through the launcher does not reach): fleet setup installed the timer; after Claude Code's own `claude plugin uninstall`, the timer's next passes started nothing and logged that Pit Stop is not installed, with `systemctl --user disable --now pit-stop-restart.timer`; that command, run as printed, exited 0 and the timer was gone. Installing the same version again cleared `.orphaned_at` and the helper ran again. Also on a Linux test account with Claude Code 2.1.280: the marker was cleared on the same-version reinstall, twice. Not seen on macOS (no command is printed there).",
    "moved_why": "",
    "moved_by_person": ""
   }
