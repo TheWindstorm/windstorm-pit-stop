@@ -260,6 +260,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P19",
+   "seen": "2026-11-23, on a Linux test account with Claude Code 2.1.280: `claude plugin uninstall` emptied Pit Stop's row in the plugin registry but left its cache folder, marked `.orphaned_at`, and the launcher that fleet mode's timer runs picked that folder, so a person who had set up fleet mode and left by Claude Code's own uninstall would keep a timer running the uninstalled restart helper (restarts, typed notes) every 5 minutes. A sister plugin saw the same marker on a stock machine with 2.1.330.",
+   "promise": "Nothing runs once the plugin is gone: the launcher starts nothing and the restart helper changes no session when the folder carries `.orphaned_at`, when the registry reads fine and has no Pit Stop row, or when it cannot be read (that pass only); each pass says which in one line, with the command that takes the timer off when the plugin is gone; the checkup names an unreadable registry; after a plugin update the new folder runs.",
+   "codon": "G12.8",
+   "issue": 82,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "test_G12_8_nothing_runs_once_the_plugin_is_gone",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

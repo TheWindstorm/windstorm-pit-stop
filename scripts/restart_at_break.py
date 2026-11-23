@@ -1340,6 +1340,33 @@ def update_claude_code(now, run=None, machine=None):
     return None
 
 
+def timer_off_command():
+    """The command that takes off the fleet timer (launcher.timer_off()), or None on macOS."""
+    import launcher
+    return launcher.timer_off()
+
+
+def gone_line(here=None):
+    """None while Pit Stop is installed and HERE (this helper's plugin folder) is not one Claude Code left
+    behind; else the one line a pass logs before it does nothing (G12.8). Seen 2026-11-23 (Claude Code
+    2.1.280): `claude plugin uninstall` empties the registry row and leaves the cache folder, marked
+    .orphaned_at. A registry that cannot be read is not "gone": that pass changes no session, and the line
+    neither says Pit Stop is not installed nor advises taking the timer off."""
+    import launcher
+    here = here or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    rows = launcher.registry_rows(pc.CLAUDE_DIR)     # read ONCE: two reads can disagree while Claude Code writes it
+    marked = launcher.orphaned(here)
+    if rows is None:
+        marked = f"plugin folder {here} carries .orphaned_at, and " if marked else ""
+        return f"plugin registry: {marked}{launcher.SAY['unreadable']}"
+    if rows and not marked:
+        return None
+    if rows:
+        return (f"plugin folder {here}: {launcher.SAY['orphaned']}; nothing done. Pit Stop is installed elsewhere: "
+                f"point this timer at {os.path.join(pc.STATE_DIR, 'bin', 'pit-stop-restart')} (/pit-stop setup does)")
+    return f"{launcher.SAY['gone']}; nothing done {launcher.gone_advice()}"
+
+
 def plugin_root_now():
     """The folder Claude Code has installed for this plugin now (see scripts/launcher.py), or None."""
     try:
@@ -1451,6 +1478,10 @@ def main():
     bad = unknown_options()
     if bad:
         log(f"unknown option(s) {' '.join(bad)}; nothing done (known: {' '.join(KNOWN_OPTIONS)})")
+        return
+    gone = gone_line()
+    if gone:   # G12.8: once the plugin is gone (or its registry cannot be read), no session is touched
+        log(gone)
         return
     for w in CFG_WARNINGS:
         log(w)
