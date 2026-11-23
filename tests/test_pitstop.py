@@ -514,6 +514,7 @@ def _history(tmp_path, monkeypatch, cycles=4, per=30, gap_min=1, start=300000, p
     monkeypatch.setattr(pc, "STATE_DIR", str(tmp_path / "state"))
     monkeypatch.setattr(pc, "FOLDERS", str(tmp_path / "state" / "folders"))
     monkeypatch.setattr(pc, "LANES", str(tmp_path / "state" / "lanes"))
+    monkeypatch.setattr(pc, "CONFIG", str(tmp_path / "state" / "config.json"))   # never the person's own switches
     proj = tmp_path / "work"
     proj.mkdir(exist_ok=True)
     d = projects / pc.project_key(str(proj))
@@ -1724,6 +1725,53 @@ def test_G2_24_cache_age_follows_the_last_model_call_not_the_last_dated_row(tmp_
     assert rab.reload_due(_rl(idle=30, call_age=call_age, ctx=300_000), on)[0] is False
     # no call seen at all (or a test's stand-in): quiet time is used
     assert rab.call_age_of({"sessionId": "never-read"}, 77) == 77
+
+
+def test_G2_25_the_context_limit_comes_from_the_model(tmp_path, monkeypatch):
+    """Seen 2026-11-22: a 1M Haiku folder that had peaked at 38K was told 150K/100K, "the right one for a
+    200K context". The limit comes from the folder's newest model; off the list, it is said to be assumed."""
+    import pitstop_common as pc
+    import optimize as op
+    monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
+    monkeypatch.setattr(pc, "CONFIG", str(tmp_path / "config.json"))
+    now = time.time()
+
+    def folder(name, models):
+        cwd = str(tmp_path / name)
+        rows = []
+        for i, mdl in enumerate(models):
+            rows.append({"type": "user", "timestamp": _iso(now - 3600 + i * 60), "message": {"content": "go"}})
+            rows.append({"type": "assistant", "timestamp": _iso(now - 3590 + i * 60), "message": {
+                "id": f"msg-{i}", "model": mdl, "content": [{"type": "text", "text": "ok"}],
+                "usage": {"input_tokens": 1000, "cache_read_input_tokens": 37_000}}})
+        _transcript(pc, cwd, "sid-" + name, rows)
+        m = op.analyze(cwd, 7)
+        return m, op.recommend(m)
+
+    # the stress test's folder: Haiku 5.5 is 1M, so its own rules for a 1M context apply, and no guess is stated
+    m, rec = folder("haiku", ["claude-haiku-5-5"])
+    assert m["model"] == "claude-haiku-5-5" and m["max_context"] == 38_000
+    assert rec["context_limit"] == 1_000_000 and rec["window"] == 500_000 and rec["idle_point"] >= 200_000
+    assert not rec["context_limit_assumed"] and not any("200K context" in w or "assumed" in w for w in rec["why"])
+    # the NEWEST model decides: a folder that moved from an unknown model to a [1m] one
+    m, rec = folder("moved", ["claude-sonnet-5-5", "claude-opus-5-5[1m]"])
+    assert m["model"] == "claude-opus-5-5[1m]" and rec["context_limit"] == 1_000_000
+    # a dated id is the same model
+    assert op.model_context("claude-fable-5-2-20261101") == 1_000_000 and op.model_context("<synthetic>") is None
+    # off the list: 200K, said to be assumed, never "the right one for a 200K context"
+    m, rec = folder("unknown", ["claude-sonnet-5-5"])
+    assert rec["context_limit"] == 200_000 and rec["context_limit_assumed"]
+    assert op.UNKNOWN_CONTEXT == "could not tell this model's context; assumed 200K; pass --context-limit"
+    assert op.UNKNOWN_CONTEXT in rec["why"] and not any("right one for" in w for w in rec["why"])
+    # --context-limit wins over the model, and then nothing is assumed
+    rec = op.recommend(m, context_limit=1_000_000)
+    assert rec["context_limit"] == 1_000_000 and not rec["context_limit_assumed"] and op.UNKNOWN_CONTEXT not in rec["why"]
+    # a peak above 200K proves a 1M model even when the id is not on the list
+    rec = op.recommend(dict(m, max_context=450_000))
+    assert rec["context_limit"] == 1_000_000 and not rec["context_limit_assumed"]
+    # the daily tuner's log says so too
+    import autotune
+    assert "op.UNKNOWN_CONTEXT if rec.get(\"context_limit_assumed\")" in open(autotune.__file__).read()
 
 
 def test_G4_31_a_restart_ready_session_that_lost_the_run_limit_is_not_reloaded_instead(tmp_path, monkeypatch):
