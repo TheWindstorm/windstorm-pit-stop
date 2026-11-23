@@ -14,10 +14,10 @@
     {
       "name": "windstorm-pit-board",
       "source": {
-        "source": "github",
-        "repo": "TheWindstorm/windstorm-pit-board",
-        "ref": "v0.1.1",
-        "sha": "dc80189398ce9c5d3ec8e21ece3fb528913924df"
+        "source": "url",
+        "url": "https://github.com/TheWindstorm/windstorm-pit-board.git",
+        "ref": "v0.1.2",
+        "sha": "494ffff4d7b64524ca8d7770603513741663409b"
       },
       "description": "Windstorm Pit Board: every ask an agent needs from you, out of the scroll. Per-lane log, status line count, `pb` board, reminder after compaction."
     }

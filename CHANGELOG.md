@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.15 (2026-11-23)
+- **The Claude Code named is the one sessions run** (plan change; G6.19 added, open, due 0.6.3 in milestone M2.2). On one Linux box, a read-only probe that finds `claude` on a short PATH, by the rule `find_claude()` uses, named a root-owned npm copy (2.1.322) that nothing runs, while the person's sessions run Anthropic's native install in their own folder; Claude Code's own record said `global`. Pit Stop's code was read, not run, there. It will take what running sessions execute first and the login shell's PATH second, name every other install, and say so when they disagree. No invariant and no Part 0 rule changes.
+
 ## Plan 1.14 (2026-11-23)
 - **One version in every place, and new code gets a new one** (plan change; G7.10 added, open). Every place that states Pit Stop's version said 0.6.1, but main's code had moved 28 commits past the v0.6.1 tag under that label, and four different commits were installed as 0.6.1. A sister plugin saw `claude plugin update` keep old code when the label did not change. A test now holds the changelog, plugin.json and the catalog's pins to one version, with every catalog entry pinned to a tag's own commit, and a release check refuses new code under the last tag's version. No invariant and no Part 0 rule changes.
 
