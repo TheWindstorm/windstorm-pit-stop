@@ -685,6 +685,13 @@ def test_G12_8_nothing_runs_once_the_plugin_is_gone(tmp_path, monkeypatch, capsy
     for odd in ("{not json", json.dumps(["a list"]), json.dumps({"plugins": "odd"})):
         reg.write_text(odd)
         assert launcher.find(str(tmp_path)) == (None, "unreadable") and launcher.state(None, str(tmp_path)) == "unreadable"
+    if os.geteuid() != 0:                                # a file that exists and cannot be opened (root reads it)
+        reg.write_text(json.dumps({"plugins": {"windstorm-pit-stop@thewindstorm": [row("0.6.2")]}}))
+        os.chmod(reg, 0)
+        try:
+            assert launcher.find(str(tmp_path)) == (None, "unreadable") and launcher.registry_rows(str(tmp_path)) is None
+        finally:
+            os.chmod(reg, 0o600)
     # the launcher itself: one line, exit 0, the helper never started; a live run keeps the line in restart.log
     ran = []
     monkeypatch.setattr(launcher, "CLAUDE_DIR", str(tmp_path))
@@ -717,7 +724,8 @@ def _g12_8_the_helper_changes_no_session(tmp_path, monkeypatch, capsys):
     cases = [(json.dumps({"plugins": {"other@x": [{"installPath": str(other)}]}}), None, "not installed"),
              ("{not json", None, "could not be read"),
              (json.dumps({"plugins": {"windstorm-pit-stop@thewindstorm": [{"installPath": str(other)}]}}),
-              ".orphaned_at", "point this timer at")]
+              ".orphaned_at", "point this timer at"),
+             ("{not json", ".orphaned_at", "carries .orphaned_at, and Claude Code's plugin registry could not be read")]
     for content, mark, word in cases:
         reg.write_text(content)
         here = tmp_path / "here"
@@ -729,9 +737,22 @@ def _g12_8_the_helper_changes_no_session(tmp_path, monkeypatch, capsys):
         out = capsys.readouterr().out.strip().splitlines()
         assert len(out) == 1 and word in out[0], out
         assert "nothing done" in out[0] or "no session changed this pass" in out[0], out
+        if "could not be read" in out[0]:                # rule 6: a failed read never reads as gone, nor advises
+            assert "not installed" not in out[0] and "timer off" not in out[0], out
     reg.write_text(json.dumps({"plugins": {}}))
     line = rab.gone_line(str(tmp_path / "x"))
     assert line.endswith(rab.timer_off_command()) and "not installed" in line
+    # the command a person pastes is the one setup's own undo runs (setup.py read, not imported or run)
+    import ast
+    tree = ast.parse(open(os.path.join(ROOT, "scripts", "setup.py"), encoding="utf-8").read())
+    undo = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "undo")
+    cmds = [[e.value for e in n.elts] for n in ast.walk(undo) if isinstance(n, ast.List)
+            and n.elts and all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in n.elts)]
+    assert rab.timer_off_command().split() in cmds
+    assert "pit-stop-restart.timer" in {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant)}
+    monkeypatch.setattr(rab.sys, "platform", "darwin")   # no Mac command has been run as printed: the README's place
+    assert rab.timer_off_command() is None and rab.gone_line(str(tmp_path / "x")).endswith("in Pit Stop's README")
+    monkeypatch.setattr(rab.sys, "platform", "linux")
     # installed: the helper goes on to the sessions
     reg.write_text(json.dumps({"plugins": {"windstorm-pit-stop@thewindstorm": [{"installPath": ROOT}]}}))
     monkeypatch.setattr(rab, "gone_line", lambda f=rab.gone_line: f(ROOT))
