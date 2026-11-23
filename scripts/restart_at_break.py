@@ -1354,14 +1354,14 @@ def gone_line(here=None):
     neither says Pit Stop is not installed nor advises taking the timer off."""
     import launcher
     here = here or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    st = launcher.state(here, pc.CLAUDE_DIR)
-    if st == "installed":
-        return None
-    rows = launcher.registry_rows(pc.CLAUDE_DIR)
+    rows = launcher.registry_rows(pc.CLAUDE_DIR)     # read ONCE: two reads can disagree while Claude Code writes it
+    marked = launcher.orphaned(here)
     if rows is None:
-        marked = f"plugin folder {here} carries .orphaned_at, and " if st == "orphaned" else ""
+        marked = f"plugin folder {here} carries .orphaned_at, and " if marked else ""
         return f"plugin registry: {marked}{launcher.SAY['unreadable']}"
-    if st == "orphaned" and rows:
+    if rows and not marked:
+        return None
+    if rows:
         return (f"plugin folder {here}: {launcher.SAY['orphaned']}; nothing done. Pit Stop is installed elsewhere: "
                 f"point this timer at {os.path.join(pc.STATE_DIR, 'bin', 'pit-stop-restart')} (/pit-stop setup does)")
     return f"{launcher.SAY['gone']}; nothing done {launcher.gone_advice()}"

@@ -747,6 +747,19 @@ def _g12_8_the_helper_changes_no_session(tmp_path, monkeypatch, capsys):
     reg.write_text(json.dumps({"plugins": {}}))
     line = rab.gone_line(str(tmp_path / "x"))
     assert line.endswith(rab.timer_off_command()) and "not installed" in line
+    # one read: a registry that fails once (Claude Code writing it) and then reads fine never yields "not installed"
+    import launcher as ln
+    real, calls = ln.registry_rows, []
+
+    def flaky(claude_dir=None):
+        calls.append(1)
+        return None if len(calls) == 1 else real(claude_dir)
+    reg.write_text(json.dumps({"plugins": {"windstorm-pit-stop@thewindstorm": [{"installPath": ROOT}]}}))
+    monkeypatch.setattr(ln, "registry_rows", flaky)
+    line = rab.gone_line(str(tmp_path / "x"))
+    assert "could not be read" in line and "not installed" not in line and len(calls) == 1, line
+    monkeypatch.setattr(ln, "registry_rows", real)
+    reg.write_text(json.dumps({"plugins": {}}))
     # the command a person pastes is the one setup's own undo runs (setup.py read, not imported or run)
     import ast
     tree = ast.parse(open(os.path.join(ROOT, "scripts", "setup.py"), encoding="utf-8").read())
