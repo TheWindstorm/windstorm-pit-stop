@@ -60,6 +60,7 @@ What --undo does (each step is listed as it goes):
      the entry is read from the newest settings.json backup that has it off.
   5. Puts back the two compaction points of each folder setup tuned
      (backed up first; daily tuning's later moves are named, not undone).
+A value you changed after setup is yours: it is left as it is, and named.
 It leaves the history files (logs, tune history, checkup pages, backups) in
 place and names them; delete ~/.claude/pit-stop to remove them too.
 """
@@ -95,6 +96,25 @@ def note(ledger, key, value, sub=None):
         box = d.get(key) if isinstance(d.get(key), dict) else {}
         box.setdefault(sub, value)
         d[key] = box
+    os.makedirs(os.path.dirname(ledger), exist_ok=True)
+    pc.write_json_atomic(ledger, d, 0o600)
+
+
+def wrote(ledger, key, value, sub=None):
+    """Keep in LEDGER what setup's newest change of KEY (or KEY's SUB) wrote: --undo puts a value back only
+    while it is still this one, so a value the person changed since is theirs and stays."""
+    if not ledger:
+        return
+    d = pc.read_json(ledger, {})
+    d = d if isinstance(d, dict) else {}
+    box = d.get(key) if isinstance(d.get(key), dict) else {}
+    if sub is None:
+        box["set"] = value
+    else:
+        inner = box.get(sub) if isinstance(box.get(sub), dict) else {}
+        inner["set"] = value
+        box[sub] = inner
+    d[key] = box
     os.makedirs(os.path.dirname(ledger), exist_ok=True)
     pc.write_json_atomic(ledger, d, 0o600)
 
@@ -328,7 +348,10 @@ def undo(ledger=None, run_cmd=None):
     # 3. config.json
     cfg_changes = {k: rec[k] for k in ("auto_tune", "budget") if isinstance(rec.get(k), dict)}
     if not rec and pc.config().get("auto_tune") is True:
-        cfg_changes = {"auto_tune": {"had": False}}         # no record: tuning goes back to off, its default
+        cfg_changes = {"auto_tune": {"had": False, "set": True}}   # no record: tuning goes back to off, its default
+    now_cfg = pc.config()
+    theirs = [k for k, v in cfg_changes.items() if "set" in v and now_cfg.get(k, MISSING) != v["set"]]
+    cfg_changes = {k: v for k, v in cfg_changes.items() if k not in theirs}
 
     def put_cfg(d):
         for k, v in cfg_changes.items():
@@ -336,13 +359,14 @@ def undo(ledger=None, run_cmd=None):
                 d[k] = v.get("value")
             else:
                 d.pop(k, None)
+    said = [f"{k} left as you set it since ({json_word(now_cfg.get(k, MISSING))})" for k in theirs]
     if cfg_changes and os.path.exists(pc.CONFIG):
         why = _put_back(pc.CONFIG, put_cfg)
         out.append("3. config.json: " + (why or ", ".join(
-            f"{k} {'back to ' + json_word(v.get('value')) if v.get('had') else 'removed (it was not set)'}"
-            for k, v in cfg_changes.items())))
+            [f"{k} {'back to ' + json_word(v.get('value')) if v.get('had') else 'removed (it was not set)'}"
+             for k, v in cfg_changes.items()] + said)))
     else:
-        out.append("3. config.json: nothing setup changed")
+        out.append("3. config.json: " + (", ".join(said) if said else "nothing setup changed"))
     # 4. the marketplace entry
     mk = rec.get("marketplace") if isinstance(rec.get("marketplace"), dict) else None
     settings_path = (mk or {}).get("settings") or SETTINGS
@@ -363,6 +387,9 @@ def undo(ledger=None, run_cmd=None):
                 break
     if not name or not isinstance(now_entry, dict):
         out.append("4. marketplace entry: nothing setup changed")
+    elif now_entry.get("autoUpdate") is not True:
+        out.append(f"4. marketplace entry {name}: left as you set it since (autoUpdate "
+                   f"{json_word(now_entry.get('autoUpdate', MISSING))}); setup wrote true")
     elif not found:
         out.append(f"4. marketplace entry {name}: left ON: no record and no backup shows it before setup; "
                    f"to switch it off, set \"autoUpdate\": false on it in {home(settings_path)}")
@@ -386,9 +413,19 @@ def undo(ledger=None, run_cmd=None):
     if not folders:
         out.append("5. folders: " + ("no record of which folders setup tuned; their two points stay"
                                      if not rec else "setup tuned none"))
-    for f, pts in sorted(folders.items()):
+    for f, box in sorted(folders.items()):
         sp = os.path.join(f, ".claude", "settings.local.json")
-        pts = pts if isinstance(pts, dict) else {}
+        box = box if isinstance(box, dict) else {}
+        pts = box.get("before") if isinstance(box.get("before"), dict) else {}
+        # Pit Stop's own last write: daily tuning's profile when there is one, else what setup wrote
+        prof = pc.read_json(pc.folder_profile_path(f), {})
+        mine = ({pc.WINDOW_ENV: str(prof.get("window")), pc.IDLE_ENV: str(prof.get("idle_point"))}
+                if isinstance(prof, dict) and prof.get("window") else box.get("set"))
+        now_pts = folder_points(f)
+        if isinstance(mine, dict) and any(str(now_pts.get(k)) != str(mine.get(k)) for k in (pc.WINDOW_ENV, pc.IDLE_ENV)):
+            out.append(f"5. {home(f)}: window and idle point left as you set them since "
+                       f"({now_pts.get(pc.WINDOW_ENV)}, {now_pts.get(pc.IDLE_ENV)})")
+            continue
 
         def put_pts(d, pts=pts):
             env = d.setdefault("env", {}) if isinstance(d.get("env", {}), dict) else None
@@ -417,6 +454,9 @@ def undo(ledger=None, run_cmd=None):
         out.append(f"To remove those and your Pit Stop settings too: rm -r {home(pc.STATE_DIR)}. To remove Pit Stop itself: "
                    f"claude plugin uninstall windstorm-pit-stop@{name or 'thewindstorm'}")
     return out
+
+
+MISSING = "<not set>"
 
 
 def json_word(v):
@@ -469,9 +509,11 @@ def main():
         else:
             if not a.no_auto_tune:
                 note(UNDO, "auto_tune", {"had": "auto_tune" in cfg, "value": cfg.get("auto_tune")})
+                wrote(UNDO, "auto_tune", True)
                 cfg["auto_tune"] = True
             if a.budget:
                 note(UNDO, "budget", {"had": "budget" in cfg, "value": cfg.get("budget")})
+                wrote(UNDO, "budget", a.budget)
                 cfg["budget"] = a.budget
             pc.write_json_atomic(pc.CONFIG, cfg)
 
@@ -502,8 +544,9 @@ def main():
                   + ")")
             if a.apply:
                 try:
-                    note(UNDO, "folders", folder_points(d), sub=os.path.abspath(d))
+                    note(UNDO, "folders", {"before": folder_points(d)}, sub=os.path.abspath(d))
                     s, _, _ = op.apply(d, rec, m)
+                    wrote(UNDO, "folders", folder_points(d), sub=os.path.abspath(d))
                     pc.prune_backups(s)
                 except SystemExit as e:
                     print(f"     {e}")

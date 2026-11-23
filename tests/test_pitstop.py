@@ -2924,6 +2924,31 @@ def test_G12_7_setup_undo_puts_back_what_apply_changed(tmp_path, monkeypatch, ca
     assert "checkup" in left and "autotune.log" in left and "/bin" not in left and "setup-undo.json" not in left and not (st / "setup-undo.json").exists()
     assert glob.glob(str(sp) + ".bak-pitstop-*")                                   # backed up before each put-back
 
+    # a value the person changed after setup is theirs: the undo leaves it and says so, and puts back the rest
+    monkeypatch.setattr(sys, "argv", ["setup.py", "--apply", "--fleet", "--budget", "economy"])
+    assert su.main() == 0
+    c = json.loads((st / "config.json").read_text())
+    (st / "config.json").write_text(json.dumps(dict(c, budget="roomy")))
+    t = json.loads(sp.read_text())
+    t["extraKnownMarketplaces"]["thewindstorm"]["autoUpdate"] = False
+    sp.write_text(json.dumps(t))
+    loc = json.load(open(local))
+    loc["env"][pc.WINDOW_ENV] = "123456"
+    with open(local, "w") as f:
+        json.dump(loc, f)
+    capsys.readouterr()
+    monkeypatch.setattr(sys, "argv", ["setup.py", "--undo"])
+    assert su.main() == 0
+    out = capsys.readouterr().out
+    assert "auto_tune removed (it was not set), budget left as you set it since (roomy)" in out
+    assert json.loads((st / "config.json").read_text()) == {"nudge": False, "budget": "roomy"}
+    assert "4. marketplace entry thewindstorm: left as you set it since (autoUpdate false)" in out
+    assert json.loads(sp.read_text()) == t
+    assert "window and idle point left as you set them since (123456, " in out and json.load(open(local)) == loc
+    assert not bin_.exists() and not (units / "pit-stop-restart.timer").exists()
+    (st / "config.json").write_text(json.dumps(before["config"]))
+    sp.write_text(json.dumps(before["settings"]))
+
     # a setup from before 0.6.2 kept no record: the entry comes from the newest backup that has it off
     for b in glob.glob(str(sp) + ".bak-pitstop-*"):
         os.remove(b)
