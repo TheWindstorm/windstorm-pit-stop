@@ -181,7 +181,7 @@ def test_INV8_every_file_and_setting_has_a_codon():
 def test_INV9_every_built_codon_has_its_test():
     names = defined_test_names()
     for p in glob.glob(os.path.join(ROOT, "tests", "test_*.py")):
-        if os.path.basename(p) == "test_strand.py":   # this file names the patterns it looks for
+        if os.path.basename(p) in ("test_strand.py", "test_gate.py"):   # these files name the patterns they look for
             continue
         src = open(p, encoding="utf-8").read()
         assert not re.search(r"mark\.(skip|skipif|xfail)|pytest\.xfail\(", src), f"{p}: a skipped test"
