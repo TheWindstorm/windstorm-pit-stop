@@ -35,7 +35,8 @@ import re
 import sys
 import time
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 import pitstop_common as pc  # noqa: E402
 import optimize as op  # noqa: E402
 
@@ -129,6 +130,55 @@ def hookless(sessions, now):
         return []
 
 
+def older_install(folder, root=None, claude_dir=None):
+    """When sessions in FOLDER load an older Pit Stop than one installed for FOLDER in another scope:
+    {"folder", "old", "old_scope", "new", "new_scope", "command"}; else None. Which install a session
+    loads is read from this code itself (the checkup runs from the install its session loaded), never
+    inferred from scope order: seen 2026-11-22, a user-scope 0.1.4 beat a project-scope 0.6.1."""
+    root = os.path.realpath(root or os.path.dirname(HERE))
+    own = pc.read_json(os.path.join(root, ".claude-plugin", "plugin.json"), {}) or {}
+    reg = pc.read_json(os.path.join(claude_dir or pc.CLAUDE_DIR, "plugins", "installed_plugins.json"), {}) or {}
+    plugins = reg.get("plugins") if isinstance(reg, dict) and isinstance(reg.get("plugins"), dict) else {}
+    f = os.path.realpath(folder)
+    rows = []
+    for key, v in plugins.items():
+        if key.split("@")[0] != pc.PLUGIN_NAME or not isinstance(v, list):
+            continue
+        for r in v:
+            if not isinstance(r, dict) or not pc.vkey(r.get("version")):
+                continue
+            pp = r.get("projectPath")
+            if r.get("scope") in ("project", "local") and not (
+                    isinstance(pp, str) and (f == os.path.realpath(pp) or f.startswith(os.path.realpath(pp) + os.sep))):
+                continue                                    # installed for another folder: not this one's business
+            rows.append(dict(r, key=key))
+    mine = next((r for r in rows if isinstance(r.get("installPath"), str)
+                 and os.path.realpath(r["installPath"]) == root), None)
+    old = own.get("version") or (mine or {}).get("version")
+    newer = max(rows, key=lambda r: pc.vkey(r["version"]), default=None)
+    if not pc.vkey(old) or not newer or pc.vkey(newer["version"]) <= pc.vkey(old):
+        return None
+    old_scope = (mine or {}).get("scope") or "loaded from " + root
+    if mine and mine["key"] == newer["key"]:
+        cmd = f"claude plugin update {mine['key']} --scope {old_scope}"
+    elif mine:
+        cmd = f"claude plugin uninstall {mine['key']} --scope {old_scope}"
+    else:
+        cmd = "start sessions here without --plugin-dir " + root
+    if mine and old_scope in ("project", "local"):
+        cmd = f"cd {mine.get('projectPath')} && {cmd}"
+    return {"folder": folder, "old": old, "old_scope": old_scope, "new": newer["version"],
+            "new_scope": newer.get("scope"), "command": cmd}
+
+
+def older_install_lines(o, share=False):
+    if not o:
+        return []
+    where = label(o["folder"]) if share else o["folder"]
+    return [f"In {where}, sessions load Pit Stop {o['old']} ({o['old_scope']}), not {o['new']} ({o['new_scope']}).",
+            "To end it: " + (o["command"] if not share else o["command"].replace(o["folder"], where))]
+
+
 def collect(days=14, now=None, sessions=None):
     now = now or time.time()
     if sessions is None:
@@ -158,7 +208,7 @@ def collect(days=14, now=None, sessions=None):
                        "saving_usd_month": sum(s.get("saving_usd_month") or 0 for s in stats),
                        "saving_tokens_day": sum(s.get("saving_tokens_day") or 0 for s in stats)},
             "pitstop": {"auto_tune": cfg.get("auto_tune") is True, "fleet": pc.fleet_active()},
-            "machine": machine_info(now)}
+            "machine": machine_info(now), "older_install": older_install(os.getcwd())}
 
 
 def machine_info(now):
@@ -211,6 +261,8 @@ def render_text(d, cmp_lines):
            f"{t['sessions']} Claude Code sessions running; {t['on_newest']} on the newest version installed ({d['newest'] or 'not found'})."]
     if d.get("machine"):
         out += [""] + d["machine"]["lines"]
+    if d.get("older_install"):
+        out += [""] + older_install_lines(d["older_install"])
     waiting = sorted((r for r in d["sessions"] if r["waiting_s"] is not None), key=lambda r: -r["waiting_s"])
     if waiting:
         out += ["", "Waiting on you (a question or permission prompt on screen):"]
@@ -313,7 +365,8 @@ def render_html(d, cmp_lines, share=False):
               f"{tokens(t['saving_tokens_day'])} tokens a day, about ${t['saving_usd_month']:,} a month at list prices. "
               f"An estimate from your own history, not a measurement.</p>" if t["saving_usd_month"] > 0 else "")
     m = d.get("machine") or {}
-    lines = m.get("lines") if not share else m.get("share_lines")
+    lines = (m.get("lines") if not share else m.get("share_lines")) or []
+    lines = lines + older_install_lines(d.get("older_install"), share)
     mach = ("<div class='card'><h2>Claude Code on this machine</h2><ul>" + "".join(f"<li>{e(x)}</li>" for x in lines)
             + "</ul></div>") if lines else ""
     sent = ("Pit Stop asked Anthropic's download server for the newest version number; like any web request, "

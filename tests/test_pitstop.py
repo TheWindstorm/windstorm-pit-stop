@@ -1,4 +1,5 @@
 import calendar
+import html
 import json
 import os
 import subprocess
@@ -2477,6 +2478,7 @@ def _checkup(tmp_path, monkeypatch):
     monkeypatch.setattr(ck, "DIR", str(tmp_path / "state" / "checkup"))
     monkeypatch.setattr(ck, "BASELINE", str(tmp_path / "state" / "checkup" / "baseline.json"))
     monkeypatch.setattr(ck, "hookless", lambda sessions, now: ["Lane Two"])
+    monkeypatch.setattr(pc, "CLAUDE_DIR", str(tmp_path / "claude"))      # never the person's own plugin registry
     return pc, ck, proj
 
 
@@ -2560,6 +2562,60 @@ def test_G9_5_stop_hook_says_once_that_the_week_later_checkup_is_ready(tmp_path)
     (ck_dir / "baseline.json").write_text("not json")
     os.remove(ck_dir / "week-told")
     assert _run("stop_pit_stop.py", {"session_id": "w-3"}, tmp_path)[:2] == (0, "")          # a damaged file: nothing
+
+
+def test_G9_7_checkup_names_an_older_install_that_wins(tmp_path, monkeypatch):
+    """Seen 2026-11-22: in a test folder with a project-scope 0.6.1, sessions loaded the user-scope 0.1.4,
+    and nothing said so. Which one loads is read from the running code, not from a guess at scope order."""
+    pc, ck, proj = _checkup(tmp_path, monkeypatch)
+    cdir = tmp_path / "claude"
+    key = "windstorm-pit-stop@thewindstorm"
+
+    def install(ver):
+        r = tmp_path / "cache" / ver
+        (r / ".claude-plugin").mkdir(parents=True)
+        (r / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "windstorm-pit-stop", "version": ver}))
+        return str(r)
+
+    old, new = install("0.6.2"), install("0.6.3")
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+
+    def registry(rows):
+        (cdir / "plugins").mkdir(parents=True, exist_ok=True)
+        (cdir / "plugins" / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": rows}))
+
+    registry({key: [{"scope": "user", "installPath": old, "version": "0.6.2"},
+                    {"scope": "project", "projectPath": proj, "installPath": new, "version": "0.6.3"}]})
+    o = ck.older_install(proj, root=old)
+    assert o == {"folder": proj, "old": "0.6.2", "old_scope": "user", "new": "0.6.3", "new_scope": "project",
+                 "command": f"claude plugin update {key} --scope user"}
+    lines = ck.older_install_lines(o)
+    assert lines[0] == f"In {proj}, sessions load Pit Stop 0.6.2 (user), not 0.6.3 (project)."
+    assert lines[1] == f"To end it: claude plugin update {key} --scope user"
+    assert proj not in " ".join(ck.older_install_lines(o, share=True))           # the page to share names no path
+    # the same in a folder under the project, and in the checkup's text and page
+    sub = os.path.join(proj, "src")
+    os.makedirs(sub)
+    assert ck.older_install(sub, root=old)["new"] == "0.6.3"
+    monkeypatch.chdir(proj)
+    monkeypatch.setattr(ck, "HERE", os.path.join(old, "scripts"))
+    d = ck.collect(14, time.time(), [])
+    assert lines[0] in ck.render_text(d, []) and html.escape(lines[0]) in ck.render_html(d, [])
+    # the newer one loads: nothing to say; a newer install for ANOTHER folder is not this folder's business
+    assert ck.older_install(proj, root=new) is None
+    registry({key: [{"scope": "user", "installPath": old, "version": "0.6.2"},
+                    {"scope": "project", "projectPath": str(other), "installPath": new, "version": "0.6.3"}]})
+    assert ck.older_install(proj, root=old) is None
+    # the older is from another catalog: it is removed, from the folder it belongs to
+    registry({"windstorm-pit-stop@dev": [{"scope": "local", "projectPath": proj, "installPath": old, "version": "0.6.2"}],
+              key: [{"scope": "user", "installPath": new, "version": "0.6.3"}]})
+    o = ck.older_install(proj, root=old)
+    assert (o["old_scope"], o["new_scope"]) == ("local", "user")
+    assert o["command"] == f"cd {proj} && claude plugin uninstall windstorm-pit-stop@dev --scope local"
+    # an odd registry never stops the checkup
+    (cdir / "plugins" / "installed_plugins.json").write_text("{not json")
+    assert ck.older_install(proj, root=old) is None
 
 
 def test_G9_2_checkup_counts_only_automatic_refreshes_in_its_window_and_waits_of_two_hours(tmp_path, monkeypatch):
