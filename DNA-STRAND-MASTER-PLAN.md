@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.17 · 2026-11-23 · The Windstorm**
+**Plan version 1.18 · 2026-11-23 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -536,6 +536,7 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 8. For G18.1, which point is the session's refresh point, and under which key is the threshold kept? ASSUMES: no code reads either today; the point is the idle point in force (`pitstop_common.points`), and the key is named together with the number of question 3.
 9. About 40 behaviours inside built files have no codon yet. ASSUMES: plan 1.1 adds each one as an open codon, then a test; until then the plan cannot regrow them.
 10. Does Herdr 0.9.5 `pane send-keys` take `enter` and `ctrl+u` as written in G4.37? ASSUMES: yes, from the names in its own help. CHECKED 2026-11-20, yes: on a scratch Herdr 0.9.5 session on a test machine, `send-text` typed without sending, `enter` ran the typed line, `ctrl+u` cleared it, and an unknown key name was refused with exit 1.
+11. Can a person find Pit Stop with `gh skill search`? ASSUMES: not until GitHub's code search has indexed this repository. Nothing in the repository can ask for that, so a listing is never promised and no install line depends on search. SEEN 2026-11-23: `gh search code` limited to this repository returned no results, both for `SKILL.md` files containing `pit-stop` and for the word `compaction`, which most of its files contain; `gh skill search pit-stop` listed three skills of that name by other authors, not this one. At the time the repository was public, carried the `agent-skills` topic and had three releases, and `gh skill publish --dry-run` passed.
 
 ## Part 7. Decisions log
 
@@ -560,6 +561,7 @@ The evolution so far, oldest first. Each line gives the date and release, what w
 - 2026-11-20 (plan 1.1): the skill's description is gated by trigger evals on Sonnet (G12.4 to G12.6), 10 queries that must load it and 10 near misses that must not. A description that loads at the wrong time costs every session that carries it; one that fails to load leaves the person without Pit Stop.
 - 2026-11-20 (plan 1.1): the restart helper can also reach sessions in a Herdr pane (G4.35 to G4.38, G8.9), opt-in: `"herdr": true` in `restart.json`. Typing into a Herdr pane reaches lanes whose owner has not agreed, and stability and the person's control of their agent come first (principle 10). It found sessions only through tmux, so 6 of 98 sessions on the build machine, 5 of them in Herdr, were never moved to a new Claude Code at a break. tmux stays first; Herdr is used only for a session Herdr names by its session id.
 - 2026-11-23 (plan 1.17): Pit Stop does nothing once Claude Code has uninstalled it (G12.8), and "the registry could not be read" is not "gone": that pass changes no session either, and the next one reads it again. A person who leaves by Claude Code's own uninstall must not be driven by code they removed (principle 10: the person's control of their agent).
+- 2026-11-23 (plan 1.18): the release gate for the Agent Skills format stays `gh skill publish --dry-run`. Being found by `gh skill search` is written as "not yet indexed by GitHub's code search, seen on <date>", never as a failure and never as a promise (open question 11). That search reads GitHub's code index, which a repository cannot ask to join.
 
 ## Appendix A. Changing this plan
 
