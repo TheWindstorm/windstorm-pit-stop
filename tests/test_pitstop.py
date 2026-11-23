@@ -1,4 +1,5 @@
 import calendar
+import glob
 import html
 import json
 import os
@@ -2853,6 +2854,98 @@ def test_G7_1_setup_switches_on_pit_stops_own_marketplace_updates_once_and_keeps
     sp.write_text("{not json")
     assert "NOT changed" in su.self_update(True, str(sp), str(cd)) and sp.read_text() == "{not json"
 
+
+
+def test_G12_7_setup_undo_puts_back_what_apply_changed(tmp_path, monkeypatch, capsys):
+    """Seen 2026-11-22: after claude plugin uninstall, autoUpdate true, config.json and checkup/ stayed.
+    setup --undo puts back what --apply and --fleet changed, step by step, and names what it leaves."""
+    pc, op, proj = _history(tmp_path, monkeypatch)
+    import setup as su
+    import install_method as im
+    cd, st = tmp_path / "claude", tmp_path / "state"
+    (cd / "plugins").mkdir(parents=True)
+    (cd / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user"}]}}))
+    src = {"source": "github", "repo": "TheWindstorm/windstorm-pit-stop"}
+    (cd / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thewindstorm": {"source": src}}))
+    sp = cd / "settings.json"
+    person = {"env": {"X": "1"}, "extraKnownMarketplaces": {"other": {"source": {"source": "github", "repo": "a/b"}}}}
+    sp.write_text(json.dumps(person))
+    st.mkdir(exist_ok=True)
+    (st / "config.json").write_text(json.dumps({"nudge": False}))
+    local = os.path.join(proj, ".claude", "settings.local.json")
+    os.makedirs(os.path.dirname(local))
+    with open(local, "w") as f:
+        json.dump({"env": {pc.WINDOW_ENV: "600000"}, "permissions": {"allow": ["Bash(ls)"]}}, f)
+    units, bin_ = tmp_path / "units", st / "bin" / "pit-stop-restart"
+    for mod, k, v in ((pc, "CLAUDE_DIR", str(cd)), (pc, "STATE_DIR", str(st)), (pc, "CONFIG", str(st / "config.json")),
+                      (su, "SETTINGS", str(sp)), (su, "UNDO", str(st / "setup-undo.json")), (su, "BIN", str(bin_)),
+                      (su, "UNIT_DIR", str(units)), (su, "PLIST", str(tmp_path / "none.plist"))):
+        monkeypatch.setattr(mod, k, v)
+    ran = []
+    monkeypatch.setattr(su, "run", lambda cmd, timeout=30: ran.append(cmd) or None)
+    monkeypatch.setattr(su, "tmux_servers", lambda: {})
+    monkeypatch.setattr(su.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(su.shutil, "which", lambda n: "/usr/bin/" + n)
+    monkeypatch.setattr(im, "machine", lambda *a, **k: (_ for _ in ()).throw(OSError("not read in a test")))
+    monkeypatch.setattr(pc, "live_sessions", lambda *a, **k: ([], "registry"))
+    monkeypatch.setattr(pc, "newest_local_version", lambda: None)
+    monkeypatch.chdir(proj)
+    before = {"settings": json.loads(sp.read_text()), "config": json.loads((st / "config.json").read_text()),
+              "local": json.load(open(local))}
+
+    monkeypatch.setattr(sys, "argv", ["setup.py", "--apply", "--fleet", "--budget", "economy"])
+    assert su.main() == 0
+    assert json.loads(sp.read_text())["extraKnownMarketplaces"]["thewindstorm"]["autoUpdate"] is True
+    assert json.loads((st / "config.json").read_text()) == {"nudge": False, "auto_tune": True, "budget": "economy"}
+    assert json.load(open(local))["env"][pc.IDLE_ENV]
+    assert bin_.exists() and (units / "pit-stop-restart.timer").exists() and (st / "restart.json").exists()
+    # history a person's use leaves behind
+    (st / "checkup").mkdir()
+    (st / "autotune.log").write_text("x\n")
+    # a second --apply never overwrites what was there before the first
+    assert su.main() == 0
+    capsys.readouterr()
+
+    monkeypatch.setattr(sys, "argv", ["setup.py", "--undo"])
+    assert su.main() == 0
+    out = capsys.readouterr().out
+    assert json.loads(sp.read_text()) == before["settings"]
+    assert json.loads((st / "config.json").read_text()) == before["config"]
+    assert json.load(open(local)) == before["local"]
+    assert not bin_.exists() and not (units / "pit-stop-restart.timer").exists()
+    assert not (units / "pit-stop-restart.service").exists() and not (st / "restart.json").exists()
+    assert ["systemctl", "--user", "disable", "--now", "pit-stop-restart.timer"] in ran
+    for step in ("1. timer: stopped and removed", "   launcher: removed", "2. restart.json: removed",
+                 "3. config.json: auto_tune removed (it was not set), budget removed (it was not set)",
+                 "4. marketplace entry thewindstorm: put back as it was before setup", "window and idle point put back"):
+        assert step in out, step
+    left = next(x for x in out.splitlines() if x.startswith("Left in place"))
+    assert "checkup" in left and "autotune.log" in left and "/bin" not in left and "setup-undo.json" not in left and not (st / "setup-undo.json").exists()
+    assert glob.glob(str(sp) + ".bak-pitstop-*")                                   # backed up before each put-back
+
+    # a setup from before 0.6.2 kept no record: the entry comes from the newest backup that has it off
+    for b in glob.glob(str(sp) + ".bak-pitstop-*"):
+        os.remove(b)
+    on = dict(before["settings"], extraKnownMarketplaces=dict(before["settings"]["extraKnownMarketplaces"],
+                                                              thewindstorm={"source": src}))
+    sp.write_text(json.dumps(on))
+    pc.backup(str(sp))
+    on["extraKnownMarketplaces"]["thewindstorm"]["autoUpdate"] = True
+    sp.write_text(json.dumps(on))
+    (st / "config.json").write_text(json.dumps({"auto_tune": True}))
+    assert su.main() == 0
+    out = capsys.readouterr().out
+    assert "no record of the first setup here" in out and "4. marketplace entry thewindstorm: put back" in out
+    assert json.loads(sp.read_text())["extraKnownMarketplaces"]["thewindstorm"] == {"source": src}
+    assert json.loads((st / "config.json").read_text()) == {}
+    assert "no record of which folders setup tuned" in out
+    # no record and no backup: it says so and how, and changes nothing
+    for b in glob.glob(str(sp) + ".bak-pitstop-*"):
+        os.remove(b)
+    sp.write_text(json.dumps(on))
+    assert su.main() == 0
+    assert "left ON: no record and no backup" in capsys.readouterr().out and json.loads(sp.read_text()) == on
 
 # ---- 0.6.0: Claude Code updated by Pit Stop, whatever installed it ----
 

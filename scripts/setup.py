@@ -5,6 +5,7 @@
   setup.py --apply            do it
   setup.py --fleet [--apply]  also set up fleet mode (tmux): the launcher and
                               a timer that runs the pit stop every few minutes
+  setup.py --undo             put back what --apply and --fleet changed (below)
 Options:
   --no-auto-tune              leave tuning off
   --plugin-updates pit-stop|all|off
@@ -47,9 +48,22 @@ With --fleet it also:
   6. Installs a timer (systemd user timer on Linux, launchd on macOS) that
      runs the launcher with --live. If something already schedules
      restart_at_break.py, it changes nothing and prints the one line to edit.
-Nothing here needs sudo. Undo: delete the timer files it names, and set
-"auto_tune": false (and "plugin_updates": "off" in restart.json).
+Nothing here needs sudo. --apply keeps what it found before each change in
+~/.claude/pit-stop/setup-undo.json.
+
+What --undo does (each step is listed as it goes):
+  1. Stops and removes the timer it installed, and the launcher.
+  2. Removes the restart.json it wrote, if nobody has changed it since.
+  3. Puts "auto_tune" (and "budget") in config.json back as they were.
+  4. Puts the marketplace entry in ~/.claude/settings.json back as it was
+     (backed up first). After a setup from before 0.6.2, which kept no record,
+     the entry is read from the newest settings.json backup that has it off.
+  5. Puts back the two compaction points of each folder setup tuned
+     (backed up first; daily tuning's later moves are named, not undone).
+It leaves the history files (logs, tune history, checkup pages, backups) in
+place and names them; delete ~/.claude/pit-stop to remove them too.
 """
+import hashlib
 import argparse
 import glob
 import os
@@ -65,6 +79,32 @@ import optimize as op  # noqa: E402
 BIN = os.path.join(pc.STATE_DIR, "bin", "pit-stop-restart")
 UNIT_DIR = os.path.join(pc.HOME, ".config", "systemd", "user")
 PLIST = os.path.join(pc.HOME, "Library", "LaunchAgents", "ai.thewindstorm.pit-stop-restart.plist")
+UNDO = os.path.join(pc.STATE_DIR, "setup-undo.json")
+
+
+def note(ledger, key, value, sub=None):
+    """Keep in LEDGER what was there before setup's first change of KEY (or of KEY's SUB): a later
+    --apply never overwrites it, so --undo goes back to before the first setup. No LEDGER: no record."""
+    if not ledger:
+        return
+    d = pc.read_json(ledger, {})
+    d = d if isinstance(d, dict) else {}
+    if sub is None:
+        d.setdefault(key, value)
+    else:
+        box = d.get(key) if isinstance(d.get(key), dict) else {}
+        box.setdefault(sub, value)
+        d[key] = box
+    os.makedirs(os.path.dirname(ledger), exist_ok=True)
+    pc.write_json_atomic(ledger, d, 0o600)
+
+
+def sha(path):
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except OSError:
+        return None
 
 
 def run(cmd, timeout=30):
@@ -187,7 +227,7 @@ def own_marketplace(claude_dir=None):
     return None, None
 
 
-def self_update(apply, settings_path=None, claude_dir=None):
+def self_update(apply, settings_path=None, claude_dir=None, ledger=None):
     """Switch on Claude Code's auto-update for Pit Stop's marketplace. Returns one line saying what it found or did."""
     settings_path = settings_path or SETTINGS
     name, src = own_marketplace(claude_dir)
@@ -207,6 +247,8 @@ def self_update(apply, settings_path=None, claude_dir=None):
     if extra is not None and not isinstance(extra, dict):
         return "NOT changed: extraKnownMarketplaces in settings.json is not an object"
     if apply:
+        note(ledger, "marketplace", {"settings": settings_path, "name": name,
+                                     "entry": entry if isinstance(entry, dict) else None})
         if os.path.exists(settings_path):
             pc.backup(settings_path)
         new = dict(entry) if isinstance(entry, dict) else {"source": src}
@@ -218,10 +260,174 @@ def self_update(apply, settings_path=None, claude_dir=None):
     return f"would switch ON for marketplace {name} (autoUpdate: true in {settings_path.replace(pc.HOME, '~')})"
 
 
+def folder_points(folder):
+    """The two compaction points as FOLDER's settings.local.json has them now: {env name: value or None}."""
+    d = pc.read_json(os.path.join(folder, ".claude", "settings.local.json"), {})
+    env = d.get("env") if isinstance(d, dict) and isinstance(d.get("env"), dict) else {}
+    return {k: env.get(k) for k in (pc.WINDOW_ENV, pc.IDLE_ENV)}
+
+
+def _put_back(path, change):
+    """Read PATH as a JSON object, back it up, apply CHANGE(data) and write it with its mode kept.
+    Returns None, or why it was not changed. A file that does not read is never rewritten."""
+    data, err = pc.read_json_strict(path)
+    if err or not isinstance(data, dict):
+        return f"NOT changed: {path} does not read as a JSON object ({err or 'not an object'})"
+    pc.backup(path)
+    change(data)
+    pc.write_json_atomic(path, data, os.stat(path).st_mode & 0o777)
+    return None
+
+
+def undo(ledger=None, run_cmd=None):
+    """Put back what --apply and --fleet changed. Returns the lines to print, one per step."""
+    ledger = ledger or UNDO
+    run_cmd = run_cmd or run
+    rec = pc.read_json(ledger, {}) if os.path.exists(ledger) else {}
+    rec = rec if isinstance(rec, dict) else {}
+    out = ["Pit Stop setup --undo" + ("" if rec else " (no record of the first setup here: setup before 0.6.2 kept none; "
+                                      "each step says what it could tell)")]
+    home = lambda p: p.replace(pc.HOME, "~")            # noqa: E731
+
+    # 1. timer and launcher
+    svc, tmr = os.path.join(UNIT_DIR, "pit-stop-restart.service"), os.path.join(UNIT_DIR, "pit-stop-restart.timer")
+    if os.path.exists(tmr) or os.path.exists(svc):
+        run_cmd(["systemctl", "--user", "disable", "--now", "pit-stop-restart.timer"])
+        for f in (tmr, svc):
+            if os.path.exists(f):
+                os.remove(f)
+        run_cmd(["systemctl", "--user", "daemon-reload"])
+        out.append(f"1. timer: stopped and removed {home(tmr)} and its .service")
+    elif os.path.exists(PLIST):
+        run_cmd(["launchctl", "bootout", f"gui/{os.getuid()}", PLIST])
+        os.remove(PLIST)
+        out.append(f"1. timer: stopped and removed {home(PLIST)}")
+    else:
+        out.append("1. timer: none of setup's here")
+    others = [h for h in already_scheduled() if h not in (svc, tmr, PLIST)]
+    if os.path.exists(BIN) and others:
+        out.append(f"   launcher {home(BIN)} kept: something else still runs it: {', '.join(home(h) for h in others)}")
+    elif os.path.exists(BIN):
+        os.remove(BIN)
+        try:
+            os.rmdir(os.path.dirname(BIN))                 # only when nothing else is in it
+        except OSError:
+            pass
+        out.append(f"   launcher: removed {home(BIN)}")
+    # 2. restart.json
+    rj = rec.get("restart_json") if isinstance(rec.get("restart_json"), dict) else None
+    if rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256"):
+        os.remove(rj["path"])
+        out.append(f"2. restart.json: removed {home(rj['path'])} (setup wrote it; unchanged since)")
+    elif rj and os.path.exists(rj.get("path") or ""):
+        out.append(f"2. restart.json: kept {home(rj['path'])}: changed since setup wrote it (your settings)")
+    else:
+        rjp = os.path.join(pc.STATE_DIR, "restart.json")
+        out.append(f"2. restart.json: kept {home(rjp)}: setup did not write it" if os.path.exists(rjp)
+                   else "2. restart.json: none")
+    # 3. config.json
+    cfg_changes = {k: rec[k] for k in ("auto_tune", "budget") if isinstance(rec.get(k), dict)}
+    if not rec and pc.config().get("auto_tune") is True:
+        cfg_changes = {"auto_tune": {"had": False}}         # no record: tuning goes back to off, its default
+
+    def put_cfg(d):
+        for k, v in cfg_changes.items():
+            if v.get("had"):
+                d[k] = v.get("value")
+            else:
+                d.pop(k, None)
+    if cfg_changes and os.path.exists(pc.CONFIG):
+        why = _put_back(pc.CONFIG, put_cfg)
+        out.append("3. config.json: " + (why or ", ".join(
+            f"{k} {'back to ' + json_word(v.get('value')) if v.get('had') else 'removed (it was not set)'}"
+            for k, v in cfg_changes.items())))
+    else:
+        out.append("3. config.json: nothing setup changed")
+    # 4. the marketplace entry
+    mk = rec.get("marketplace") if isinstance(rec.get("marketplace"), dict) else None
+    settings_path = (mk or {}).get("settings") or SETTINGS
+    name = (mk or {}).get("name") or own_marketplace()[0]
+    cur, _ = pc.read_json_strict(settings_path) if os.path.exists(settings_path) else (None, None)
+    extra = cur.get("extraKnownMarketplaces") if isinstance(cur, dict) else None
+    now_entry = extra.get(name) if isinstance(extra, dict) and name else None
+    prior, found = None, bool(mk)
+    if mk:
+        prior = mk.get("entry")
+    elif isinstance(now_entry, dict) and now_entry.get("autoUpdate") is True:
+        for b in sorted(glob.glob(glob.escape(settings_path) + ".bak-pitstop-*"), reverse=True):
+            old = pc.read_json(b, {})
+            ent = (old.get("extraKnownMarketplaces") or {}).get(name) if isinstance(old, dict) and isinstance(
+                old.get("extraKnownMarketplaces"), dict) else None
+            if not (isinstance(ent, dict) and ent.get("autoUpdate") is True):
+                prior, found = (ent if isinstance(ent, dict) else None), True
+                break
+    if not name or not isinstance(now_entry, dict):
+        out.append("4. marketplace entry: nothing setup changed")
+    elif not found:
+        out.append(f"4. marketplace entry {name}: left ON: no record and no backup shows it before setup; "
+                   f"to switch it off, set \"autoUpdate\": false on it in {home(settings_path)}")
+    else:
+        def put_entry(d):
+            ex = d.setdefault("extraKnownMarketplaces", {})
+            e = ex.get(name) if isinstance(ex.get(name), dict) else {}
+            if prior is None and set(e) <= {"source", "autoUpdate"}:
+                ex.pop(name, None)                         # setup made the whole entry: it goes
+                if not ex:
+                    d.pop("extraKnownMarketplaces", None)
+            elif prior is not None and "autoUpdate" in prior:
+                e["autoUpdate"] = prior["autoUpdate"]
+            else:
+                e.pop("autoUpdate", None)
+        why = _put_back(settings_path, put_entry)
+        out.append(f"4. marketplace entry {name}: " + (why or f"put back as it was before setup in {home(settings_path)} "
+                                                       f"(backed up first); Claude Code no longer updates Pit Stop by itself"))
+    # 5. the folders setup tuned
+    folders = rec.get("folders") if isinstance(rec.get("folders"), dict) else {}
+    if not folders:
+        out.append("5. folders: " + ("no record of which folders setup tuned; their two points stay"
+                                     if not rec else "setup tuned none"))
+    for f, pts in sorted(folders.items()):
+        sp = os.path.join(f, ".claude", "settings.local.json")
+        pts = pts if isinstance(pts, dict) else {}
+
+        def put_pts(d, pts=pts):
+            env = d.setdefault("env", {}) if isinstance(d.get("env", {}), dict) else None
+            if env is None:
+                return
+            for k in (pc.WINDOW_ENV, pc.IDLE_ENV):
+                if pts.get(k) is None:
+                    env.pop(k, None)
+                else:
+                    env[k] = pts[k]
+            if not env:
+                d.pop("env", None)
+        why = _put_back(sp, put_pts) if os.path.exists(sp) else "its settings file is gone"
+        out.append(f"5. {home(f)}: " + (why or "window and idle point put back as before setup (backed up first)"))
+    tuned = sorted(x for x in os.listdir(pc.FOLDERS) if x.endswith(".json")) if os.path.isdir(pc.FOLDERS) else []
+    if tuned:
+        out.append(f"   daily tuning's own moves stay where they are; its record of each folder: {home(pc.FOLDERS)}")
+    # what stays, by name
+    if os.path.exists(ledger):
+        os.remove(ledger)
+    left = sorted(x for x in os.listdir(pc.STATE_DIR) if x not in ("config.json", "restart.json")) if os.path.isdir(
+        pc.STATE_DIR) else []
+    out.append("Left in place (history, not settings): " + (", ".join(home(os.path.join(pc.STATE_DIR, x)) for x in left)
+                                                          if left else "nothing"))
+    if left:
+        out.append(f"To remove those and your Pit Stop settings too: rm -r {home(pc.STATE_DIR)}. To remove Pit Stop itself: "
+                   f"claude plugin uninstall windstorm-pit-stop@{name or 'thewindstorm'}")
+    return out
+
+
+def json_word(v):
+    return "true" if v is True else "false" if v is False else str(v)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--fleet", action="store_true")
+    ap.add_argument("--undo", action="store_true")
     ap.add_argument("--no-auto-tune", action="store_true")
     ap.add_argument("--no-tune-now", action="store_true")
     ap.add_argument("--no-self-update", action="store_true")
@@ -230,6 +436,10 @@ def main():
     ap.add_argument("--budget", choices=op.BUDGETS)
     ap.add_argument("--plugin-updates", choices=("pit-stop", "all", "off"), default="pit-stop")
     a = ap.parse_args()
+    if a.undo:
+        for line in undo():
+            print(line)
+        return 0
     word = "DOING" if a.apply else "PLAN (nothing is changed; add --apply)"
     sessions, source = pc.live_sessions()
     newest = pc.newest_local_version()
@@ -258,8 +468,10 @@ def main():
             print(f"   NOT written: {pc.CONFIG} does not read as a JSON object ({err or 'not an object'}); fix it and run again")
         else:
             if not a.no_auto_tune:
+                note(UNDO, "auto_tune", {"had": "auto_tune" in cfg, "value": cfg.get("auto_tune")})
                 cfg["auto_tune"] = True
             if a.budget:
+                note(UNDO, "budget", {"had": "budget" in cfg, "value": cfg.get("budget")})
                 cfg["budget"] = a.budget
             pc.write_json_atomic(pc.CONFIG, cfg)
 
@@ -290,6 +502,7 @@ def main():
                   + ")")
             if a.apply:
                 try:
+                    note(UNDO, "folders", folder_points(d), sub=os.path.abspath(d))
                     s, _, _ = op.apply(d, rec, m)
                     pc.prune_backups(s)
                 except SystemExit as e:
@@ -297,7 +510,7 @@ def main():
         print("   New points take effect at each session's next start (a pit-stop restart counts).")
 
     print("3. Pit Stop's own updates: " + ("left as they are (--no-self-update)" if a.no_self_update
-                                          else self_update(a.apply)))
+                                          else self_update(a.apply, ledger=UNDO if a.apply else None)))
 
     if not a.fleet:
         print("Fleet mode: not asked for. If you run several sessions in tmux, add --fleet to see that plan.")
@@ -325,6 +538,7 @@ def main():
         if a.apply:
             pc.write_json_atomic(rj, {"tmux_socket": best, "allow_names": [], "deny_names": [],
                                       "deny_name_globs": [], "deny_paths": [], "plugin_updates": a.plugin_updates})
+            note(UNDO, "restart_json", {"path": rj, "sha256": sha(rj)})
     hits = already_scheduled()
     if hits:
         print("6. timer: something already schedules the restart helper; nothing changed:")
