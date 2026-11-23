@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.14 · 2026-11-23 · The Windstorm**
+**Plan version 1.15 · 2026-11-23 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -329,6 +329,8 @@ Pit Stop tells which way Claude Code was installed on a machine, which version a
 
 **G6.18 A switched-off updater stops every method.** `update_plan(m, cfg, which, env, settings)` in `scripts/install_method.py` returns no command for a `native`, `npm`, `homebrew` or `mise` install that is behind when `DISABLE_UPDATES` or `DISABLE_AUTOUPDATER` is set in `env`, or in the `"env"` of `settings` (`~/.claude/settings.json`), and the reason names the variable, plus `settings.json` for the second. With neither set, each method gets a command. Proof: `test_G6_18_update_plan_keeps_a_switched_off_updater_for_every_method`.
 
+**G6.19 The Claude Code named is the one sessions run (open).** `find_claude()` in `scripts/install_method.py` takes the program running sessions execute (`/proc/<pid>/exe`) first, the login shell's PATH second, never a short PATH alone. Every other install found is named, and when they disagree Pit Stop says so to the person instead of choosing. Seen 2026-11-23: a probe with the short-PATH rule named a stale root npm copy on a box whose sessions run the native install. Proof: `test_G6_19_the_claude_named_is_the_one_sessions_run`.
+
 ### G7 Pit Stop keeps itself current
 
 Pit Stop switches on Claude Code's own updates for the marketplace it came from, brings plugins up to date with Claude Code's plugin commands before the helper restarts anyone, and tells a session once per version that a newer Claude Code is installed.
@@ -513,6 +515,7 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 - M1 (0.6.0): G6. Claude Code updates are off by default, and are tried on one machine before any other.
 - M2 (0.6.1): G13, G14, G15.
 - M2.1 (0.6.2): G19, with the open G7 codons (G7.6 to G7.10).
+- M2.2 (0.6.3): G6.19.
 - M3 (0.7): G16, then G17 from the kit's results.
 - M4 (0.8): G18.
 - M5 (1.0): the skill is renamed `windstorm-pit-stop`, with a notice in the update line and both names in the README for that release.

@@ -232,6 +232,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P17",
+   "seen": "2026-11-23, one Linux box: a read-only probe that finds claude with shutil.which in a non-interactive ssh shell (PATH first, the rule Pit Stop's find_claude() uses) named a root-owned npm global copy, /usr/bin/claude 2.1.322, that nothing runs. The person's sessions run Anthropic's native install in ~/.local/share/claude/versions (2.1.309 and 2.1.319; newest 2.1.321), and ~/.claude.json says installMethod 'global'. Pit Stop's own code was read, not run, on that box.",
+   "promise": "Pit Stop names the Claude Code a person's sessions really run: what running sessions execute first, the person's login-shell PATH second, never a short PATH alone. A second install is named, not hidden, and when the two disagree Pit Stop says so plainly instead of choosing in silence. Seen on a real machine before the release that carries it is tagged.",
+   "codon": "G6.19",
+   "issue": 70,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
