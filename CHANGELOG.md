@@ -1,5 +1,8 @@
 # Changelog
 
+## Plan 1.18 (2026-11-23)
+- **Finding Pit Stop by search** (plan change; open question 11 and one decision added; no codon changes). On 2026-11-23 `gh skill search` did not list Pit Stop, and GitHub's code search returned nothing from this repository, even for a word most of its files contain: the repository is not yet in GitHub's code index, which a repository cannot ask to join. The publish gate stays `gh skill publish --dry-run`; a search listing is never promised, and no install line depends on it. No invariant and no Part 0 rule changes.
+
 ## Plan 1.17 (2026-11-23)
 - **Nothing runs once the plugin is gone** (plan change; G12.8 added, open, due 0.6.2 in milestone M2.1; G12.1's fallback narrowed). On a Linux test account with Claude Code 2.1.280, `claude plugin uninstall` emptied Pit Stop's row in the plugin registry but left its cache folder, marked `.orphaned_at`. Pit Stop's launcher then found that folder, so a timer from `/pit-stop setup --fleet` kept running the uninstalled restart helper every 5 minutes. A sister plugin saw the same marker on 2.1.330. From now on the launcher and the helper change no session when the folder is marked, when the registry has no Pit Stop row, or when it cannot be read; each pass says which in one line. No invariant and no Part 0 rule changes.
 
