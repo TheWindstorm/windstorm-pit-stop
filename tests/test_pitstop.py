@@ -2266,13 +2266,14 @@ def test_G2_22_fleet_tune_starts_one_at_a_time_and_not_on_a_busy_machine(tmp_pat
     monkeypatch.setattr(rab.subprocess, "Popen", lambda cmd, **kw: (started.append((cmd, kw)), P())[1])
     monkeypatch.setattr(rab, "tune_due", lambda sessions, now, cfg, tuned_dir=None, week=0: "/work/one")
     monkeypatch.setattr(rab, "machine_busy", lambda: True)
+    monkeypatch.setattr(rab, "under_service", lambda: None)                         # not inside a systemd service (G2.28)
     now = time.time()
     assert rab.start_tune([], now) is None and not started                         # busy: wait for a later run
     monkeypatch.setattr(rab, "machine_busy", lambda: False)
     assert rab.start_tune([], now) == "/work/one" and len(started) == 1
     cmd, kw = started[0]
     assert cmd[-3:] == [os.path.join(ROOT, "scripts", "autotune.py"), "--project", "/work/one"] and "--force" not in cmd
-    assert kw.get("start_new_session") is True                                     # it outlives the helper's run
+    assert kw.get("start_new_session") is True                     # it outlives the helper's run (outside a service)
     assert rab.start_tune([], now + 120) is None and len(started) == 1             # the last one still runs
     runf = os.path.join(rab.BASE, "state", "tune.pid")
     os.utime(runf, (now - 4000, now - 4000))
@@ -2281,6 +2282,44 @@ def test_G2_22_fleet_tune_starts_one_at_a_time_and_not_on_a_busy_machine(tmp_pat
     os.remove(runf)
     assert rab.start_tune([], now) is None and len(started) == 2                   # nothing due
 
+
+
+def test_G2_28_no_fleet_tune_is_started_inside_a_systemd_service(tmp_path, monkeypatch):
+    """Seen 2026-11-24 (systemd 255, a throwaway user unit on a test account): a Type=oneshot unit ends a child
+    started with start_new_session=True when its main process exits (gone at +1 s; alive with KillMode=process).
+    Pit Stop's timer service is such a unit, so a tune the helper started there was cut off at the run's end, at any
+    point of its own run (its backup copy is written in place), and the log promised a result. Inside a systemd
+    service the helper starts no tune; it says so once a day, naming the service. Outside one: as before (G2.22)."""
+    import time
+    rab, _ = _live(tmp_path, monkeypatch)
+    started, said = [], []
+
+    class P:
+        pid = os.getpid()
+
+    monkeypatch.setattr(rab.subprocess, "Popen", lambda cmd, **kw: (started.append(cmd), P())[1])
+    monkeypatch.setattr(rab, "tune_due", lambda sessions, now, cfg, tuned_dir=None, week=0: "/work/one")
+    monkeypatch.setattr(rab, "machine_busy", lambda: False)
+    monkeypatch.setattr(rab, "log", lambda m: said.append(m))
+    real = rab.under_service
+    monkeypatch.setattr(rab, "under_service", lambda: "pit-stop-restart.service")
+    now = time.time()
+    assert rab.start_tune([], now) is None and started == [], started
+    assert len(said) == 1 and "not started" in said[0] and "pit-stop-restart.service" in said[0], said
+    assert "result in autotune.log" not in said[0] and "starts or ends a turn" in said[0], said
+    assert rab.start_tune([], now + 300) is None and started == [] and len(said) == 1      # once a day, not every run
+    assert rab.start_tune([], now + 86400 + 1) is None and len(said) == 2
+    monkeypatch.setattr(rab, "under_service", lambda: None)
+    assert rab.start_tune([], now) == "/work/one" and len(started) == 1
+    # what the process itself says: the last cgroup line's leaf, only when it is a .service
+    for text, want in (("0::/user.slice/user-1000.slice/user@1000.service/app.slice/pit-stop-restart.service\n",
+                        "pit-stop-restart.service"),
+                       ("0::/user.slice/user-1000.slice/user@1000.service/tmux-spawn-1.scope\n", None),
+                       ("", None)):
+        f = tmp_path / "cgroup"
+        f.write_text(text)
+        assert real(str(f)) == want, text
+    assert real(str(tmp_path / "none")) is None                       # no such file (a Mac): not a service
 
 def test_G2_23_fleet_tune_runs_only_when_tuning_is_on(tmp_path, monkeypatch):
     rab, _ = _live(tmp_path, monkeypatch)

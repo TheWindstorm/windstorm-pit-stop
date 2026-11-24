@@ -1417,6 +1417,19 @@ def machine_busy():
         return False
 
 
+def under_service(cgroup="/proc/self/cgroup"):
+    """The systemd service this process runs inside (the leaf of its last cgroup line, when it is a .service),
+    else None (no such file: a Mac, or not Linux). Seen 2026-11-24 (systemd 255): a Type=oneshot unit ends what its
+    main process started, even in a new session, when that process exits (G2.28)."""
+    try:
+        with open(cgroup) as f:
+            lines = f.read().strip().splitlines()
+    except OSError:
+        return None
+    leaf = lines[-1].rsplit("/", 1)[-1] if lines else ""
+    return leaf if leaf.endswith(".service") else None
+
+
 def start_tune(sessions, now):
     """Fleet-wide tune (daily by default). A session's folder used to be tuned only when a
     session started there, so a session that runs for weeks was never looked at
@@ -1434,6 +1447,24 @@ def start_tune(sessions, now):
         pass
     folder = tune_due(sessions, now, CFG)
     if not folder or machine_busy():
+        return None
+    svc = under_service()
+    if svc:     # G2.28: the service's end would cut the tune off at any point of its own run; say so once a day
+        said = os.path.join(BASE, "state", "tune-not-started")
+        try:
+            if now - os.path.getmtime(said) < 86400:
+                return None
+        except OSError:
+            pass
+        log(f"daily tune not started: this run is inside systemd's {svc}, which ends what a run starts when the run "
+            f"ends; folders are tuned when a session there starts or ends a turn (Pit Stop's hooks)")
+        try:
+            os.makedirs(os.path.dirname(said), exist_ok=True)
+            with open(said, "w"):
+                pass
+            os.utime(said, (now, now))
+        except OSError:
+            pass
         return None
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "autotune.py")
     p = subprocess.Popen([sys.executable, "-I", script, "--project", folder], stdin=subprocess.DEVNULL,
