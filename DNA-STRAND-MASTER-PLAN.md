@@ -443,6 +443,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.9 No bytecode beside the plugin's code.** Every file a hook, a command or a timer starts (`hooks/*.py` and each `scripts/*.py` with a `__main__`) sets `sys.dont_write_bytecode = True` right after `import sys`, before it imports any module of its own, so Python leaves no `__pycache__` in Claude Code's plugin folder. Seen 2026-11-23: `scripts/__pycache__` in every installed version folder back to 0.1.2. Files already there are Claude Code's folder and are left alone. Proof: `test_G12_9_no_bytecode_is_written_beside_the_code`.
 
+**G12.10 Undo names only what Pit Stop wrote, and prints no delete.** `setup.py --undo` names as left in place only names in `pitstop_common.STATE_NAMES` (with their `.1` and `.bak-pitstop-<UTC time>` copies), counts the rest as not written by this version, and prints no `rm -r`. A test holds the list against the code. Seen 2026-11-24, scratch home: a person's `pit-stop/notes.txt` was named as history under an `rm -r`. Proof: `test_G12_10_undo_names_only_what_pit_stop_wrote`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

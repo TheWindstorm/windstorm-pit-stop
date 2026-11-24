@@ -3677,3 +3677,31 @@ def test_G3_10_prune_removes_only_backups_pit_stop_wrote(tmp_path):
     assert all(f.exists() for f in theirs)                                          # not ours: never removed
     left = sorted(f.name for f in s.parent.iterdir() if f.name.startswith(s.name + ".bak-pitstop-2026010") and f not in theirs)
     assert left == [f"{s.name}.bak-pitstop-2026010{i}T000000Z" for i in (2, 3, 4)]   # ours: newest three kept
+
+
+def test_G12_10_undo_names_only_what_pit_stop_wrote(tmp_path, monkeypatch, capsys):
+    import re
+    import pitstop_common as pc
+    code = ""
+    for f in glob.glob(os.path.join(ROOT, "hooks", "*.py")) + glob.glob(os.path.join(ROOT, "scripts", "*.py")):
+        code += open(f).read()
+    written = set(re.findall(r'os\.path\.join\((?:pc\.)?(?:STATE_DIR|STATE), ["\']([^"\']+)["\']', code))
+    assert written and written <= pc.STATE_NAMES, written - pc.STATE_NAMES            # the list holds every name the code writes
+    for n in ("autotune.log.1", "config.json.bak-pitstop-20261124T032900Z", "tuned"):
+        assert pc.state_name_is_ours(n)
+    for n in ("notes.txt", "backups", "restart.json.bak-20261110T135046Z", "config.json.bak-pitstop-mine", "x.1"):
+        assert not pc.state_name_is_ours(n)
+    st = tmp_path / "state"
+    st.mkdir()
+    (st / "notes.txt").write_text("the person's")
+    (st / "theirs").mkdir()
+    (st / "autotune.log").write_text("x")
+    monkeypatch.setattr(pc, "STATE_DIR", str(st))
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    out = "\n".join(su.undo(ledger=str(st / "setup-undo.json"), run_cmd=lambda c: (0, "")))
+    assert "rm -r" not in out and "rm " not in out                                  # no delete is printed
+    left = next(x for x in out.splitlines() if x.startswith("Left in place"))
+    assert "autotune.log" in left and "notes.txt" not in left and "theirs" not in left
+    assert "2 other file(s) or folder(s) this version of Pit Stop did not write; they stay." in out
+    assert (st / "notes.txt").exists() and (st / "theirs").is_dir()

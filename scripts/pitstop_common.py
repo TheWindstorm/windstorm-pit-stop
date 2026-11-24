@@ -24,6 +24,22 @@ LANES = os.path.join(STATE_DIR, "lanes")           # one profile per session id
 FOLDERS = os.path.join(STATE_DIR, "folders")       # one profile per folder (0.1.x kept it in <folder>/.claude/pit-stop.json)
 ASKS = os.path.join(STATE_DIR, "asks")             # background-jobs asks waiting for a session's Stop hook
 SEEN = os.path.join(STATE_DIR, "seen")             # sessions whose Stop hook has run (the plugin is loaded there)
+# Every name Pit Stop itself writes at the top of STATE_DIR (G12.10). A test holds it against the code. A log
+# rotates to "<name>.1"; a settings copy is "<name>.bak-pitstop-<UTC time>". Anything else there is not ours.
+STATE_NAMES = frozenset({"asks", "autotune.log", "bin", "checkup", "config.json", "folders", "holds", "lanes",
+                         "machine-behind.json", "needs-you.md", "nudged", "precompact.log", "released.json",
+                         "restart", "restart.json", "seen", "setup-undo.json", "started", "stop.log", "tuned"})
+
+
+def state_name_is_ours(name):
+    """True for a top-level name in STATE_DIR that Pit Stop writes (G12.10)."""
+    if name in STATE_NAMES:
+        return True
+    base, dot, tail = name.rpartition(".")
+    if dot and tail == "1" and base in STATE_NAMES:
+        return True
+    m = re.fullmatch(r"(.+)\.bak-pitstop-\d{8}T\d{6}Z", name)
+    return bool(m and m.group(1) in STATE_NAMES)
 
 # Claude Code's own idle compaction (settings key idleCompaction, on by default)
 # compacts a session that has gone quiet, shortly before its prompt cache

@@ -447,13 +447,16 @@ def undo(ledger=None, run_cmd=None):
     # what stays, by name
     if os.path.exists(ledger):
         os.remove(ledger)
-    left = sorted(x for x in os.listdir(pc.STATE_DIR) if x not in ("config.json", "restart.json")) if os.path.isdir(
+    names = sorted(x for x in os.listdir(pc.STATE_DIR) if x not in ("config.json", "restart.json")) if os.path.isdir(
         pc.STATE_DIR) else []
+    left = [x for x in names if pc.state_name_is_ours(x)]
+    others = len(names) - len(left)
     out.append("Left in place (history, not settings): " + (", ".join(home(os.path.join(pc.STATE_DIR, x)) for x in left)
                                                           if left else "nothing"))
-    if left:
-        out.append(f"To remove those and your Pit Stop settings too: rm -r {home(pc.STATE_DIR)}. To remove Pit Stop itself: "
-                   f"claude plugin uninstall windstorm-pit-stop@{name or 'thewindstorm'}")
+    if others:   # G12.10: not ours, so never named as Pit Stop's and never offered for deletion
+        out.append(f"   Also in {home(pc.STATE_DIR)}: {others} other file(s) or folder(s) this version of Pit Stop "
+                   f"did not write; they stay.")
+    out.append(f"To remove Pit Stop itself: claude plugin uninstall windstorm-pit-stop@{name or 'thewindstorm'}")
     return out
 
 
