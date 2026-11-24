@@ -3731,6 +3731,9 @@ def test_G12_11_undo_removes_only_timer_files_setup_wrote(tmp_path, monkeypatch)
     assert "my-own-thing" in svc.read_text() and "hourly" in tmr.read_text()
     out = undo()
     assert svc.exists() and tmr.exists() and "not written by Pit Stop's setup: left as they are" in out
+    assert out.splitlines()[-1].startswith("Done: what Pit Stop's setup changed is put back; anything that stayed is named above.")
+    monkeypatch.setattr(sys, "argv", ["setup.py", "--undo"])
+    assert su.main() == 0                                                           # a foreign file never fails the leave
     assert ["systemctl", "--user", "disable", "--now", "pit-stop-restart.timer"] not in ran
     # 2. files setup wrote (recorded): undo stops and removes them
     svc.unlink(), tmr.unlink()

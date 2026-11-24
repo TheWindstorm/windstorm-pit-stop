@@ -499,7 +499,9 @@ def undo(ledger=None, run_cmd=None):
     if others:   # G12.10: not ours, so never named as Pit Stop's and never offered for deletion
         out.append(f"   Also in {home(pc.STATE_DIR)}: {others} other file(s) or folder(s) this version of Pit Stop "
                    f"did not write; they stay.")
-    out.append(f"To remove Pit Stop itself: claude plugin uninstall windstorm-pit-stop@{name or 'thewindstorm'}")
+    # rule 8: a foreign file does not stop a leave; the last line says it is done and where what stayed is named
+    out.append(f"Done: what Pit Stop's setup changed is put back; anything that stayed is named above. "
+               f"To remove Pit Stop itself: claude plugin uninstall windstorm-pit-stop@{name or 'thewindstorm'}")
     return out
 
 

@@ -445,7 +445,7 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.10 Undo names only what Pit Stop wrote, and prints no delete.** `setup.py --undo` names as left in place only names in `pitstop_common.STATE_NAMES` (with their `.1` and `.bak-pitstop-<UTC time>` copies), counts the rest as not written by this version, and prints no `rm -r`. A test holds the list against the code. Seen 2026-11-24, scratch home: a person's `pit-stop/notes.txt` was named as history under an `rm -r`. Proof: `test_G12_10_undo_names_only_what_pit_stop_wrote`.
 
-**G12.11 Undo removes only the timer files setup wrote.** Setup records each unit, timer, plist and launcher it writes with its sha256 and never overwrites one that is not Pit Stop's; `--undo` stops and removes a file only while it matches that record or, with no record, carries Pit Stop's mark, and names any other with the command that switches it off. Proof: `test_G12_11_undo_removes_only_timer_files_setup_wrote`.
+**G12.11 Undo removes only the timer files setup wrote.** Setup records each unit, timer, plist and launcher it writes with its sha256 and never overwrites one that is not Pit Stop's; `--undo` stops and removes a file only while it matches that record or, with no record, carries Pit Stop's mark, and names any other with the command that switches it off; it still exits 0 and ends `Done: ... named above.` Proof: `test_G12_11_undo_removes_only_timer_files_setup_wrote`.
 
 ### G13 Self-update for everyone (open)
 
