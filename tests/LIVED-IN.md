@@ -11,7 +11,9 @@ All values are made up for the round: no real token, key or address is ever put 
 1. `~/.claude/settings.json` with many keys: `permissions` (allow and deny lists), `model`, `includeCoAuthoredBy`,
    `cleanupPeriodDays`, and an `env` block naming several variables (`BASH_DEFAULT_TIMEOUT_MS`,
    `CLAUDE_CODE_MAX_OUTPUT_TOKENS`, `DISABLE_TELEMETRY`, a made-up `GITHUB_TOKEN`).
-2. A status line of the person's own (`statusLine` running a script in `~/.claude/`).
+2. A status line of the person's own (`statusLine` running a script in `~/.claude/`) whose line starts with `❯` (many
+   prompt themes do) and names a branch, a model and a context share: the restart helper reads the pane's screen, and
+   Claude Code draws this line below the input box, in the rows the helper reads.
 3. Hooks of the person's own in `settings.json` on SessionStart, PreCompact and Stop: each prints a line and exits 0.
 4. Another plugin enabled from another marketplace, whose hooks also run on SessionStart, PreCompact and Stop.
 5. A `claude` of the person's own first on PATH (`~/bin/claude`, a wrapper that sets a variable and runs the real one).
