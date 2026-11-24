@@ -3908,3 +3908,38 @@ def test_G12_14_status_repeats_an_open_folder_until_it_is_closed():
         assert "Can be written by another account" not in r.stdout and "Nothing needs you." in r.stdout, r.stdout
     finally:
         shutil.rmtree(tmp_path)
+
+
+def test_G12_15_a_private_group_of_one_is_not_another_account():
+    """Rule 28, WHEN A PERSON'S FOLDER IS NAMED: a stock Linux home is 755 with ~/.config 775 in the person's own
+    group with nobody else in it; that is named nowhere. The same folders in a group with a second member are
+    named; where the group's members cannot be read, the line says so."""
+    import json as _json
+    import shutil
+    tmp_path = _open_home()
+    try:
+        home, cfg = tmp_path / "home", tmp_path / "home" / ".claude"
+        units = home / ".config" / "systemd" / "user"
+        for d in (cfg / "pit-stop", units):
+            d.mkdir(parents=True)
+        (units / "pit-stop-restart.timer").write_text("[Unit]\nDescription=Windstorm Pit Stop every 5 minutes\n")
+        os.chmod(units / "pit-stop-restart.timer", 0o644)
+        for d in (home, cfg, cfg / "pit-stop"):
+            os.chmod(d, 0o755)
+        for d in (home / ".config", units.parent, units):
+            os.chmod(d, 0o775)
+        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent"}
+        code = ("import json, sys; sys.path.insert(0, sys.argv[1]); import setup as su; m = json.loads(sys.argv[2]); "
+                "su.group_members = lambda gid: None if m is None else set(m); "
+                "print(json.dumps([l for l in su.open_lines(su.open_scan()) if 'Pit Stop cannot tell' in l]))")
+        lines = lambda members: _json.loads(subprocess.run(
+            [sys.executable, "-I", "-c", code, os.path.join(ROOT, "scripts"), _json.dumps(members)], env=env,
+            capture_output=True, text=True, timeout=60).stdout)
+        assert lines([]) == []                                          # a group of one: nothing named
+        two = lines(["someone-else"])
+        assert [l.split(" (")[0] for l in two] == ["1. ~/.config", "2. ~/.config/systemd", "3. ~/.config/systemd/user"], two
+        assert all("(775) can be written by another account:" in l for l in two)
+        unread = lines(None)
+        assert len(unread) == 3 and all(f"(the members of group {os.getgid()} could not be read)" in l for l in unread), unread
+    finally:
+        shutil.rmtree(tmp_path)

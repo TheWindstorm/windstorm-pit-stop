@@ -270,30 +270,65 @@ def install_timer(interval, apply):
                                                "systemctl --user enable --now pit-stop-restart.timer")
 
 
-def reach(path):
-    """Who other than the owner can get to PATH: "g" (the group) and/or "o" (everyone else), kept only while
-    every folder above it, from the root down, lets them pass. A folder that cannot be read stops both."""
-    who = {"g", "o"}
-    d = os.path.dirname(os.path.abspath(path))
-    while who:
+def group_members(gid):
+    """The accounts other than the owner (and root) that hold group GID: its member list and every account whose
+    primary group it is. None when it cannot be read (no such group entry, or no grp/pwd on this system)."""
+    try:
+        import grp
+        import pwd
+        me = pwd.getpwuid(os.getuid()).pw_name
+        names = set(grp.getgrgid(gid).gr_mem) | {p.pw_name for p in pwd.getpwall() if p.pw_gid == gid}
+    except (ImportError, KeyError, OSError):
+        return None
+    return names - {me, "root"}
+
+
+OTHER = "(an account in none of these groups)"
+
+
+def exposure(path, mode):
+    """None when no account other than the owner can reach PATH (every folder from the root down passable for
+    it) and write it; else the note for its line: "" when known, or which group's members could not be read.
+    The group's bits count only for an account in that folder's group, and only when the group has a member
+    other than the owner (rule 28, WHEN A PERSON'S FOLDER IS NAMED): a private group of one is not another
+    account. Everyone else goes by the "other" bits."""
+    chain, d = [], os.path.dirname(os.path.abspath(path))
+    while True:
         try:
-            m = os.stat(d).st_mode
+            chain.append((os.stat(d), 0o1))                   # a folder above: x lets an account through
         except OSError:
-            return set()
-        if not m & 0o010:
-            who.discard("g")
-        if not m & 0o001:
-            who.discard("o")
+            return None
         if os.path.dirname(d) == d:
             break
         d = os.path.dirname(d)
-    return who
+    gid = None
+    try:
+        gid = os.lstat(path).st_gid
+    except OSError:
+        return None
+    steps = [(st.st_gid, st.st_mode, need) for st, need in chain] + [(gid, mode, 0o2)]   # the thing itself: w
+    groups, unread = {}, []
+    for g, _, _ in steps:
+        if g not in groups:
+            groups[g] = group_members(g)
+            if groups[g] is None:
+                unread.append(g)
+    who = {OTHER} | {n for m in groups.values() if m for n in m} | {f"(group {g})" for g in unread}
+    for c in who:
+        ok = True
+        for g, m, need in steps:
+            inside = c != OTHER and (c == f"(group {g})" or c in (groups[g] or ()))
+            if not m & (need << 3 if inside else need):
+                ok = False
+                break
+        if ok:
+            return f" (the members of group {c[7:-1]} could not be read)" if c.startswith("(group ") else ""
+    return None
 
 
 def writable_by_others(path, mode):
-    """True when an account other than the owner can reach PATH and write it."""
-    w = ({"g"} if mode & 0o020 else set()) | ({"o"} if mode & 0o002 else set())
-    return bool(w & reach(path))
+    """True when an account other than the owner can reach PATH and write it (exposure)."""
+    return exposure(path, mode) is not None
 
 
 def open_scan(home=None):
@@ -301,7 +336,7 @@ def open_scan(home=None):
       mine:  [(path, mode)] what Pit Stop wrote that has group or other write: the state folder and, inside it,
              the names Pit Stop writes (everything under its own folders), and the launcher, unit, timer and
              plist when ours. Setup closes these whoever can reach them; symlinks and other owners' are left.
-      ways:  [(path, mode, what runs under it)] every other folder from the home down to each thing of ours that
+      ways:  [(path, mode, what runs under it, note)] every other folder from the home down to each thing of ours that
              runs or is read (the launcher, the timer files, the installed code, the settings) that another
              account can reach and write. Not ours to change (rule 23): named with the one command.
       copy:  (installed code folder, how many entries in it another account can reach and write).
@@ -361,8 +396,9 @@ def open_scan(home=None):
             except OSError:
                 unread.append(d)
                 continue
-            if not os.path.islink(d) and writable_by_others(d, st.st_mode):
-                ways.append((d, st.st_mode & 0o7777, what + (" runs" if what != "Pit Stop's settings and state" else " are")))
+            note = None if os.path.islink(d) else exposure(d, st.st_mode)
+            if note is not None:
+                ways.append((d, st.st_mode & 0o7777, what + (" runs" if what != "Pit Stop's settings and state" else " are"), note))
     n = 0
     for d, dirs, files in os.walk(code, followlinks=False, onerror=lambda e: unread.append(e.filename)):
         dirs[:] = [x for x in dirs if x != ".git"]
@@ -381,9 +417,9 @@ def open_lines(scan, first=()):
     """The numbered lines that name what Pit Stop may not change (rule 28): which folder, what it means, the one
     command. Setup prints them; /pit-stop status repeats them until they are closed."""
     short = lambda p: p.replace(pc.HOME, "~", 1) if p.startswith(pc.HOME) else p
-    out = list(first) + [f"{short(d)} ({oct(m)[2:]}) can be written by another account: it could delete and replace what is "
-           f"in it, and {what} under it, as you. Pit Stop cannot tell whether it made this folder, so it stays. "
-           f"To close it: chmod go-w {d}" for d, m, what in scan["ways"]]
+    out = list(first) + [f"{short(d)} ({oct(m)[2:]}) can be written by another account{note}: it could delete and replace "
+           f"what is in it, and {what} under it, as you. Pit Stop cannot tell whether it made this folder, so it stays. "
+           f"To close it: chmod go-w {d}" for d, m, what, note in scan["ways"]]
     code, n = scan["copy"]
     if n:
         out.append(f"{n} file(s) or folder(s) in Pit Stop's installed code ({short(code)}) can be written by another "

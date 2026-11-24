@@ -453,6 +453,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.14 Status repeats an open folder until it is closed.** `/pit-stop status` (needs_you) names, numbered, what another account can reach and write: Pit Stop's own (with the setup that closes it) and each folder on the way (with the chmod), every time, and counts it as needing the person; behind a home only its owner enters, nothing. Seen 2026-11-24, rule 28's folders paragraph. Proof: `test_G12_14_status_repeats_an_open_folder_until_it_is_closed`.
 
+**G12.15 A private group of one is not another account.** A folder's group bits count only for an account in that group other than the owner (its member list, and every account whose primary group it is); a stock home at 755 with `~/.config` at 775 in the person's own group of one is named nowhere; with a second member it is; unreadable membership is said on the line. Seen 2026-11-24, rule 28's naming paragraph. Proof: `test_G12_15_a_private_group_of_one_is_not_another_account`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.
