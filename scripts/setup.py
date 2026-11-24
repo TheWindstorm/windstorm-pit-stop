@@ -114,6 +114,33 @@ def keep_record(path):
     wrote(UNDO, "files", sha(path), sub=path)
 
 
+LEFT_SAYS = {   # rule 6: three answers, never "could not be read" told as read
+    "launcher": "it runs Pit Stop's launcher, which runs nothing until Pit Stop is installed again",
+    "direct": "it names a version folder directly, not Pit Stop's launcher; what it runs is not checked here",
+    "neither": "read now, it names neither Pit Stop's launcher nor its helper",
+    "unread": "it could not be read here; what it runs is not known",
+}
+
+
+def what_it_runs(h, run_cmd=None):
+    """For a timer file or "crontab" that already_scheduled() named: "launcher", "direct", "neither" or "unread"."""
+    if h == "crontab":
+        r = (run_cmd or run)(["crontab", "-l"], 10)
+        if not r or r.returncode != 0:
+            return "unread"
+        text = r.stdout or ""
+    else:
+        try:
+            with open(h, errors="replace") as f:
+                text = f.read()
+        except OSError:
+            return "unread"
+    lines = [ln for ln in text.splitlines() if "restart_at_break.py" in ln or "pit-stop-restart" in ln]
+    if any("restart_at_break.py" in ln for ln in lines):
+        return "direct"
+    return "launcher" if lines else "neither"
+
+
 def missing_chain(path):
     """The folders that do not exist yet on the way to PATH (PATH included), deepest first."""
     out, d = [], os.path.abspath(path)
@@ -937,18 +964,15 @@ def main():
     import launcher as ln
     root, why = ln.find(pc.CLAUDE_DIR)
     if not root and why != "unreadable":
-        there = already_scheduled()
+        there = already_scheduled()     # it skips a file it cannot read: Pit Stop's own names are added by path
+        there += [f for f in (os.path.join(UNIT_DIR, "pit-stop-restart.service"), PLIST)
+                  if os.path.lexists(f) and f not in there]
         print(f"  check: the launcher a timer runs would run nothing: {ln.SAY[why]}.")
         print(f"  Fleet mode is NOT set up: nothing of it was made or changed. Install Pit Stop from its marketplace "
               f"(claude plugin install windstorm-pit-stop@{own_marketplace()[0] or 'thewindstorm'}), then this setup again.")
         for h in there:
-            try:
-                direct = h != "crontab" and "pit-stop-restart" not in open(h, errors="replace").read()
-            except OSError:
-                direct = False
-            print(f"  Left as it is, from an earlier install: {h.replace(pc.HOME, '~')}: " + (
-                "it names a version folder directly, not Pit Stop's launcher; what it runs is not checked here"
-                if direct else "it runs Pit Stop's launcher, which runs nothing until Pit Stop is installed again"))
+            print(f"  Left as it is, from an earlier install: {'your crontab' if h == 'crontab' else h.replace(pc.HOME, '~')}: "
+                  + LEFT_SAYS[what_it_runs(h)])
         return 1 if a.apply else 0
     servers = tmux_servers()
     ttys = {session_tty(s.get("pid")) for s in sessions}

@@ -4160,6 +4160,38 @@ def test_G12_20_the_way_back_in_is_walked(tmp_path):
     units = home / ".config" / "systemd" / "user"
     assert not (units.exists() and any(units.iterdir())), sorted(units.iterdir())
 
+    # rule 6: a timer or crontab named as left is told by what was read of it, or as not read
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    unreadable = tmp_path / "pit-stop-restart.service"
+    unreadable.mkdir()                      # opening it fails for any account, root too
+    assert su.what_it_runs(str(unreadable)) == "unread"
+    assert su.LEFT_SAYS["unread"] == "it could not be read here; what it runs is not known"
+    direct = tmp_path / "direct.service"
+    direct.write_text("ExecStart=/usr/bin/python3 -I /x/windstorm-pit-stop/0.5.1/scripts/restart_at_break.py --live\n")
+    assert su.what_it_runs(str(direct)) == "direct"
+    ran = lambda out, code: (lambda cmd, t: subprocess.CompletedProcess(cmd, code, out, ""))   # noqa: E731
+    assert su.what_it_runs("crontab", ran("*/5 * * * * ~/.claude/pit-stop/bin/pit-stop-restart --live\n", 0)) == "launcher"
+    assert su.what_it_runs("crontab", ran("", 1)) == "unread"
+    assert su.what_it_runs("crontab", lambda cmd, t: None) == "unread"
+    assert su.what_it_runs("crontab", ran("0 * * * * backup\n", 0)) == "neither"
+    # and the line the person reads, when the earlier install's unit cannot be read
+    install()
+    assert setup("--apply", "--fleet").returncode == 0
+    svc = home / ".config" / "systemd" / "user" / "pit-stop-restart.service"
+    uninstall()
+    os.chmod(svc, 0)
+    try:
+        r = setup("--apply", "--fleet")
+        if os.access(svc, os.R_OK):         # root reads it anyway: the in-process case above stands for it
+            assert "it runs Pit Stop's launcher" in r.stdout, r.stdout[-600:]
+        else:
+            assert (f"Left as it is, from an earlier install: ~/.config/systemd/user/pit-stop-restart.service: "
+                    f"it could not be read here; what it runs is not known") in r.stdout, r.stdout[-800:]
+            assert "it runs Pit Stop's launcher" not in r.stdout.split("pit-stop-restart.service:")[1].splitlines()[0]
+    finally:
+        os.chmod(svc, 0o644)
+
 
 def test_G12_18_the_walk_covers_what_decides_what_runs():
     """Rule 28, WHAT RUNS INCLUDES WHAT DECIDES WHAT RUNS: besides Pit Stop's own settings, launcher, timer and
