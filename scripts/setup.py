@@ -270,8 +270,13 @@ def timer_state(unit="pit-stop-restart.timer", run_cmd=None):
     "inactive" exit 3 for a stopped timer systemd knows, "inactive" exit 4 for one it does not know; `is-enabled`
     prints "enabled" exit 0, "disabled" exit 1, "not-found" exit 4; with no user bus both print nothing on stdout and
     "Failed to connect to bus: No medium found" on stderr, exit 1. Any other word is not one we have seen: unread.
-    launchd: `launchctl print gui/<uid>/<label>` exit 0 is loaded, and the job's file in ~/Library/LaunchAgents loads it
-    again at login (`launchctl disable` is not read); any other answer is not checked (not seen by us)."""
+    launchd (`launchctl print gui/<uid>/<label>`, seen by a lane, family rule 24): exit 0 is loaded, and the job's file
+    in ~/Library/LaunchAgents loads it again at login (`launchctl disable` is not read); exit 113 with "Bad request." is
+    a job not loaded where the account is logged in at the screen (macOS 27.2.1, seen by us 2026-11-24 on a clean test account on a Mac:
+    stderr "Bad request." then 'Could not find service "<label>" in domain for user gui: <uid>', stdout empty): stopped;
+    exit 125 with "Domain does not support specified action" is an account NOT logged in at the screen (ssh only,
+    macOS 13.7.8, seen by us on a test account, the domain itself answers the same): there is no place to ask,
+    so not checked ("no-screen-login"), never "not loaded". Any other answer is not one we have seen: unread."""
     run_cmd = run_cmd or (lambda c, t: run(c, t, env=c_locale()))
 
     def answer(r, what):
@@ -279,8 +284,15 @@ def timer_state(unit="pit-stop-restart.timer", run_cmd=None):
         return (f"{what} answered exit {r.returncode}" + (f": \"{first}\"" if first else "")) if r else f"{what} gave no answer"
     if platform.system() == "Darwin":
         r = run_cmd(["launchctl", "print", f"gui/{os.getuid()}/{unit}"], 15)
+        err = (r.stderr or "").strip() if r else ""
+        first = (err.splitlines() or [""])[0].strip()     # macOS 27.2.1 adds a 2nd line: Could not find service "..."
         if r and r.returncode == 0 and os.path.isfile(PLIST):
             return "running", f"{unit} is loaded, and its file {PLIST.replace(pc.HOME, '~')} loads it again at login"
+        if r and r.returncode == 113 and first == "Bad request." and os.path.isfile(PLIST):
+            return "stopped", f"{unit} is not loaded (launchctl print answered exit 113: \"Bad request.\")"
+        if r and r.returncode == 125 and "Domain does not support specified action" in err:
+            return "no-screen-login", (f"this account is not logged in at this Mac's screen, so launchd has no place to "
+                                       f"ask about {unit} (launchctl print answered exit 125)")
         return "unread", answer(r, "launchctl print")
     r1 = run_cmd(["systemctl", "--user", "is-active", unit], 15)
     act = (r1.stdout or "").strip() if r1 else ""
@@ -297,6 +309,33 @@ def timer_state(unit="pit-stop-restart.timer", run_cmd=None):
     if act == "active":
         return "not-enabled", f"{unit} is active but disabled: it runs now and will not start again after a restart"
     return "stopped", f"{unit} is {act} ({en})"
+
+
+def fleet_stop_line(st, unit, wrote_now, darwin):
+    """Family rule 7: the one line, with the one next step, for a timer read as not running (timer_state's answers)."""
+    if st == "not-enabled":
+        return (f"   Fleet mode is NOT set up to last: {unit} runs now but will not start again after a restart. "
+                f"Enable it with: systemctl --user enable {unit}")
+    if st == "stopped":
+        return (f"   Fleet mode is NOT running: {unit} is {'written but ' if wrote_now else ''}stopped. Start it with: "
+                + (f"launchctl bootstrap gui/{os.getuid()} {PLIST}" if darwin else
+                   ("systemctl --user daemon-reload && " if wrote_now else "") + f"systemctl --user enable --now {unit}"))
+    if st == "unknown" and unit == "pit-stop-restart.timer" and not darwin:
+        return (f"   Fleet mode is NOT running: its file is written but systemd does not know {unit}. Start it with: "
+                f"systemctl --user daemon-reload && systemctl --user enable --now {unit}")
+    if st == "no-screen-login":
+        try:
+            import pwd
+            me = pwd.getpwuid(os.getuid()).pw_name
+        except Exception:
+            me = "this user"
+        return (f"   Fleet mode: asked for, not checked: launchd answers only where {me} is logged in at this Mac's "
+                f"screen. Log in at this Mac's screen as {me}, then run this setup again.")
+    if unit and st in ("unread", "unknown"):
+        return ("   Fleet mode: asked for, not checked: whether the timer runs could not be read here. Run "
+                + (f"launchctl print gui/{os.getuid()}/{unit}" if darwin else f"systemctl --user is-active {unit}")
+                + " yourself: if it says the timer is active (or loaded), the timer runs.")
+    return "   Fleet mode: asked for, not checked (see the line above)."
 
 
 def schedule_read(run_cmd=None, cron_none_said=False):
@@ -1135,19 +1174,7 @@ def main():
             print(f"   First look at what it would do: {sys.executable} -I {BIN}")
             return 0
         for st, said, unit, wrote_now in states:
-            if st == "not-enabled":
-                print(f"   Fleet mode is NOT set up to last: {unit} runs now but will not start again after a restart. "
-                      f"Enable it with: systemctl --user enable {unit}")
-            elif st == "stopped":
-                print(f"   Fleet mode is NOT running: {unit} is {'written but ' if wrote_now else ''}stopped. Start it with: "
-                      + (f"launchctl bootstrap gui/{os.getuid()} {PLIST}" if darwin else
-                         ("systemctl --user daemon-reload && " if wrote_now else "") + f"systemctl --user enable --now {unit}"))
-            elif unit and st in ("unread", "unknown"):
-                print("   Fleet mode: asked for, not checked: whether the timer runs could not be read here. Run "
-                      + (f"launchctl print gui/{os.getuid()}/{unit}" if darwin else f"systemctl --user is-active {unit}")
-                      + " yourself: if it says the timer is active (or loaded), the timer runs.")
-            else:
-                print("   Fleet mode: asked for, not checked (see the line above).")
+            print(fleet_stop_line(st, unit, wrote_now, darwin))
         return 1
     print(f"7. check: the launcher the timer runs would run nothing: {ln.SAY[why]}.")
     if why == "unreadable":

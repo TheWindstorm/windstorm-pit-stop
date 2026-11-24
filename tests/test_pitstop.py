@@ -4365,6 +4365,11 @@ def test_G12_22_fleet_mode_is_set_up_only_when_the_timer_is_read_running(tmp_pat
         assert (home / ".config" / "systemd" / "user" / "pit-stop-restart.timer").exists(), (name, r.stdout[-600:])
         assert "enabled and started" not in r.stdout and line in r.stdout, (name, r.stdout[-900:])
         assert (r.returncode == 0) == (name == "running") and ("fleet mode is set up" in r.stdout) == (name == "running"), name
+    home, r = setup_with("not known 2", sh(seen["not known"]))   # our own file written, systemd does not know it
+    assert ("   Fleet mode is NOT running: its file is written but systemd does not know pit-stop-restart.timer. Start it "
+            "with: systemctl --user daemon-reload && systemctl --user enable --now pit-stop-restart.timer") in r.stdout, \
+        r.stdout[-800:]
+    assert "is-active pit-stop-restart.timer yourself" not in r.stdout
     home, r = setup_with("no bus 2", sh(seen["no bus"]))
     assert ("   Fleet mode: asked for, not checked: whether the timer runs could not be read here. Run systemctl --user "
             "is-active pit-stop-restart.timer yourself: if it says the timer is active (or loaded), the timer runs.") in r.stdout
@@ -4401,6 +4406,43 @@ def test_G12_22_fleet_mode_is_set_up_only_when_the_timer_is_read_running(tmp_pat
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0 and "   the timer: a crontab line runs it (read from crontab -l)" in r.stdout, r.stdout[-600:]
     assert "   fleet mode is set up" in r.stdout
+
+def test_G12_22_launchd_answers_as_seen(tmp_path, monkeypatch):
+    """Family rule 24, WHAT THE READS ANSWER, AS SEEN (the maintainer, 2026-11-24): `launchctl print gui/<uid>/<label>`
+    exit 0 = loaded; exit 113 "Bad request." (then a "Could not find service" line on macOS 27.2.1) = not loaded where
+    the account is logged in at the screen:
+    stopped, with the bootstrap command; exit 125 "Domain does not support specified action" = not logged in at the
+    screen (ssh only, macOS 13): not checked, with the step "log in at this Mac's screen", never "not loaded".
+    Any other answer is not one we have seen: unread."""
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    plist = tmp_path / "ai.thewindstorm.pit-stop-restart.plist"
+    plist.write_text("<plist/>")
+    monkeypatch.setattr(su.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(su, "PLIST", str(plist))
+    seen = {"loaded": (0, "gui/501/ai.thewindstorm.pit-stop-restart = {", "", "running"),
+            "not loaded": (113, "", 'Bad request.\nCould not find service "ai.thewindstorm.pit-stop-restart" in domain '
+                           'for user gui: 510\n', "stopped"),                   # as seen, macOS 27.2.1 (logged in at the screen)
+            "not loaded, one line": (113, "", "Bad request.\n", "stopped"),
+            "no screen login": (125, "", "Could not print domain: 125: Domain does not support specified action\n",
+                                "no-screen-login"),
+            "113, other words": (113, "", "Could not find service in domain\n", "unread"),
+            "125, other words": (125, "", "something else\n", "unread"),
+            "unseen exit": (5, "", "Input/output error\n", "unread")}
+    for name, (code, out, err, want) in seen.items():
+        st = su.timer_state(su.LAUNCHD_LABEL, run_cmd=lambda c, t, a=(code, out, err): subprocess.CompletedProcess(c, *a))[0]
+        assert st == want, name
+    os.remove(plist)          # 113 without the job's file: what would be loaded is not there, so not "stopped"
+    assert su.timer_state(su.LAUNCHD_LABEL, run_cmd=lambda c, t: subprocess.CompletedProcess(c, 113, "", "Bad request.\n"))[0] \
+        == "unread"
+    line = su.fleet_stop_line("stopped", su.LAUNCHD_LABEL, False, True)
+    assert line.startswith("   Fleet mode is NOT running: ai.thewindstorm.pit-stop-restart is stopped. Start it with: "
+                           "launchctl bootstrap gui/") and line.endswith(str(plist)), line
+    line = su.fleet_stop_line("no-screen-login", su.LAUNCHD_LABEL, False, True)
+    assert "Log in at this Mac's screen as " in line and "then run this setup again" in line and "not checked" in line
+    assert "stopped" not in line and "NOT running" not in line
+    assert "launchctl print gui/" in su.fleet_stop_line("unread", su.LAUNCHD_LABEL, False, True)
+
 
 def test_G12_18_the_walk_covers_what_decides_what_runs():
     """Rule 28, WHAT RUNS INCLUDES WHAT DECIDES WHAT RUNS: besides Pit Stop's own settings, launcher, timer and

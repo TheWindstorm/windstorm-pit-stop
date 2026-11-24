@@ -469,7 +469,7 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.21 A schedule that could not be read is not none there.** Setup --fleet makes a timer only when it has read that nothing else schedules the helper. An unreadable unit, or a `crontab -l` (C locale) refused, killed or silent, is "not checked": no timer, NOT set up, exit 1, with what crontab answered and the next step; --crontab-has-no-pit-stop-line is the person's way through. Proof: `test_G12_21_a_schedule_that_could_not_be_read_is_not_none`.
 
-**G12.22 Fleet mode is set up only when the timer is read running.** Step 6 says what was asked of systemd or launchd; step 7 reads the timer itself: `systemctl --user is-active` "active" and `is-enabled` "enabled", `launchctl print` exit 0, or a crontab line read. Stopped, disabled, unknown or unreadable: said so, naming the unit read, with its one command, exit 1. Proof: `test_G12_22_fleet_mode_is_set_up_only_when_the_timer_is_read_running`.
+**G12.22 Fleet mode is set up only when the timer is read running.** Step 7 reads the timer itself: `systemctl --user is-active` "active" and `is-enabled` "enabled", `launchctl print` exit 0, or a read crontab line. Stopped (launchctl: 113 "Bad request."), disabled, unknown or unreadable: said so, naming the unit, with its one command, exit 1; launchctl 125 (no screen login): not checked, log in at the screen. Proof: `test_G12_22_fleet_mode_is_set_up_only_when_the_timer_is_read_running`, `test_G12_22_launchd_answers_as_seen`.
 
 ### G13 Self-update for everyone (open)
 
