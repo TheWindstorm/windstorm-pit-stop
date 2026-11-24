@@ -560,8 +560,12 @@ def append_log(path, msg, max_bytes=5_000_000):
 
 
 def prune_backups(path, keep=3):
-    """Keep only the newest KEEP <path>.bak-pitstop-* files (the daily tune would pile them up)."""
-    old = sorted(glob.glob(glob.escape(path) + ".bak-pitstop-*"))[:-keep]
+    """Keep only the newest KEEP <path>.bak-pitstop-<UTC time> files (the daily tune would pile them up).
+    Only names exactly as backup() writes them (YYYYMMDDTHHMMSSZ) are counted or removed: a file of the
+    person's that merely starts the same way is not ours (rule 23, G3.10)."""
+    mine = re.compile(re.escape(os.path.basename(path)) + r"\.bak-pitstop-\d{8}T\d{6}Z")
+    old = sorted(f for f in glob.glob(glob.escape(path) + ".bak-pitstop-*")
+                 if mine.fullmatch(os.path.basename(f)))[:-keep]
     for f in old:
         try:
             os.remove(f)

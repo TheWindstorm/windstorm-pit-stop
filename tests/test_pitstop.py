@@ -3661,3 +3661,19 @@ def test_G12_9_no_bytecode_is_written_beside_the_code(tmp_path):
                        env=env, timeout=60)
     left = [str(p) for p in copy.rglob("__pycache__")]
     assert not left, left
+
+
+def test_G3_10_prune_removes_only_backups_pit_stop_wrote(tmp_path):
+    import pitstop_common as pc
+    s = tmp_path / "proj" / ".claude" / "settings.local.json"
+    s.parent.mkdir(parents=True)
+    s.write_text("{}")
+    theirs = [s.parent / (s.name + x) for x in (".bak-pitstop-0-person", ".bak-pitstop-mine", ".bak-pitstop-20260101T000000Z.old")]
+    for f in theirs:
+        f.write_text("the person's")
+    for i in range(5):
+        (s.parent / f"{s.name}.bak-pitstop-2026010{i}T000000Z").write_text("x")
+    pc.prune_backups(str(s), keep=3)
+    assert all(f.exists() for f in theirs)                                          # not ours: never removed
+    left = sorted(f.name for f in s.parent.iterdir() if f.name.startswith(s.name + ".bak-pitstop-2026010") and f not in theirs)
+    assert left == [f"{s.name}.bak-pitstop-2026010{i}T000000Z" for i in (2, 3, 4)]   # ours: newest three kept

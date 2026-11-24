@@ -195,6 +195,8 @@ One shared module, `scripts/pitstop_common.py`, plus the hook generation file, r
 
 **G3.9 Every apply keeps three backups.** `main()` in `scripts/optimize.py` with `--apply` calls `prune_backups(s)` after `apply()`, as `scripts/autotune.py` and `scripts/setup.py` already do, so each settings file keeps its newest three `.bak-pitstop-*` copies (G2.11). Seen 2026-11-22: 55 hand-run `--apply` writes left 56 copies; daily tuning prunes. Proof: `test_G3_9_optimize_apply_keeps_three_backups`.
 
+**G3.10 Only our own backups are pruned.** `pitstop_common.prune_backups(path)` counts and removes only files named exactly as `backup()` writes them, `<file>.bak-pitstop-YYYYMMDDTHHMMSSZ`; any other name that starts the same way is the person's and stays. Seen 2026-11-24 in a scratch home: a stand-in `settings.local.json.bak-pitstop-0-person` was deleted by the glob. Proof: `test_G3_10_prune_removes_only_backups_pit_stop_wrote`.
+
 ### G4 Restart helper at a break
 
 The helper `scripts/restart_at_break.py` types `/compact`, `/restart` or a short note into a session's tmux pane, or, when switched on, its Herdr pane (G4.35 to G4.38), only when the session is at a break and its input box is free, so every session moves to the newest Claude Code without a person.
