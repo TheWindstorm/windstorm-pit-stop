@@ -358,6 +358,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P35",
+   "seen": "2026-11-24, by the code (restart_at_break.py tmux() and panes(), released 0.6.1 the same) against sightings by the release review: a tmux SHELL client with no UTF-8 language setting (tmux 3.4 on Linux; a shell in a launchd job on macOS 27.2.1, tmux 3.7c) prints \"_\" for each non-ASCII letter of a name, so a session named \"tést\" comes out \"t_st\" and has-session by it answers \"can't find session\"; a target without \"=\" also matches by prefix. The helper ran tmux with no -u and typed into \"#{session_name}:#{window_index}.#{pane_index}\". The helper is a Python program, which hands tmux a UTF-8 setting when it starts with no language variable (seen with Python 3.9, 3.12 and 3.14 on Linux, macOS 27 and macOS 13: its tmux child printed the name whole), so its reads come out changed only when LC_ALL is C or POSIX where it was started (a hand run from such a shell, a cron line). The TAB between a format's fields comes out \"_\" to such a client too (tmux 3.4, seen), so under LC_ALL=C 0.6.1's panes() splits no line and its map is EMPTY: by its code it finds no pane for any session, passes each over with no line in restart.log (main(): a session with no target is skipped silently), and types nowhere. A name as a target also matches by prefix, so a session that ended between the list and the keys can hand its keys to another whose name starts the same; a pane id cannot: that is the reason for the id. capture-pane's screen came out whole from such a client on tmux 3.4. Not seen: the helper itself reading a name or a tab changed, and a session reached wrongly.",
+   "promise": "The helper addresses a pane only by its id (#{pane_id}), never by a name from tmux, and every tmux call it makes carries -u, so a name with a non-ASCII letter is read whole from a timer whose environment has no UTF-8 language setting; a test's tmux stand-in drops non-ASCII letters unless -u is given, holds two sessions named \"tést\" and \"t_st\", and sees the keys land in the first only.",
+   "codon": "G4.39",
+   "issue": null,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "test_G4_39_a_pane_is_addressed_by_its_id_and_tmux_is_read_whole",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

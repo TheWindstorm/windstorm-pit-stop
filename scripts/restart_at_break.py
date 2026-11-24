@@ -213,12 +213,19 @@ PLANNED = set()  # panes the restart path wants this run (a restart, a compactio
 
 
 def tmux(*args):
-    base = ["tmux"] + (["-L", CFG["tmux_socket"]] if CFG["tmux_socket"] else [])
+    """Every call carries -u (rule 30, A NAME IS READ WHOLE): a tmux client with no UTF-8 language setting prints
+    "_" for each non-ASCII letter of a NAME and for a TAB (tmux 3.4, seen), as the helper's own tmux child does
+    when the helper was started under LC_ALL=C or POSIX (with no language variable at all, Python hands tmux UTF-8);
+    the screen from capture-pane came out whole from such a client on 3.4 (seen); -u is carried on every call all
+    the same. It is on the helper's own calls only; nothing in tmux's server changes."""
+    base = ["tmux", "-u"] + (["-L", CFG["tmux_socket"]] if CFG["tmux_socket"] else [])
     return subprocess.run(base + list(args), capture_output=True, text=True, timeout=15)
 
 
 def panes():
-    r = tmux("list-panes", "-a", "-F", "#{pane_tty}\t#{session_name}:#{window_index}.#{pane_index}")
+    """{terminal: pane id}. A pane is addressed by its id ("%N": the same text in every environment, one pane only),
+    never by a session's name, which can come out changed and also matches by prefix (rule 30)."""
+    r = tmux("list-panes", "-a", "-F", "#{pane_tty}\t#{pane_id}")
     return dict(l.split("\t") for l in r.stdout.splitlines() if "\t" in l)
 
 

@@ -1207,6 +1207,82 @@ def _fake_box(rab, monkeypatch, box, per_ctrl_u):
     return sent, told
 
 
+def test_G4_39_a_pane_is_addressed_by_its_id_and_tmux_is_read_whole(tmp_path, monkeypatch):
+    """Family rule 30, A NAME IS READ WHOLE: a tmux client with no UTF-8 language setting (a timer's environment)
+    prints "_" for every non-ASCII letter (tmux 3.4, seen: "tést" came out "t_st"; has-session by that name: "can't
+    find session"), and a target without "=" also matches by prefix. A pane is addressed by its id (#{pane_id},
+    the same text in every environment, one pane only), never by a name, and every tmux call of the helper carries
+    -u. The stand-in: two sessions named "tést" and "t_st"; names and screens lose their non-ASCII letters unless
+    the call carries -u; a target resolves as tmux's does (a pane id, or session:window.pane by name, exact first,
+    then prefix). The world is LC_ALL=C with no TMUX: a Python program started with no language variable hands
+    tmux a UTF-8 setting and reads names whole (seen with Python 3.9, 3.12 and 3.14), but under LC_ALL=C or POSIX
+    it does not. The stand-in is stricter than what was seen for the screen (tmux 3.4 gave capture-pane whole).
+    A TAB between a format's fields comes out "_" too (seen), so without -u the old map came out EMPTY and
+    nothing was typed. A name as a target also matches by prefix, so a session that ended between the list and
+    the keys can hand its keys to another whose name starts the same; a pane id cannot.
+    The keys for the session in "tést" land in "tést" only."""
+    rab = _rab(tmp_path, monkeypatch)
+    monkeypatch.setattr(rab, "LIVE", True)
+    monkeypatch.setattr(rab.time, "sleep", lambda n: None)
+    for k in ("LANG", "LC_CTYPE", "TMUX"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("LC_ALL", "C")    # where names come out changed: Python sets no UTF-8 setting under LC_ALL=C
+    world = {"%1": {"tty": "/dev/pts/1", "session": "t\u00e9st", "box": ""},
+             "%2": {"tty": "/dev/pts/2", "session": "t_st", "box": ""}}
+    calls, keys = [], []
+
+    def plain(t, utf8):        # tmux 3.4, seen: a non-ASCII letter AND a TAB come out "_" to a client with no UTF-8
+        return t if utf8 else "".join(c if 31 < ord(c) < 128 or c == "\n" else "_" for c in t)
+
+    def resolve(t, utf8):
+        if t in world:
+            return t
+        name = t.split(":", 1)[0]
+        for exact in (True, False):          # tmux: an exact name first, then a prefix
+            for pid, w in sorted(world.items()):
+                if (w["session"] == name) if exact else w["session"].startswith(name):
+                    return pid
+        return None
+
+    def run(cmd, **kw):
+        assert cmd[0] == "tmux", cmd
+        calls.append(cmd)
+        utf8 = "-u" in cmd
+        args = [a for a in cmd[1:] if a != "-u"]
+        if args[:1] == ["-L"]:
+            args = args[2:]
+        out = ""
+        if args[0] == "list-panes":
+            fmt = args[args.index("-F") + 1]
+            out = "".join(fmt.replace("#{pane_tty}", w["tty"]).replace("#{pane_id}", pid)
+                          .replace("#{session_name}", w["session"]).replace("#{window_index}", "0")
+                          .replace("#{pane_index}", "0") + "\n" for pid, w in sorted(world.items()))
+            out = plain(out, utf8)
+        else:
+            pid = resolve(args[args.index("-t") + 1], utf8)
+            if pid is None:
+                return subprocess.CompletedProcess(cmd, 1, "", "can't find pane\n")
+            w = world[pid]
+            if args[0] == "capture-pane":
+                out = plain(f"{rab.PROMPT} {w['box']}\n" + "\u2500" * 20 + "\n", utf8)
+            elif args[0] == "display-message":
+                out = "0\n"
+            elif args[0] == "send-keys":
+                keys.append((pid, args[-1]))
+                if "-l" in args:
+                    w["box"] += args[-1]
+                elif args[-1] == "Enter":
+                    w["box"] = ""
+        return subprocess.CompletedProcess(cmd, 0, out, "")
+    monkeypatch.setattr(rab.subprocess, "run", run)
+    tty_map = rab.panes()
+    assert tty_map == {"/dev/pts/1": "%1", "/dev/pts/2": "%2"}, tty_map
+    sent, why = rab.type_line(tty_map["/dev/pts/1"], "/restart")
+    assert (sent, why) == (True, ""), (sent, why, calls)
+    assert keys == [("%1", "/restart"), ("%1", "Enter")], keys            # the session in "tést" only
+    assert all("-u" in c for c in calls), [c for c in calls if "-u" not in c]
+
+
 def test_G4_5_a_mismatch_keeps_clearing_its_own_long_note_and_says_so_when_it_cannot(tmp_path, monkeypatch):
     # Mac mini 2026-11-14: the box read back 258 of 497 characters, one Ctrl-U did not empty it,
     # and the note sat in Windy Fly Mobile's box until a person pressed Enter.

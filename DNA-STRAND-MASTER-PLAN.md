@@ -279,6 +279,8 @@ The helper `scripts/restart_at_break.py` types `/compact`, `/restart` or a short
 
 **G4.38 Live through Herdr, end to end.** Live `handle()` for a behind `idle` session whose only target is `herdr://p9`, at context `300000` and idle `600`, types `/compact` through the fake `herdr`; once compacted `200` s ago (context `20000`, idle `90`), it types `/restart`, as in G4.18, and `restart.log` names the target `herdr://p9`. No `tmux` command runs. Needs: G4.37, G4.18. Proof: `test_G4_38_live_compact_then_restart_through_herdr`.
 
+**G4.39 A pane is addressed by its id, and tmux is read whole.** The helper types into a pane by its id (`#{pane_id}`, the same text in every environment, one pane only), never by a session's name, which a tmux client with no UTF-8 language setting prints with "_" for non-ASCII letters, and which matches by prefix; every tmux call of the helper carries -u (family rule 30). Proof: `test_G4_39_a_pane_is_addressed_by_its_id_and_tmux_is_read_whole`.
+
 ### G5 Hook reload
 
 With `reload_plugins: true` in `restart.json`, the helper types `/reload-plugins` (no turn starts) into a session whose Pit Stop hooks are missing or of the wrong hook generation, at a break, and confirms it from the screen.
