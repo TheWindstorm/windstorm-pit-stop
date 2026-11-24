@@ -260,6 +260,34 @@ def session_tty(pid):
         return f"/dev/{t}" if t and t != "??" else None
 
 
+LAUNCHD_LABEL = "ai.thewindstorm.pit-stop-restart"
+
+
+def timer_state(unit="pit-stop-restart.timer", run_cmd=None):
+    """Rule 24, A SETTING SAYS WHAT WAS ASKED FOR, NOT WHAT IS THERE: whether the timer runs, read now from the
+    thing itself, with rule 6's three answers: ("running" | "stopped" | "unread", what was read).
+    systemd 255 (255.4-1ubuntu8.19), seen 2026-11-24: `systemctl --user is-active T` prints "active" (exit 0) for a
+    running timer and "inactive" (exit 4) for a stopped or missing one; with no user bus "Failed to connect to bus".
+    launchd: `launchctl print gui/<uid>/<label>` exit 0 is loaded; any other answer is not checked (not seen by us)."""
+    run_cmd = run_cmd or (lambda c, t: run(c, t, env=c_locale()))
+    if platform.system() == "Darwin":
+        r = run_cmd(["launchctl", "print", f"gui/{os.getuid()}/{unit}"], 15)
+        if r and r.returncode == 0:
+            return "running", "launchctl print shows it loaded"
+        first = ((r.stderr or r.stdout or "").strip().splitlines() or [""])[0][:160] if r else ""
+        return "unread", (f"launchctl print answered exit {r.returncode}" + (f": \"{first}\"" if first else "")
+                          if r else "launchctl gave no answer")
+    r = run_cmd(["systemctl", "--user", "is-active", unit], 15)
+    said = (r.stdout or "").strip() if r else ""
+    if said == "active":
+        return "running", f"systemctl --user is-active {unit} says active"
+    if said in ("inactive", "failed"):
+        return "stopped", f"systemctl --user is-active {unit} says {said}"
+    first = ((r.stderr or r.stdout or "").strip().splitlines() or [""])[0][:160] if r else ""
+    return "unread", (f"systemctl --user is-active answered exit {r.returncode}" + (f": \"{first}\"" if first else "")
+                      if r else "systemctl gave no answer")
+
+
 def schedule_read(run_cmd=None, cron_none_said=False):
     """(hits, unread, said): the timers or cron lines that already run restart_at_break.py or the launcher; the
     places that could not be read, so what they run is not known (rule 6: never taken for "none there"); and for
@@ -332,7 +360,8 @@ def install_timer(interval, apply):
                 f.write(body)
             keep_record(PLIST)
             r = run(["launchctl", "bootstrap", f"gui/{os.getuid()}", PLIST])
-            print("    loaded" if r and r.returncode == 0 else f"    written; load it with: launchctl bootstrap gui/{os.getuid()} {PLIST}")
+            print("    written; asked launchd to load it" if r and r.returncode == 0
+                  else f"    written; load it with: launchctl bootstrap gui/{os.getuid()} {PLIST}")
         return True
     svc, tmr = os.path.join(UNIT_DIR, "pit-stop-restart.service"), os.path.join(UNIT_DIR, "pit-stop-restart.timer")
     print(f"  timer: {tmr} (systemd user timer, every {interval} min)")
@@ -357,8 +386,8 @@ def install_timer(interval, apply):
     keep_record(svc), keep_record(tmr)
     ok = all((r := run(c)) and r.returncode == 0 for c in (["systemctl", "--user", "daemon-reload"],
                                                            ["systemctl", "--user", "enable", "--now", "pit-stop-restart.timer"]))
-    print("    enabled and started" if ok else "    written; start it with: systemctl --user daemon-reload && "
-                                               "systemctl --user enable --now pit-stop-restart.timer")
+    print("    written; asked systemd to enable and start it" if ok else "    written; start it with: systemctl --user "
+                                                                      "daemon-reload && systemctl --user enable --now pit-stop-restart.timer")
     return True
 
 
@@ -1065,11 +1094,38 @@ def main():
         return 1 if a.apply else 0
     # rule 8 (G12.20): the last act is the same check again (a row can go between the two); "set up" and 0 only then
     root, why = ln.find(pc.CLAUDE_DIR)
-    if root:
-        print(f"7. check: the launcher the timer runs finds Pit Stop at {root.replace(pc.HOME, '~')}"
-              + ("; fleet mode is set up" if a.apply else ""))
+    if root and not a.apply:
+        print(f"7. check: the launcher the timer runs finds Pit Stop at {root.replace(pc.HOME, '~')}")
         print(f"   First look at what it would do: {sys.executable} -I {BIN}")
         return 0
+    if root:
+        print(f"7. check: the launcher the timer runs finds Pit Stop at {root.replace(pc.HOME, '~')}")
+        states = []                                    # (state, what was read), one per schedule
+        for h in (hits or [None]):
+            if h == "crontab":
+                states.append(("running", "a crontab line runs it (read from crontab -l)"))
+            elif h is None or h in (os.path.join(UNIT_DIR, "pit-stop-restart.service"), PLIST):
+                states.append(timer_state(LAUNCHD_LABEL if platform.system() == "Darwin" else "pit-stop-restart.timer"))
+            elif h.endswith(".service"):
+                states.append(timer_state(os.path.basename(h)[:-len(".service")] + ".timer"))
+            else:
+                states.append(("unread", f"{h.replace(pc.HOME, '~')} is not Pit Stop's; whether it runs is not checked here"))
+        for st, said in states:
+            print(f"   the timer: {said}")
+        if any(st == "running" for st, _ in states):
+            print("   fleet mode is set up")
+            print(f"   First look at what it would do: {sys.executable} -I {BIN}")
+            return 0
+        if any(st == "stopped" for st, _ in states):
+            print("   Fleet mode is NOT running: the timer is written but stopped. Start it with: "
+                  + (f"launchctl bootstrap gui/{os.getuid()} {PLIST}" if platform.system() == "Darwin"
+                     else "systemctl --user daemon-reload && systemctl --user enable --now pit-stop-restart.timer"))
+            return 1
+        print("   Fleet mode: asked for, not checked: whether the timer runs could not be read here. Run "
+              + (f"launchctl print gui/{os.getuid()}/{LAUNCHD_LABEL}" if platform.system() == "Darwin"
+                 else "systemctl --user is-active pit-stop-restart.timer")
+              + " yourself: if it says the timer is active (or loaded), the timer runs.")
+        return 1
     print(f"7. check: the launcher the timer runs would run nothing: {ln.SAY[why]}.")
     if why == "unreadable":
         print("   Not checked, so fleet mode is not said to be set up; the timer's next pass reads the list again.")

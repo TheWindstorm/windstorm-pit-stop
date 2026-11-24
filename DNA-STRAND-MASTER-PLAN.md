@@ -469,6 +469,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.21 A schedule that could not be read is not none there.** Setup --fleet makes a timer only when it has read that nothing else schedules the helper. An unreadable unit, or a `crontab -l` (C locale) refused, killed or silent, is "not checked": no timer, NOT set up, exit 1, with what crontab answered and the next step; --crontab-has-no-pit-stop-line is the person's way through. Proof: `test_G12_21_a_schedule_that_could_not_be_read_is_not_none`.
 
+**G12.22 Fleet mode is set up only when the timer is read running.** Step 6 says what was asked of systemd or launchd; step 7 reads the timer itself (`systemctl --user is-active` printing "active", `launchctl print` exit 0, or a crontab line read). Stopped: NOT running, the start command, exit 1. Not readable: asked for, not checked, exit 1. Proof: `test_G12_22_fleet_mode_is_set_up_only_when_the_timer_is_read_running`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

@@ -302,6 +302,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P30",
+   "seen": "2026-11-24, reading setup's code against the family rule that a setting says what was asked for, not what is there: `/pit-stop setup --fleet --apply` printed \"enabled and started\" (and on macOS \"loaded\") from the exit codes of `systemctl --user enable --now` and `launchctl bootstrap` alone, and the new \"fleet mode is set up\" rested on that, never on the timer itself. Released 0.6.1 prints \"enabled and started\" the same way.",
+   "promise": "Setup says \"fleet mode is set up\" only when the timer is read running from the thing itself: `systemctl --user is-active` printing \"active\" (systemd 255, seen), `launchctl print` answering 0, or a crontab line that was read. A timer written but stopped is said so with the start command; one whose state could not be read is \"asked for, not checked\" with the command that reads it; both answer 1. Step 6 says what was asked of systemd or launchd, not that it is running.",
+   "codon": "G12.22",
+   "issue": null,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "test_G12_22_fleet_mode_is_set_up_only_when_the_timer_is_read_running",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
