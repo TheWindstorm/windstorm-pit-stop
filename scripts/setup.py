@@ -222,10 +222,15 @@ def run(cmd, timeout=30, env=None):
 
 
 def c_locale():
-    """The environment for a program whose words are read: LC_ALL=C and no LANGUAGE, so the text is the program's
-    own and not a translation (rule 6: "no crontab for" is read in cron's own words)."""
-    env = {k: v for k, v in os.environ.items() if k != "LANGUAGE"}
-    env["LC_ALL"] = "C"
+    """The environment for a program whose words are read (rule 30, ONE LANGUAGE): LC_ALL=C.UTF-8 and no LANGUAGE,
+    so the text is the program's own and not a translation ("no crontab for" is read in cron's own words). Never
+    plain "C" (rule 30 (3)). On a Mac the call is not moved: macOS 13 has no C.UTF-8 and falls to plain C (ASCII)
+    without a word, so there the person's own environment is used and the exit code decides first."""
+    env = dict(os.environ)
+    if platform.system() == "Darwin":
+        return env
+    env.pop("LANGUAGE", None)
+    env["LC_ALL"] = "C.UTF-8"
     return env
 
 

@@ -4378,12 +4378,13 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
                            text=True, timeout=120)
         assert r.returncode == 0 and (u2 / "pit-stop-restart.timer").exists() and "fleet mode is set up" in r.stdout, r.stdout[-600:]
 
-    # the C locale: a cron that says "none" in another language says it in its own words under LC_ALL=C
+    # the C language: a cron that says "none" in another language says it in its own words under LC_ALL=C.UTF-8
+    # (rule 30 (3): a moved call is given "C.UTF-8", never plain "C")
     h3, s3 = tmp_path / "de", tmp_path / "de-stub"
     (h3 / "proj").mkdir(parents=True)
     s3.mkdir()
     for n, body in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab",
-                    'if [ "$LC_ALL" = C ] && [ -z "$LANGUAGE" ]; then echo "no crontab for x" >&2; '
+                    'if [ "$LC_ALL" = C.UTF-8 ] && [ -z "$LANGUAGE" ]; then echo "no crontab for x" >&2; '
                     'else echo "keine Crontab fuer x" >&2; fi; exit 1')):
         (s3 / n).write_text(f"#!/bin/sh\n{body}\n")
         os.chmod(s3 / n, 0o755)
@@ -4692,8 +4693,9 @@ def test_G12_26_setup_loads_the_job_file_it_wrote_over_a_job_already_loaded(tmp_
         def run(c, t=30, env=None):
             calls.append(" ".join(c[:2]))
             if c[1] == "print":
-                # rule 30 (ONE LANGUAGE): launchd's words are read, so the call runs in C, LANGUAGE removed
-                assert env and env.get("LC_ALL") == "C" and "LANGUAGE" not in env, env
+                # rule 30 (3), WHAT "C" IS ON A MAC: macOS 13 has no C.UTF-8 and falls to plain C (ASCII) without a
+                # word, so on a Mac a call is not moved: launchd is asked in the person's own environment
+                assert env is not None and env.get("LC_ALL") == os.environ.get("LC_ALL"), env
                 if state["after_bootout"] is not None:
                     state["after_bootout"] -= 1
                     if state["after_bootout"] <= 0:
