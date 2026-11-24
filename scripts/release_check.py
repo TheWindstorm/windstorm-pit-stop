@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
 
 TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 WATCHED = ("hooks/", "scripts/", "skills/")

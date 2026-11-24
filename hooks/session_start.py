@@ -21,6 +21,7 @@ Any error: print nothing, exit 0.
 import json
 import os
 import sys
+sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

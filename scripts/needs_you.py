@@ -27,6 +27,7 @@ out. Standard library only.
 """
 import os
 import sys
+sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

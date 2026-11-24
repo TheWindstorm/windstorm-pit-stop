@@ -13,6 +13,7 @@ import argparse
 import json
 import os
 import sys
+sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pitstop_common as pc  # noqa: E402

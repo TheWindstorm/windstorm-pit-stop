@@ -439,6 +439,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.8 Nothing runs once the plugin is gone.** `state()` in `scripts/launcher.py` answers `installed`, `orphaned` (the folder carries Claude Code's `.orphaned_at`), `gone` (the registry reads fine and has no Pit Stop row) or `unreadable`. Unless `installed`, the launcher starts nothing and the helper changes no session; each logs one line saying which, `gone` with the command that takes the timer off. Checkup names `unreadable`. After a `plugin update` the new folder runs. Proof: `test_G12_8_nothing_runs_once_the_plugin_is_gone`.
 
+**G12.9 No bytecode beside the plugin's code.** Every file a hook, a command or a timer starts (`hooks/*.py` and each `scripts/*.py` with a `__main__`) sets `sys.dont_write_bytecode = True` right after `import sys`, before it imports any module of its own, so Python leaves no `__pycache__` in Claude Code's plugin folder. Seen 2026-11-23: `scripts/__pycache__` in every installed version folder back to 0.1.2. Files already there are Claude Code's folder and are left alone. Proof: `test_G12_9_no_bytecode_is_written_beside_the_code`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

@@ -3625,3 +3625,31 @@ def test_G2_27_the_helper_never_tunes_a_headless_runs_folder(tmp_path, monkeypat
     assert rab.tune_due([dict(run_row, entrypoint="sdk-ts")], now, cfg, str(tuned), week=86400) is None
     no_field = {k: v for k, v in run_row.items() if k != "entrypoint"}               # no entrypoint read: a person's
     assert rab.tune_due([no_field], now, cfg, str(tuned), week=86400) == str(run)
+
+
+def test_G12_9_no_bytecode_is_written_beside_the_code(tmp_path):
+    import re
+    import shutil
+    own = {os.path.splitext(os.path.basename(f))[0] for f in glob.glob(os.path.join(ROOT, "scripts", "*.py"))}
+    entries = [f for f in sorted(glob.glob(os.path.join(ROOT, "hooks", "*.py")) + glob.glob(os.path.join(ROOT, "scripts", "*.py")))
+               if re.search(r"^if __name__ == .__main__.", open(f).read(), re.M)]
+    assert len(entries) >= 14
+    for f in entries:                                       # the line, before the first import of a module of our own
+        lines = open(f).read().splitlines()
+        at = [i for i, l in enumerate(lines) if l.startswith("sys.dont_write_bytecode = True")]
+        mine = [i for i, l in enumerate(lines) if re.match(r"\s*(import|from) (" + "|".join(sorted(own)) + r")\b", l)]
+        assert at, f"{os.path.basename(f)} does not set sys.dont_write_bytecode"
+        assert not mine or at[0] < mine[0], f"{os.path.basename(f)} imports its own module before the line"
+    copy = tmp_path / "plugin"                              # run the three hooks from a clean copy, as Claude Code does
+    for d in ("hooks", "scripts", ".claude-plugin"):
+        shutil.copytree(os.path.join(ROOT, d), copy / d, ignore=shutil.ignore_patterns("__pycache__"))
+    env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp_path / "cfg"), HOME=str(tmp_path / "home"))
+    env.pop("PYTHONDONTWRITEBYTECODE", None)
+    (tmp_path / "home").mkdir()
+    payload = json.dumps({"session_id": "g12-9", "cwd": str(tmp_path), "transcript_path": str(tmp_path / "none.jsonl"),
+                          "trigger": "auto", "source": "startup", "hook_event_name": "Stop"})
+    for h in ("session_start.py", "stop_pit_stop.py", "precompact_wait_for_break.py"):
+        subprocess.run([sys.executable, "-I", str(copy / "hooks" / h)], input=payload, capture_output=True, text=True,
+                       env=env, timeout=60)
+    left = [str(p) for p in copy.rglob("__pycache__")]
+    assert not left, left
