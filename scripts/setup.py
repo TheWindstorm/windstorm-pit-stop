@@ -264,28 +264,39 @@ LAUNCHD_LABEL = "ai.thewindstorm.pit-stop-restart"
 
 
 def timer_state(unit="pit-stop-restart.timer", run_cmd=None):
-    """Rule 24, A SETTING SAYS WHAT WAS ASKED FOR, NOT WHAT IS THERE: whether the timer runs, read now from the
-    thing itself, with rule 6's three answers: ("running" | "stopped" | "unread", what was read).
-    systemd 255 (255.4-1ubuntu8.19), seen 2026-11-24: `systemctl --user is-active T` prints "active" (exit 0) for a
-    running timer and "inactive" (exit 4) for a stopped or missing one; with no user bus "Failed to connect to bus".
-    launchd: `launchctl print gui/<uid>/<label>` exit 0 is loaded; any other answer is not checked (not seen by us)."""
+    """Rule 24, A SETTING SAYS WHAT WAS ASKED FOR, NOT WHAT IS THERE: whether the timer runs and comes back, read now
+    from the thing itself, rule 6's answers: ("running" | "not-enabled" | "stopped" | "unknown" | "unread", what was read).
+    systemd 255 (255.4-1ubuntu8.19), each seen 2026-11-24 on a timer of our own: `is-active` prints "active" exit 0,
+    "inactive" exit 3 for a stopped timer systemd knows, "inactive" exit 4 for one it does not know; `is-enabled`
+    prints "enabled" exit 0, "disabled" exit 1, "not-found" exit 4; with no user bus both print nothing on stdout and
+    "Failed to connect to bus: No medium found" on stderr, exit 1. Any other word is not one we have seen: unread.
+    launchd: `launchctl print gui/<uid>/<label>` exit 0 is loaded, and the job's file in ~/Library/LaunchAgents loads it
+    again at login (`launchctl disable` is not read); any other answer is not checked (not seen by us)."""
     run_cmd = run_cmd or (lambda c, t: run(c, t, env=c_locale()))
+
+    def answer(r, what):
+        first = ((r.stderr or r.stdout or "").strip().splitlines() or [""])[0][:160] if r else ""
+        return (f"{what} answered exit {r.returncode}" + (f": \"{first}\"" if first else "")) if r else f"{what} gave no answer"
     if platform.system() == "Darwin":
         r = run_cmd(["launchctl", "print", f"gui/{os.getuid()}/{unit}"], 15)
-        if r and r.returncode == 0:
-            return "running", "launchctl print shows it loaded"
-        first = ((r.stderr or r.stdout or "").strip().splitlines() or [""])[0][:160] if r else ""
-        return "unread", (f"launchctl print answered exit {r.returncode}" + (f": \"{first}\"" if first else "")
-                          if r else "launchctl gave no answer")
-    r = run_cmd(["systemctl", "--user", "is-active", unit], 15)
-    said = (r.stdout or "").strip() if r else ""
-    if said == "active":
-        return "running", f"systemctl --user is-active {unit} says active"
-    if said in ("inactive", "failed"):
-        return "stopped", f"systemctl --user is-active {unit} says {said}"
-    first = ((r.stderr or r.stdout or "").strip().splitlines() or [""])[0][:160] if r else ""
-    return "unread", (f"systemctl --user is-active answered exit {r.returncode}" + (f": \"{first}\"" if first else "")
-                      if r else "systemctl gave no answer")
+        if r and r.returncode == 0 and os.path.isfile(PLIST):
+            return "running", f"{unit} is loaded, and its file {PLIST.replace(pc.HOME, '~')} loads it again at login"
+        return "unread", answer(r, "launchctl print")
+    r1 = run_cmd(["systemctl", "--user", "is-active", unit], 15)
+    act = (r1.stdout or "").strip() if r1 else ""
+    if act not in ("active", "inactive", "failed"):
+        return "unread", answer(r1, "systemctl --user is-active")
+    r2 = run_cmd(["systemctl", "--user", "is-enabled", unit], 15)
+    en = (r2.stdout or "").strip() if r2 else ""
+    if en == "not-found" or (act == "inactive" and r1.returncode == 4):
+        return "unknown", f"systemd does not know {unit} (is-active: {act}, exit {r1.returncode}; is-enabled: {en or 'not read'})"
+    if en not in ("enabled", "disabled"):
+        return "unread", answer(r2, "systemctl --user is-enabled")
+    if act == "active" and en == "enabled":
+        return "running", f"{unit} is active and enabled"
+    if act == "active":
+        return "not-enabled", f"{unit} is active but disabled: it runs now and will not start again after a restart"
+    return "stopped", f"{unit} is {act} ({en})"
 
 
 def schedule_read(run_cmd=None, cron_none_said=False):
@@ -1100,31 +1111,43 @@ def main():
         return 0
     if root:
         print(f"7. check: the launcher the timer runs finds Pit Stop at {root.replace(pc.HOME, '~')}")
-        states = []                                    # (state, what was read), one per schedule
+        states = []                     # (state, what was read, the unit read, whether this run wrote it)
+        darwin = platform.system() == "Darwin"
         for h in (hits or [None]):
             if h == "crontab":
-                states.append(("running", "a crontab line runs it (read from crontab -l)"))
+                states.append(("running", "a crontab line runs it (read from crontab -l)", None, False))
             elif h is None or h in (os.path.join(UNIT_DIR, "pit-stop-restart.service"), PLIST):
-                states.append(timer_state(LAUNCHD_LABEL if platform.system() == "Darwin" else "pit-stop-restart.timer"))
+                unit = LAUNCHD_LABEL if darwin else "pit-stop-restart.timer"
+                states.append((*timer_state(unit), unit, h is None))
             elif h.endswith(".service"):
-                states.append(timer_state(os.path.basename(h)[:-len(".service")] + ".timer"))
+                unit = os.path.basename(h)[:-len(".service")] + ".timer"
+                st, said = timer_state(unit)
+                if st == "unknown":                 # what starts that service was not read
+                    st, said = "unread", f"what starts {h.replace(pc.HOME, '~')} was not read ({said})"
+                states.append((st, said, unit, False))
             else:
-                states.append(("unread", f"{h.replace(pc.HOME, '~')} is not Pit Stop's; whether it runs is not checked here"))
-        for st, said in states:
+                states.append(("unread", f"{h.replace(pc.HOME, '~')} is not Pit Stop's; whether it runs is not checked here",
+                               None, False))
+        for st, said, _, _ in states:
             print(f"   the timer: {said}")
-        if any(st == "running" for st, _ in states):
+        if any(st == "running" for st, *_ in states):
             print("   fleet mode is set up")
             print(f"   First look at what it would do: {sys.executable} -I {BIN}")
             return 0
-        if any(st == "stopped" for st, _ in states):
-            print("   Fleet mode is NOT running: the timer is written but stopped. Start it with: "
-                  + (f"launchctl bootstrap gui/{os.getuid()} {PLIST}" if platform.system() == "Darwin"
-                     else "systemctl --user daemon-reload && systemctl --user enable --now pit-stop-restart.timer"))
-            return 1
-        print("   Fleet mode: asked for, not checked: whether the timer runs could not be read here. Run "
-              + (f"launchctl print gui/{os.getuid()}/{LAUNCHD_LABEL}" if platform.system() == "Darwin"
-                 else "systemctl --user is-active pit-stop-restart.timer")
-              + " yourself: if it says the timer is active (or loaded), the timer runs.")
+        for st, said, unit, wrote_now in states:
+            if st == "not-enabled":
+                print(f"   Fleet mode is NOT set up to last: {unit} runs now but will not start again after a restart. "
+                      f"Enable it with: systemctl --user enable {unit}")
+            elif st == "stopped":
+                print(f"   Fleet mode is NOT running: {unit} is {'written but ' if wrote_now else ''}stopped. Start it with: "
+                      + (f"launchctl bootstrap gui/{os.getuid()} {PLIST}" if darwin else
+                         ("systemctl --user daemon-reload && " if wrote_now else "") + f"systemctl --user enable --now {unit}"))
+            elif unit and st in ("unread", "unknown"):
+                print("   Fleet mode: asked for, not checked: whether the timer runs could not be read here. Run "
+                      + (f"launchctl print gui/{os.getuid()}/{unit}" if darwin else f"systemctl --user is-active {unit}")
+                      + " yourself: if it says the timer is active (or loaded), the timer runs.")
+            else:
+                print("   Fleet mode: asked for, not checked (see the line above).")
         return 1
     print(f"7. check: the launcher the timer runs would run nothing: {ln.SAY[why]}.")
     if why == "unreadable":

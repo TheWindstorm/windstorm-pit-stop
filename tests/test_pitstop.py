@@ -3046,9 +3046,11 @@ def test_G12_7_setup_undo_puts_back_what_apply_changed(tmp_path, monkeypatch, ca
         monkeypatch.setattr(mod, k, v)
     ran = []
     no_cron = subprocess.CompletedProcess(["crontab", "-l"], 1, "", "no crontab for x\n")   # cron 3.0pl1's words
-    active = subprocess.CompletedProcess(["systemctl"], 0, "active\n", "")   # systemd 255's answer, seen
+    active = subprocess.CompletedProcess(["systemctl"], 0, "active\n", "")   # systemd 255's answers, seen
+    enabled = subprocess.CompletedProcess(["systemctl"], 0, "enabled\n", "")
     monkeypatch.setattr(su, "run", lambda cmd, timeout=30, env=None: ran.append(cmd) or (
-        no_cron if cmd[:2] == ["crontab", "-l"] else active if cmd[:3] == ["systemctl", "--user", "is-active"] else None))
+        no_cron if cmd[:2] == ["crontab", "-l"] else active if cmd[:3] == ["systemctl", "--user", "is-active"]
+        else enabled if cmd[:3] == ["systemctl", "--user", "is-enabled"] else None))
     monkeypatch.setattr(su, "tmux_servers", lambda: {})
     monkeypatch.setattr(su.platform, "system", lambda: "Linux")
     monkeypatch.setattr(su.shutil, "which", lambda n: "/usr/bin/" + n)
@@ -4083,8 +4085,9 @@ def test_G12_17_undo_leaves_the_home_as_it_was_before_setup(tmp_path):
     assert "kept the folder ~/.claude/pit-stop (setup made it): it holds" in r.stdout and "config.json" in r.stdout
 
 
-# systemctl as systemd 255 was seen to answer (2026-11-24) for a timer that runs: is-active prints "active"
-SYSTEMCTL_RUNNING = 'if [ "$2" = is-active ]; then echo active; fi; exit 0'
+# systemctl as systemd 255 was seen to answer (2026-11-24) for a timer that runs: "active", "enabled"
+SYSTEMCTL_RUNNING = ('if [ "$2" = is-active ]; then echo active; fi; '
+                     'if [ "$2" = is-enabled ]; then echo enabled; fi; exit 0')
 
 
 def test_G12_20_the_way_back_in_is_walked(tmp_path):
@@ -4301,50 +4304,85 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
 
 def test_G12_22_fleet_mode_is_set_up_only_when_the_timer_is_read_running(tmp_path):
     """Rule 24, A SETTING SAYS WHAT WAS ASKED FOR, NOT WHAT IS THERE (the maintainer, 2026-11-24): setup says
-    "fleet mode is set up" only when the timer is read running from the thing itself (systemd 255: is-active prints
-    "active"; a crontab line that was read). The timer written but stopped: NOT running, the start command, exit 1.
-    No user bus: asked for, not checked, the command to read it yourself, exit 1. Step 6 says what was asked."""
+    "fleet mode is set up" only when the timer is read active AND enabled from the thing itself (or a crontab line
+    is read). Each answer below is what systemd 255.4-1ubuntu8.19 was seen to print, on a timer of our own:
+    stopped: NOT running + the start command; active but disabled: NOT set up to last + the enable command; not
+    known to systemd, or no user bus: asked for, not checked. Every line names the unit it read; "written" only for
+    what this run wrote. Someone's earlier X.service: X.timer is read; unknown X.timer = what starts it, not read."""
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     import setup as su
-    seen = {"active": (0, "active\n", ""), "inactive": (4, "inactive\n", ""),
-            "no bus": (1, "", "Failed to connect to bus: No medium found\n")}
-    for name, (code, out, err) in seen.items():
-        st = su.timer_state(run_cmd=lambda cmd, t: subprocess.CompletedProcess(cmd, code, out, err))
-        assert st[0] == {"active": "running", "inactive": "stopped", "no bus": "unread"}[name], (name, st)
+    seen = {   # (is-active: exit, stdout), (is-enabled: exit, stdout), stderr
+        "running": ((0, "active"), (0, "enabled"), ""), "stopped": ((3, "inactive"), (0, "enabled"), ""),
+        "stopped and disabled": ((3, "inactive"), (1, "disabled"), ""), "active, disabled": ((0, "active"), (1, "disabled"), ""),
+        "not known": ((4, "inactive"), (4, "not-found"), ""), "no bus": ((1, ""), (1, ""), "Failed to connect to bus: No medium found")}
+    want = {"running": "running", "stopped": "stopped", "stopped and disabled": "stopped", "active, disabled": "not-enabled",
+            "not known": "unknown", "no bus": "unread"}
+
+    def stand_in(ans):
+        act, en, err = ans
+        return lambda cmd, t: subprocess.CompletedProcess(cmd, *(act if "is-active" in cmd else en), "") if not err \
+            else subprocess.CompletedProcess(cmd, 1, "", err + "\n")
+    for name, ans in seen.items():
+        assert su.timer_state(run_cmd=lambda cmd, t, a=ans: subprocess.CompletedProcess(
+            cmd, (a[0] if "is-active" in cmd else a[1])[0], (a[0] if "is-active" in cmd else a[1])[1] + "\n", a[2]))[0] \
+            == want[name], name
     assert su.timer_state(run_cmd=lambda cmd, t: None)[0] == "unread"
 
-    cases = {"active": SYSTEMCTL_RUNNING,
-             "inactive": 'if [ "$2" = is-active ]; then echo inactive; exit 4; fi; exit 0',
-             "no bus": 'echo "Failed to connect to bus: No medium found" >&2; exit 1'}
-    for name, body in cases.items():
-        home, stub = tmp_path / name.replace(" ", "-"), tmp_path / (name.replace(" ", "-") + "-stub")
+    def sh(ans):
+        (ae, ao), (ee, eo), err = ans
+        if err:
+            return f'echo "{err}" >&2; exit 1'
+        return (f'if [ "$2" = is-active ]; then echo {ao}; exit {ae}; fi; '
+                f'if [ "$2" = is-enabled ]; then echo {eo}; exit {ee}; fi; exit 0')
+
+    def setup_with(name, systemctl, units=()):
+        home, stub = tmp_path / name.replace(" ", "-").replace(",", ""), tmp_path / (name.replace(" ", "-").replace(",", "") + "-stub")
         (home / "proj").mkdir(parents=True)
         stub.mkdir()
-        for n, b in (("tmux", "exit 0"), ("systemctl", body), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
+        for n, b in (("tmux", "exit 0"), ("systemctl", systemctl), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
             (stub / n).write_text(f"#!/bin/sh\n{b}\n")
             os.chmod(stub / n, 0o755)
         (home / ".claude" / "plugins").mkdir(parents=True)
         (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
             {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
-        r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--fleet"],
-                           cwd=str(home / "proj"), env={"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home),
-                                                        "PATH": str(stub), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
-                           capture_output=True, text=True, timeout=120)
+        for u, text in units:
+            (home / ".config" / "systemd" / "user").mkdir(parents=True, exist_ok=True)
+            (home / ".config" / "systemd" / "user" / u).write_text(text)
+        return home, subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--fleet"],
+                                    cwd=str(home / "proj"), env={"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home),
+                                                                 "PATH": str(stub), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
+                                    capture_output=True, text=True, timeout=120)
+    lines = {
+        "running": "   fleet mode is set up",
+        "stopped": ("   Fleet mode is NOT running: pit-stop-restart.timer is written but stopped. Start it with: systemctl "
+                    "--user daemon-reload && systemctl --user enable --now pit-stop-restart.timer"),
+        "active, disabled": ("   Fleet mode is NOT set up to last: pit-stop-restart.timer runs now but will not start again "
+                             "after a restart. Enable it with: systemctl --user enable pit-stop-restart.timer"),
+        "not known": "   the timer: systemd does not know pit-stop-restart.timer (is-active: inactive, exit 4; is-enabled: not-found)",
+        "no bus": ('   the timer: systemctl --user is-active answered exit 1: "Failed to connect to bus: No medium found"')}
+    for name, line in lines.items():
+        home, r = setup_with(name, sh(seen[name]))
         assert (home / ".config" / "systemd" / "user" / "pit-stop-restart.timer").exists(), (name, r.stdout[-600:])
-        assert "enabled and started" not in r.stdout, r.stdout[-600:]
-        if name == "active":
-            assert r.returncode == 0 and "   the timer: systemctl --user is-active pit-stop-restart.timer says active" in r.stdout
-            assert "   fleet mode is set up" in r.stdout and "written; asked systemd to enable and start it" in r.stdout
-        elif name == "inactive":
-            assert r.returncode == 1 and "fleet mode is set up" not in r.stdout, r.stdout[-600:]
-            assert ("   Fleet mode is NOT running: the timer is written but stopped. Start it with: systemctl --user "
-                    "daemon-reload && systemctl --user enable --now pit-stop-restart.timer") in r.stdout, r.stdout[-600:]
-        else:
-            assert r.returncode == 1 and "fleet mode is set up" not in r.stdout, r.stdout[-600:]
-            assert ('   the timer: systemctl --user is-active answered exit 1: "Failed to connect to bus: No medium found"'
-                    in r.stdout), r.stdout[-600:]
-            assert ("   Fleet mode: asked for, not checked: whether the timer runs could not be read here. Run systemctl "
-                    "--user is-active pit-stop-restart.timer yourself: if it says the timer is active (or loaded), the timer runs.") in r.stdout, r.stdout[-600:]
+        assert "enabled and started" not in r.stdout and line in r.stdout, (name, r.stdout[-900:])
+        assert (r.returncode == 0) == (name == "running") and ("fleet mode is set up" in r.stdout) == (name == "running"), name
+    home, r = setup_with("no bus 2", sh(seen["no bus"]))
+    assert ("   Fleet mode: asked for, not checked: whether the timer runs could not be read here. Run systemctl --user "
+            "is-active pit-stop-restart.timer yourself: if it says the timer is active (or loaded), the timer runs.") in r.stdout
+
+    # someone's earlier unit that runs the launcher: its own timer is read and named; never "written", never ours
+    theirs = [("my-fleet.service", "[Service]\nExecStart=/usr/bin/python3 -I ~/.claude/pit-stop/bin/pit-stop-restart --live\n")]
+    stopped_theirs = ('if [ "$3" = my-fleet.timer ] && [ "$2" = is-active ]; then echo inactive; exit 3; fi; '
+                      'if [ "$3" = my-fleet.timer ] && [ "$2" = is-enabled ]; then echo enabled; exit 0; fi; exit 0')
+    home, r = setup_with("theirs stopped", stopped_theirs, theirs)
+    assert r.returncode == 1 and ("   Fleet mode is NOT running: my-fleet.timer is stopped. Start it with: systemctl "
+                                  "--user enable --now my-fleet.timer") in r.stdout, r.stdout[-800:]
+    assert "written but" not in r.stdout and not (home / ".config" / "systemd" / "user" / "pit-stop-restart.timer").exists()
+    unknown_theirs = ('if [ "$2" = is-active ]; then echo inactive; exit 4; fi; '
+                      'if [ "$2" = is-enabled ]; then echo not-found; exit 4; fi; exit 0')
+    home, r = setup_with("theirs unknown", unknown_theirs, theirs)
+    assert r.returncode == 1 and "   the timer: what starts ~/.config/systemd/user/my-fleet.service was not read (systemd " \
+        "does not know my-fleet.timer" in r.stdout, r.stdout[-800:]
+    assert "Run systemctl --user is-active my-fleet.timer yourself" in r.stdout and "is stopped" not in r.stdout
 
     # a crontab line that was READ is the schedule itself: set up, with no timer written
     home, stub = tmp_path / "cron", tmp_path / "cron-stub"
