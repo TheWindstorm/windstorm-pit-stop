@@ -511,10 +511,10 @@ def test_G4_13_plan_idle_compact_is_opt_in(tmp_path, monkeypatch):
 
 def test_G4_15_allow_and_deny_lists(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
-    cfg = dict(rab.CFG, deny_name_globs=["user1-*", "* Boss"], deny_names=["Ghost"], deny_paths=[str(tmp_path / "private")])
-    assert rab.allowed("Windy Hub", "/work", cfg)
-    assert not rab.allowed("user1-gpu-2f", "/work", cfg)
-    assert not rab.allowed("Veron HERDR Boss", "/work", cfg)
+    cfg = dict(rab.CFG, deny_name_globs=["temp-*", "* Keeper"], deny_names=["Ghost"], deny_paths=[str(tmp_path / "private")])
+    assert rab.allowed("Notes Helper", "/work", cfg)
+    assert not rab.allowed("temp-2f", "/work", cfg)
+    assert not rab.allowed("Night Keeper", "/work", cfg)
     assert not rab.allowed("Ghost", "/work", cfg)
     assert not rab.allowed("Windy Hub", str(tmp_path / "private" / "x"), cfg)
     assert not rab.allowed("Windy Hub", "/work", dict(cfg, allow_names=["Windy Mail"]))
@@ -1052,7 +1052,7 @@ def test_G4_20_live_background_jobs_ask_then_restart_then_rearm_note(tmp_path, m
 
 
 def test_G4_16_every_typed_note_stays_under_the_length_claude_code_folds_into_a_paste_block(tmp_path, monkeypatch):
-    """Found live on Veron, 2026-11-12: a start-your-jobs note of about 930 chars became a "[Pasted text]" block,
+    """Found live on a fleet machine, 2026-11-12: a start-your-jobs note of about 930 chars became a "[Pasted text]" block,
     the box no longer showed the text, and the note was (safely) never sent: the session's watchers stayed down."""
     rab = _rab(tmp_path, monkeypatch)
     assert rab.NOTE_MAX <= 560
@@ -1077,7 +1077,7 @@ def test_G4_16_every_typed_note_stays_under_the_length_claude_code_folds_into_a_
 
 
 def test_G4_17_notes_stay_under_the_limit_with_the_longest_key_and_long_home_folders(tmp_path, monkeypatch):
-    """Windy Boss's note on 0.3.2: the note that names the file had no fallback of its own, and the typed ask
+    """A reviewer's note on 0.3.2: the note that names the file had no fallback of its own, and the typed ask
     had room for a re-arm path of only about 110 chars. Now the key's name part is capped and both notes have
     a short last form, so a path of up to 300 chars still gives a note Claude Code shows as typed text."""
     rab = _rab(tmp_path, monkeypatch)
@@ -1089,7 +1089,7 @@ def test_G4_17_notes_stay_under_the_limit_with_the_longest_key_and_long_home_fol
     heads = [("[AUTOMATED pit-stop restart, not your user] You were restarted at 2026-11-12T05:52:14Z onto Claude Code "
               "2.1.9999 (was 2.1.9998); same conversation. The background jobs you stopped for it are down: start them "
               "again now", ". Scheduled session crons survive a restart. No reply needed.")]
-    for home in ("/home/user1-gpu", "/Users/" + "h" * 60, "/" + "d" * 180):
+    for home in ("/home/user", "/Users/" + "h" * 60, "/" + "d" * 180):
         okf = os.path.join(home, ".claude", "pit-stop", "restart", "ok", key)
         ask = rab.ask_note("2.1.9999", "2.1.9998", okf)
         assert len(ask) <= rab.NOTE_MAX and okf in ask and "empty if none" in ask.replace("an empty file", "empty")
@@ -1098,7 +1098,7 @@ def test_G4_17_notes_stay_under_the_limit_with_the_longest_key_and_long_home_fol
             for jobs in (["inbox watcher"], ["w" * 300, "v" * 300]):
                 note = rab.rearm_note(head, jobs, tail, where)
                 assert len(note) <= rab.NOTE_MAX and (where in note or "inbox watcher" in note)
-    assert len(rab.ask_note("2.1.322", "2.1.319", "/home/user1-gpu/.claude/pit-stop/restart/ok/" + key)) > 500   # full form
+    assert len(rab.ask_note("2.1.322", "2.1.319", "/home/user/.claude/pit-stop/restart/ok/" + key)) > 500   # full form
     long_okf = "/" + "d" * 180 + "/ok/" + key
     assert "(1) write one line" not in rab.ask_note("2.1.322", "2.1.319", long_okf)                              # short form
     short = rab.rearm_note("H" * 300, ["j" * 200], "T" * 100, "/" + "p" * 300)                 # neither longer form fits
@@ -1288,7 +1288,7 @@ def test_G4_24_live_typing_backoff_stops_every_typed_action(tmp_path, monkeypatc
     ("days", 99999),
 ])
 def test_G11_3_stop_hook_does_not_pass_on_an_ask_with_a_field_the_helper_would_not_write(tmp_path, field, bad):
-    """Windy Boss's read of 0.2.0: the ask's text goes to Claude as an instruction,
+    """A reviewer's read of 0.2.0: the ask's text goes to Claude as an instruction,
     so its fields are checked before they are printed."""
     asks = tmp_path / "cfg" / "pit-stop" / "asks"
     asks.mkdir(parents=True)
@@ -1303,7 +1303,7 @@ def test_G11_3_stop_hook_does_not_pass_on_an_ask_with_a_field_the_helper_would_n
 
 
 def test_G3_2_idle_is_counted_from_the_newest_dated_entry_not_the_file_time(tmp_path, monkeypatch):
-    """Seen on Veron 2026-11-11: a quiet lane's transcript had its file time moved
+    """Seen on a fleet machine 2026-11-11: a quiet lane's transcript had its file time moved
     about once an hour with nothing appended, so the idle clock never passed an hour."""
     import pitstop_common as pc
     import restart_at_break as rab
@@ -1335,7 +1335,7 @@ def test_G4_26_not_before_holds_a_run_until_its_time():
 
 def test_G1_15_a_summary_swapped_in_instantly_is_not_counted_as_mid_task(tmp_path, monkeypatch):
     """Claude Code can prepare the summary ahead and swap it in mid-tool-call in
-    milliseconds (compactMetadata.precomputed); seen on Veron 2026-11-04..11."""
+    milliseconds (compactMetadata.precomputed); seen on a fleet machine 2026-11-04..11."""
     import pitstop_common as pc
     import optimize as op
     monkeypatch.setattr(pc, "PROJECTS", str(tmp_path / "projects"))
@@ -2403,7 +2403,7 @@ def test_G11_4_escalation_counts_from_the_first_ask_in_the_helper_and_the_stop_h
     for off in (0, True, "3", None):
         assert rab.escalate_days(now - 9 * 86400, now, dict(cfg, jobs_escalate_days=off)) == 0
     assert rab.escalate_days(None, now, cfg) == 0 and rab.escalate_days(now + 99, now, cfg) == 0
-    okf = "/home/user1-gpu/.claude/pit-stop/restart/ok/" + "x" * 40 + "-abcdef12"
+    okf = "/home/user/.claude/pit-stop/restart/ok/" + "x" * 40 + "-abcdef12"
     esc = rab.ask_note("2.1.322", "2.1.319", okf, 4)
     assert "for 4 days your background jobs have kept you" in esc and "stop ALL of them" in esc and okf in esc
     assert len(esc) <= rab.NOTE_MAX and "kept you" not in rab.ask_note("2.1.322", "2.1.319", okf, 0)
@@ -2505,7 +2505,7 @@ def test_G7_3_update_plugins_runs_claude_codes_commands_once_and_says_what_happe
 
 
 def test_G8_6_needs_you_names_sessions_kept_off_the_list_once_a_week_when_behind_a_week(tmp_path, monkeypatch):
-    """Grant, 2026-11-12: a session left for weeks on an old Claude Code (Contabo Server Admin, on 2.1.318) was off
+    """The maintainer, 2026-11-12: a session left for weeks on an old Claude Code (a server's admin session, on 2.1.318) was off
     the helper's list, so nothing ever restarted it and nobody was told."""
     pc, rab, ny = _needs(tmp_path, monkeypatch, {"allow_names": ["A"]})
     now = time.time()
@@ -2513,21 +2513,21 @@ def test_G8_6_needs_you_names_sessions_kept_off_the_list_once_a_week_when_behind
     told = []
     monkeypatch.setattr(rab, "notify", lambda msg: told.append(msg))
     monkeypatch.setattr(rab, "LIVE", True)
-    off = [_s("Contabo", version="2.1.318", now=now), _s("Ghost", version="2.1.318", now=now)]
+    off = [_s("Admin", version="2.1.318", now=now), _s("Ghost", version="2.1.318", now=now)]
     ny.refresh([_s("A", now=now)] + off, "2.1.322", now, force=True)
     assert len(told) == 1 and "2 session(s) behind the newest Claude Code for a week or more are off the helper's list" in told[0]
-    assert "Contabo; Ghost" in told[0] and "allow_names" in told[0]
+    assert "Admin; Ghost" in told[0] and "allow_names" in told[0]
     ny.refresh([_s("A", now=now)] + off, "2.1.322", now + 3600, force=True)
     assert len(told) == 1                                                            # once a week, not every hour
     os.utime(os.path.join(rab.BASE, "state", "needs-you.offlist"), (now - 8 * 86400, now - 8 * 86400))
     ny.refresh([_s("A", now=now)] + off, "2.1.322", now + 7200, force=True)
     assert len(told) == 2
     # the owner's reason, written once in restart.json, is shown in the file and in the notice
-    rab.CFG.update(off_list_reasons={"Ghost": "in a folder that is Grant's call (BOARD 2026-11-12T17:16:18Z)", "X": 5})
+    rab.CFG.update(off_list_reasons={"Ghost": "in a folder that is the owner's call (asked 2026-11-12)", "X": 5})
     os.utime(os.path.join(rab.BASE, "state", "needs-you.offlist"), (now - 8 * 86400, now - 8 * 86400))
     ny.refresh([_s("A", now=now)] + off, "2.1.322", now + 9000, force=True)
-    assert "Ghost (in a folder that is Grant's call (BOARD 2026-11-12T17:16:18Z))" in told[-1]
-    assert "  - Ghost: in a folder that is Grant's call" in open(ny.OUT).read() and "X:" not in open(ny.OUT).read()
+    assert "Ghost (in a folder that is the owner's call (asked 2026-11-12))" in told[-1]
+    assert "  - Ghost: in a folder that is the owner's call" in open(ny.OUT).read() and "X:" not in open(ny.OUT).read()
 
 
 def test_G2_19_tune_folders_narrows_tuning_to_a_test_group(tmp_path, monkeypatch):
@@ -2796,7 +2796,7 @@ def test_G9_2_checkup_counts_only_automatic_refreshes_in_its_window_and_waits_of
     assert rows[0]["waiting_s"] is None                                                # 10 minutes is not "waiting on you"
 
 
-# ---------------------------------------------------------------- 0.5.2: any install method (case: OC3, 2026-11-15)
+# ---------------------------------------------------------------- 0.5.2: any install method (case: a machine on mise, 2026-11-15)
 @pytest.fixture(autouse=True)
 def _no_release_fetch(tmp_path, monkeypatch):
     """No test asks the download server, and no test touches the real state folder's release files."""
@@ -2899,7 +2899,7 @@ def test_G6_7_behind_is_counted_from_the_first_time_seen_across_new_releases(tmp
 
 
 def _oc3(tmp_path, monkeypatch, pin='claude = "2.1.322"'):
-    """A machine like OC3 on 2026-11-15: claude on PATH is a mise link, mise's global config holds 2.1.322."""
+    """A machine like one seen on 2026-11-15: claude on PATH is a mise link, mise's global config holds 2.1.322."""
     import install_method as im
     import pitstop_common as pc
     home = tmp_path / "home"

@@ -462,7 +462,7 @@ def ctx_and_idle(s):
         return None, -1
     # Idle is counted from the newest entry that carries a time, not from the
     # file's modification time: on a quiet lane the file's time was seen moving
-    # about once an hour with nothing appended (Veron, 2026-11-11), which reset
+    # about once an hour with nothing appended (a fleet machine, 2026-11-11), which reset
     # the idle clock and kept the hour-idle rule from ever applying.
     ctx, newest, last_call = None, None, None
     for e in pc.iter_entries(p, tail_bytes=3_000_000):

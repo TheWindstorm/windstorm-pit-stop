@@ -9,4 +9,4 @@
 
 ## Done
 - [x] 2026-11-08 -> 2026-11-10 (0.2.0) Big contexts that never compact and never idle an hour: compact first while the cache is warm, then restart; background jobs asked through the Stop hook, whatever the context size.
-- [x] 2026-11-10 Proved live on one real session (Veron, booked with Test Boss as B-0058): `/compact` typed into a 111K idle session with a warm cache, compacted 39 s later, `/restart` typed on the next run 71 s after the compaction, same session id on 2.1.322, nothing typed after.
+- [x] 2026-11-10 Proved live on one real session (a fleet machine, booked through the test schedule): `/compact` typed into a 111K idle session with a warm cache, compacted 39 s later, `/restart` typed on the next run 71 s after the compaction, same session id on 2.1.322, nothing typed after.

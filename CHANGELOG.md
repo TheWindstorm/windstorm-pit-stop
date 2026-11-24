@@ -141,8 +141,8 @@ Not proven live yet: an undo on a real folder (it needs a lowering, then 3 compa
 ## 0.3.3 (2026-11-12)
 Closes the gap left in 0.3.2 (from the review of 0.3.2): the 560-character limit had no fallback of its own.
 
-- **Each typed note has a short last form.** The "start your jobs again" note that names the list's file, and the typed background-jobs ask, now fall back to a short form when a long path would push them over 560 characters. The full ask had room for a re-arm path of only about 110 characters (Veron's longest is 78); a long home folder or a long session name would have had the ask refused every run. Now both notes fit with a path of up to 300 characters. Past that, `type_line` still refuses and logs it.
-- **The name part of a session's state key is cut at 40 letters** (`KEY_NAME_MAX`). The key is part of the path typed in those notes. Keys of names up to 40 letters are unchanged (all 96 sessions on Veron); a session with a longer name gets a new key, so an ask it has open at the moment of the update is asked again later.
+- **Each typed note has a short last form.** The "start your jobs again" note that names the list's file, and the typed background-jobs ask, now fall back to a short form when a long path would push them over 560 characters. The full ask had room for a re-arm path of only about 110 characters (the longest on one fleet machine was 78); a long home folder or a long session name would have had the ask refused every run. Now both notes fit with a path of up to 300 characters. Past that, `type_line` still refuses and logs it.
+- **The name part of a session's state key is cut at 40 letters** (`KEY_NAME_MAX`). The key is part of the path typed in those notes. Keys of names up to 40 letters are unchanged (all 96 sessions on one fleet machine); a session with a longer name gets a new key, so an ask it has open at the moment of the update is asked again later.
 
 ## 0.3.2 (2026-11-12)
 One fix, found on the first live restarts of 0.3.1.
@@ -215,7 +215,7 @@ Install and forget:
 
 The pit stop (fleet mode):
 - **Compact first, restart after.** A big session at a break whose cache is still warm gets `/compact`; the next run restarts it on a small context. `compact_before_restart: false` switches it off.
-- **Nothing typed after a restart** unless the session listed jobs to start again, so restarting a session whose cache is cold costs nothing (asked for by Veron's HERDR Boss, who had switched `cold_idle` off because the typed note started a cold turn on a big context).
+- **Nothing typed after a restart** unless the session listed jobs to start again, so restarting a session whose cache is cold costs nothing (asked for by a fleet machine's keeper, who had switched `cold_idle` off because the typed note started a cold turn on a big context).
 - **The background-jobs ask goes through the plugin's Stop hook**, at the end of the session's next turn, instead of being typed. It asks Claude to sort its jobs: watchers to stop and start again, or real work to leave alone. A session without the plugin's hooks gets it typed once, only while that is cheap. Sessions with background jobs are now asked whatever their context size (0.1.x asked only those already at a break).
 - A session that wrote its re-arm list and stopped its jobs is restarted whatever its context size (0.1.x could leave it waiting with its watchers down). If no restart comes in 30 minutes it is told to start its jobs again.
 - Optional `idle_compact_after`: compact a quiet session over its idle point while its cache is warm, for fleets whose sessions are woken too often for Claude Code's own idle compaction.
@@ -250,7 +250,7 @@ Docs: `/restart` needs the native macOS or Linux install and a paid plan; a new 
 - `--trim` groups memories named with hyphens (`feedback-<topic>-...`) the same way as the underscore style (`feedback_<topic>_...`).
 
 ## 0.1.3 (2026-11-10)
-Restart helper: back off after a typing mismatch (found on Veron by its HERDR Boss: one pane got /restart typed and cleared 5 runs in a row, every 2 minutes, and each typing reset the session's idle clock):
+Restart helper: back off after a typing mismatch (found on a fleet machine by its keeper: one pane got /restart typed and cleared 5 runs in a row, every 2 minutes, and each typing reset the session's idle clock):
 - After the input box fails to match the typed text, that session is left alone for 30 minutes, then 1 h, 2 h... at most 12 h per miss in a row (`mismatch_backoff` 1800, `mismatch_backoff_max` 43200). A successful send clears the count; a busy screen does not count as a miss.
 - The mismatch log line gives the number of characters read and typed (never the text read), so the cause can be found.
 
@@ -264,7 +264,7 @@ Restart at the break now reaches busy, long-running sessions (found on the Mac m
 - New config keys: `compact_window` (1800), `min_idle_after_compact` (60), `cold_idle` (3600).
 
 ## 0.1.1 (2026-11-08)
-Review fixes (thanks to Windy Boss):
+Review fixes (thanks to a reviewing agent):
 - Restart helper: after typing, it presses Enter only if the input box holds exactly the typed text. If anyone typed in the same second, it clears the line, logs it and skips.
 - Hook: a configured ceiling (env or a project's `.claude/pit-stop.json`) is clamped to at most 1.5x the first hold and 95% of the model's context size, so a file shipped in a cloned repo cannot hold compaction until the context overflows. The log says `clamped`.
 - Logs rotate at 5 MB (one `.1` file kept).
