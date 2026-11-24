@@ -337,6 +337,8 @@ Pit Stop tells which way Claude Code was installed on a machine, which version a
 
 **G6.19 The Claude Code named is the one sessions run (open).** `find_claude()` in `scripts/install_method.py` takes the program running sessions execute (`/proc/<pid>/exe`) first, the login shell's PATH second, never a short PATH alone. Every other install found is named, and when they disagree Pit Stop says so to the person instead of choosing. Seen 2026-11-23: a probe with the short-PATH rule named a stale root npm copy on a box whose sessions run the native install. Proof: `test_G6_19_the_claude_named_is_the_one_sessions_run`.
 
+**G6.20 "This machine has it" only when a Claude Code was found.** `describe()` in `scripts/install_method.py` adds "(this machine has it)" to the newest-release line only when the machine's own version was read; with no claude on PATH it says only the newest. Seen 2026-11-24 on a Mac test account with no Claude Code (the words came from 0.6.1). Proof: `test_G6_20_this_machine_has_it_only_when_a_claude_is_found`.
+
 ### G7 Pit Stop keeps itself current
 
 Pit Stop switches on Claude Code's own updates for the marketplace it came from, brings plugins up to date with Claude Code's plugin commands before the helper restarts anyone, and tells a session once per version that a newer Claude Code is installed.

@@ -419,7 +419,7 @@ def describe(m, now=None, paths=True):
               else " (no claude found on PATH)")]
     if m["released"]:
         out.append(f"Newest on the {m['channel']} channel: {m['released']}"
-                   + (" (this machine has it)" if not m["behind"] else ""))
+                   + (" (this machine has it)" if not m["behind"] and m.get("installed") else ""))   # G6.20
     else:
         out.append("Newest release: not checked (switched off, or the download server could not be reached)")
     if m["behind"]:

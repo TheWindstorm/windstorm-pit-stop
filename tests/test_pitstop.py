@@ -3213,6 +3213,16 @@ def test_G6_10_describe_names_an_admin_install():
     assert "only an administrator" in text
 
 
+def test_G6_20_this_machine_has_it_only_when_a_claude_is_found():
+    """Seen 2026-11-24 on a Mac test account with no Claude Code: "Newest on the latest channel: 2.1.331 (this
+    machine has it)" under "no claude found on PATH". Rule 9: it is said only when a version was found."""
+    import install_method as im
+    none = "\n".join(im.describe(_mach(behind=False, installed=None, method=None, path=None, real=None), now=10_000))
+    assert "no claude found on PATH" in none and "this machine has it" not in none, none
+    has = "\n".join(im.describe(_mach(behind=False, installed="2.1.326"), now=10_000))
+    assert "Newest on the latest channel: 2.1.326 (this machine has it)" in has
+
+
 def test_G6_13_claude_update_due_waits_and_retries(tmp_path, monkeypatch):
     rab = _rab(tmp_path, monkeypatch)
     cfg = dict(rab.CFG)
