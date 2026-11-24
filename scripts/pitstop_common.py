@@ -278,6 +278,14 @@ def tune_due_now(folder, now, cfg=None):
         return True
 
 
+def headless(env=None):
+    """True when Claude Code says this session was started by `claude -p` or an SDK: its
+    CLAUDE_CODE_ENTRYPOINT starts with "sdk-" (sdk-cli, sdk-ts, sdk-py). Absent or anything else
+    (cli, a desktop or editor host) is a person's session (G2.26)."""
+    v = (os.environ if env is None else env).get("CLAUDE_CODE_ENTRYPOINT")
+    return isinstance(v, str) and v.startswith("sdk-")
+
+
 def start_tune(cwd, cfg=None, now=None):
     """Start scripts/autotune.py for CWD in the background when tuning is on ("auto_tune"), the folder is on
     "tune_folders" (if there is a list) and its tune is due. The SessionStart hook calls this when a session
@@ -287,6 +295,8 @@ def start_tune(cwd, cfg=None, now=None):
     try:
         cfg = config() if cfg is None else cfg
         if cfg.get("auto_tune") is not True or not isinstance(cwd, str) or not cwd or not os.path.isdir(cwd):
+            return False
+        if headless():   # `claude -p` or an SDK: nobody chose this folder's points (G2.26)
             return False
         if not tune_wanted(cwd, cfg) or not tune_due_now(cwd, time.time() if now is None else now, cfg):
             return False

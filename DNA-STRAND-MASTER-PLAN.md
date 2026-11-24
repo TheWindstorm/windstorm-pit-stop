@@ -170,6 +170,8 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 
 **G2.25 The context limit from the model.** With no `--context-limit`, `recommend()` in `scripts/optimize.py` takes the limit from the folder's newest model: a `[1m]` id, or an id on a list in that file of sizes seen on a machine, which goes stale as models change. Claude Code gives the real size only to the status line, which Pit Stop does not own. Off the list: `could not tell this model's context; assumed 200K; pass --context-limit`. Seen 2026-11-22: a 1M Haiku folder was told "the right one for a 200K context". Proof: `test_G2_25_the_context_limit_comes_from_the_model`.
 
+**G2.26 No tuning in a session nobody sits at.** `pitstop_common.start_tune()` returns at once when `headless()` reads the session's `CLAUDE_CODE_ENTRYPOINT` as `sdk-*` (`claude -p`, an SDK); absent or anything else is a person's session and tunes as before. Seen 2026-11-23: with daily tuning on, a folder where only a headless run had worked got a settings file once it had history, a compaction point nobody chose in a tree nobody was watching. Proof: `test_G2_26_a_headless_session_never_starts_tuning`.
+
 ### G3 Shared readers
 One shared module, `scripts/pitstop_common.py`, plus the hook generation file, reads Claude Code's transcripts, session listings, plugin records and Pit Stop's own state the same way for every part of the plugin.
 

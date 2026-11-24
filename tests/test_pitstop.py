@@ -3585,3 +3585,22 @@ def test_G7_9_update_checks_the_cache_folder_against_the_registry_commit(tmp_pat
     (cache / "note.txt").write_text("A\n")
     rab.update_plugins(now + 270000, 0, lambda cmd, t: R())
     assert len(told) == 2
+
+
+def test_G2_26_a_headless_session_never_starts_tuning(tmp_path, monkeypatch):
+    import pitstop_common as pc
+    monkeypatch.setattr(pc, "STATE_DIR", str(tmp_path / "state"))
+    started = []
+    monkeypatch.setattr(pc.subprocess, "Popen", lambda cmd, **kw: started.append(cmd))
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    on, now = {"auto_tune": True}, time.time()
+    for v in ("sdk-cli", "sdk-ts", "sdk-py"):
+        monkeypatch.setenv("CLAUDE_CODE_ENTRYPOINT", v)
+        assert pc.start_tune(str(proj), on, now) is False
+    assert not started and not os.path.exists(pc.tune_stamp(str(proj)))          # no tune, no stamp
+    assert not (proj / ".claude").exists()                                          # nothing written in the folder
+    for v in ("cli", "claude-desktop", "claude-vscode"):                            # a person's session, any host
+        assert pc.headless({"CLAUDE_CODE_ENTRYPOINT": v}) is False
+    monkeypatch.delenv("CLAUDE_CODE_ENTRYPOINT")                                    # absent: a person's session
+    assert pc.start_tune(str(proj), on, now) is True and len(started) == 1

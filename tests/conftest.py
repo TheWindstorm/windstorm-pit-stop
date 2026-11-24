@@ -16,6 +16,13 @@ import _gate  # noqa: E402
 _run = {"names": {}, "collected": set(), "deselected": 0, "results": {}, "lines": [], "whole": None}
 
 
+@pytest.fixture(autouse=True)
+def _a_persons_session(monkeypatch):
+    """Every test runs as a person's session, also when the suite itself is run by `claude -p` or an SDK
+    (G2.26: a headless entrypoint switches tuning off); a test that wants a headless one sets it."""
+    monkeypatch.delenv("CLAUDE_CODE_ENTRYPOINT", raising=False)
+
+
 def _top_level_name(item):
     """The function name of a top-level test in tests/test_*.py (parametrized cases share it), else None."""
     path = str(getattr(item, "path", getattr(item, "fspath", "")))
