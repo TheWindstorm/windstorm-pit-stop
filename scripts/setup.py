@@ -270,39 +270,136 @@ def install_timer(interval, apply):
                                                "systemctl --user enable --now pit-stop-restart.timer")
 
 
-def close_open(apply):
-    """Rule 28 for what an earlier run left open (G12.13): a setup run under a wide-open umask (000, as some job
-    queues start) left Pit Stop's state folder 0777 and its timer files 0666. Removes group and other write from
-    what Pit Stop wrote: ~/.claude/pit-stop and, inside it, the names Pit Stop writes (and everything under its own
-    folders there); the launcher, unit, timer and plist when they are ours. Only narrows, never widens; symlinks
-    and files of another owner are left alone; --undo does not open them again. A folder on the way that Pit Stop
-    may have made but cannot tell (~/.config/systemd/user and its parents, ~/Library/LaunchAgents, ~/.claude) is
-    named with the command to close it, not changed. Returns the lines to print."""
-    mine = []
+def reach(path):
+    """Who other than the owner can get to PATH: "g" (the group) and/or "o" (everyone else), kept only while
+    every folder above it, from the root down, lets them pass. A folder that cannot be read stops both."""
+    who = {"g", "o"}
+    d = os.path.dirname(os.path.abspath(path))
+    while who:
+        try:
+            m = os.stat(d).st_mode
+        except OSError:
+            return set()
+        if not m & 0o010:
+            who.discard("g")
+        if not m & 0o001:
+            who.discard("o")
+        if os.path.dirname(d) == d:
+            break
+        d = os.path.dirname(d)
+    return who
+
+
+def writable_by_others(path, mode):
+    """True when an account other than the owner can reach PATH and write it."""
+    w = ({"g"} if mode & 0o020 else set()) | ({"o"} if mode & 0o002 else set())
+    return bool(w & reach(path))
+
+
+def open_scan(home=None):
+    """Rule 28, A FILE IS ONLY AS CLOSED AS THE FOLDERS ABOVE IT (G12.13, G12.14). Returns a dict:
+      mine:  [(path, mode)] what Pit Stop wrote that has group or other write: the state folder and, inside it,
+             the names Pit Stop writes (everything under its own folders), and the launcher, unit, timer and
+             plist when ours. Setup closes these whoever can reach them; symlinks and other owners' are left.
+      ways:  [(path, mode, what runs under it)] every other folder from the home down to each thing of ours that
+             runs or is read (the launcher, the timer files, the installed code, the settings) that another
+             account can reach and write. Not ours to change (rule 23): named with the one command.
+      copy:  (installed code folder, how many entries in it another account can reach and write).
+      unread: [path] what could not be read (rule 6)."""
+    home = os.path.realpath(home or pc.HOME)
+    mine, ways, unread, seen = [], [], [], set()
 
     def add(p):
         try:
             st = os.lstat(p)
         except OSError:
+            unread.append(p)
             return
         if not os.path.islink(p) and st.st_uid == os.getuid() and st.st_mode & 0o022:
             mine.append((p, st.st_mode & 0o7777))
 
     if os.path.isdir(pc.STATE_DIR) and not os.path.islink(pc.STATE_DIR):
         add(pc.STATE_DIR)
-        for name in sorted(os.listdir(pc.STATE_DIR)):
+        try:
+            names = sorted(os.listdir(pc.STATE_DIR))
+        except OSError:
+            names = []
+            unread.append(pc.STATE_DIR)
+        for name in names:
             if not pc.state_name_is_ours(name):
                 continue
             top = os.path.join(pc.STATE_DIR, name)
             add(top)
             if os.path.isdir(top) and not os.path.islink(top):
-                for d, dirs, files in os.walk(top, followlinks=False):
+                for d, dirs, files in os.walk(top, followlinks=False, onerror=lambda e: unread.append(e.filename)):
                     for n in sorted(dirs) + sorted(files):
                         add(os.path.join(d, n))
     timer = [os.path.join(UNIT_DIR, "pit-stop-restart.service"), os.path.join(UNIT_DIR, "pit-stop-restart.timer"), PLIST]
     for f in [BIN] + timer:
         if ours(f):
             add(f)
+    code = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    runs = [(pc.STATE_DIR, "Pit Stop's settings and state")] + ([(BIN, "Pit Stop's launcher")] if os.path.exists(BIN) else []) \
+        + [(f, "Pit Stop's timer") for f in timer if ours(f)] + [(os.path.join(code, "hooks"), "Pit Stop's installed code")]
+    state = os.path.realpath(pc.STATE_DIR)
+    for target, what in runs:
+        d = os.path.dirname(os.path.abspath(target))
+        chain = []
+        while True:
+            chain.append(d)
+            r = os.path.realpath(d)
+            if r == home or not r.startswith(home + os.sep) or os.path.dirname(d) == d:
+                break
+            d = os.path.dirname(d)
+        for d in reversed(chain):                       # from the home down
+            r = os.path.realpath(d)
+            if r in seen or r == state or r.startswith(state + os.sep):
+                continue
+            seen.add(r)
+            try:
+                st = os.lstat(d)
+            except OSError:
+                unread.append(d)
+                continue
+            if not os.path.islink(d) and writable_by_others(d, st.st_mode):
+                ways.append((d, st.st_mode & 0o7777, what + (" runs" if what != "Pit Stop's settings and state" else " are")))
+    n = 0
+    for d, dirs, files in os.walk(code, followlinks=False, onerror=lambda e: unread.append(e.filename)):
+        dirs[:] = [x for x in dirs if x != ".git"]
+        for x in dirs + files:
+            p = os.path.join(d, x)
+            try:
+                st = os.lstat(p)
+            except OSError:
+                unread.append(p)
+                continue
+            n += not os.path.islink(p) and writable_by_others(p, st.st_mode)
+    return {"mine": mine, "ways": ways, "copy": (code, n), "unread": unread}
+
+
+def open_lines(scan, first=()):
+    """The numbered lines that name what Pit Stop may not change (rule 28): which folder, what it means, the one
+    command. Setup prints them; /pit-stop status repeats them until they are closed."""
+    short = lambda p: p.replace(pc.HOME, "~", 1) if p.startswith(pc.HOME) else p
+    out = list(first) + [f"{short(d)} ({oct(m)[2:]}) can be written by another account: it could delete and replace what is "
+           f"in it, and {what} under it, as you. Pit Stop cannot tell whether it made this folder, so it stays. "
+           f"To close it: chmod go-w {d}" for d, m, what in scan["ways"]]
+    code, n = scan["copy"]
+    if n:
+        out.append(f"{n} file(s) or folder(s) in Pit Stop's installed code ({short(code)}) can be written by another "
+                   f"account, and Claude Code runs that code as you. To close them: chmod -R go-w {code}")
+    out += [f"could not be read, so not checked: {short(p)}" for p in scan["unread"]]
+    return [f"{i}. {x}" for i, x in enumerate(out, 1)]
+
+
+def close_open(apply, home=None):
+    """Rule 28 for what an earlier run left open (G12.13): a setup run under a wide-open umask (000, as some job
+    queues start) left Pit Stop's state folder 0777 and its timer files 0666. Removes group and other write from
+    what Pit Stop wrote (open_scan's "mine"); only narrows, never widens; --undo does not open them again. The
+    folders on the way that are not Pit Stop's are named (open_lines), not changed. Returns the lines to print."""
+    scan = open_scan(home)
+    mine = scan["mine"]
+    short = lambda p: p.replace(pc.HOME, "~", 1) if p.startswith(pc.HOME) else p
     if not mine:
         out = ["   none of what Pit Stop wrote can be written by another account"]
     elif apply:
@@ -310,27 +407,12 @@ def close_open(apply):
         for p, m in mine:
             try:
                 os.chmod(p, m & ~0o022)
-                out.append(f"   closed {p.replace(pc.HOME, '~')}: {oct(m)[2:]} -> {oct(m & ~0o022)[2:]}")
+                out.append(f"   closed {short(p)}: {oct(m)[2:]} -> {oct(m & ~0o022)[2:]}")
             except OSError as e:
-                out.append(f"   NOT closed {p.replace(pc.HOME, '~')} ({oct(m)[2:]}): {e}")
+                out.append(f"   NOT closed {short(p)} ({oct(m)[2:]}): {e}")
     else:
-        out = [f"   would close {p.replace(pc.HOME, '~')}: {oct(m)[2:]} -> {oct(m & ~0o022)[2:]}" for p, m in mine]
-    home = os.path.realpath(pc.HOME)
-    ways = [pc.CLAUDE_DIR] + ([UNIT_DIR] if any(ours(f) for f in timer[:2]) else []) \
-        + ([os.path.dirname(PLIST)] if ours(PLIST) else [])
-    seen = set()
-    for d in ways:
-        while d and os.path.realpath(d) != home and os.path.realpath(d).startswith(home + os.sep) and d not in seen:
-            seen.add(d)
-            try:
-                st = os.lstat(d)
-                if not os.path.islink(d) and st.st_mode & 0o022:
-                    out.append(f"   {d.replace(pc.HOME, '~')} can be written by another account ({oct(st.st_mode & 0o7777)[2:]}); "
-                               f"Pit Stop cannot tell whether it made it, so it stays. To close it: chmod go-w {d}")
-            except OSError:
-                pass
-            d = os.path.dirname(d)
-    return out
+        out = [f"   would close {short(p)}: {oct(m)[2:]} -> {oct(m & ~0o022)[2:]}" for p, m in mine]
+    return out + ["   " + x for x in open_lines(scan)]
 
 
 SETTINGS = os.path.join(pc.CLAUDE_DIR, "settings.json")

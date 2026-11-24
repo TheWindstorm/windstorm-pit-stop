@@ -3797,12 +3797,31 @@ def test_G12_12_nothing_made_is_writable_by_another_account(tmp_path):
     assert not loose, loose
 
 
-def test_G12_13_setup_closes_what_an_earlier_run_left_open(tmp_path):
+def _open_home():
+    """A home another account can reach (a 755 folder in /tmp): pytest's own temp folder is 700, so nothing in it
+    is reachable, and rule 28 names only what another account can reach."""
+    import pathlib
+    import tempfile
+    base = tempfile.mkdtemp(prefix="pitstop-g12-", dir="/tmp")
+    os.chmod(base, 0o755)
+    return pathlib.Path(base)
+
+
+def test_G12_13_setup_closes_what_an_earlier_run_left_open():
     """Released 0.6.1 run under umask 000 left ~/.claude/pit-stop and its bin 0777 and the unit and timer 0666
     (measured 2026-11-24). Setup closes those, and only those: a person's file in the state folder, a unit
     without Pit Stop's mark, a symlink's target and the folders on the way keep their modes; the folders on
-    the way are named with the command to close them."""
+    the way are named, numbered, with what they mean and the command that closes them."""
+    import shutil
     import stat
+    tmp_path = _open_home()
+    try:
+        _g12_13(tmp_path, stat)
+    finally:
+        shutil.rmtree(tmp_path)
+
+
+def _g12_13(tmp_path, stat):
     home, cfg, proj = tmp_path / "home", tmp_path / "home" / ".claude", tmp_path / "home" / "proj"
     state, units, outside = cfg / "pit-stop", tmp_path / "home" / ".config" / "systemd" / "user", tmp_path / "outside.txt"
     for d in (state / "bin", state / "folders", units, proj / ".claude"):
@@ -3818,7 +3837,7 @@ def test_G12_13_setup_closes_what_an_earlier_run_left_open(tmp_path):
     os.symlink(outside, state / "folders" / "link.json")
     for d in (state, state / "bin", state / "folders", units, units.parent, units.parent.parent):
         os.chmod(d, 0o777)
-    for d in (tmp_path, home, cfg, proj, proj / ".claude"):
+    for d in (home, cfg, proj, proj / ".claude"):
         os.chmod(d, 0o755)
     mode = lambda p: stat.S_IMODE(os.lstat(p).st_mode)
     env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent"}
@@ -3837,6 +3856,55 @@ def test_G12_13_setup_closes_what_an_earlier_run_left_open(tmp_path):
     assert {str(p): mode(p) for p in closed} == {str(p): m for p, m in closed.items()}, r.stdout
     assert {str(p): mode(p) for p in kept} == {str(p): m for p, m in kept.items()}, r.stdout
     assert "closed ~/.claude/pit-stop: 777 -> 755" in r.stdout
-    assert f"To close it: chmod go-w {units}" in r.stdout and "rm " not in r.stdout
+    named = [l.strip() for l in r.stdout.splitlines() if "Pit Stop cannot tell whether it made this folder" in l]
+    assert [l.split(" (")[0] for l in named] == ["1. ~/.config", "2. ~/.config/systemd", "3. ~/.config/systemd/user"], r.stdout
+    assert named[2].endswith(f"Pit Stop's timer runs under it, as you. Pit Stop cannot tell whether it made this folder, "
+                             f"so it stays. To close it: chmod go-w {units}") and "rm " not in r.stdout
     r = run("--apply")                                                 # a second run finds nothing of ours open
     assert "none of what Pit Stop wrote can be written by another account" in r.stdout, r.stdout
+
+
+def test_G12_14_status_repeats_an_open_folder_until_it_is_closed():
+    """/pit-stop status (needs_you) names, numbered, what another account can reach and write: Pit Stop's own
+    (with the setup that closes it) and every folder on the way to what it runs (with the chmod), each time,
+    until it is closed; behind a home only its owner can enter, nothing is reachable and nothing is named."""
+    import shutil
+    tmp_path = _open_home()
+    try:
+        home, cfg = tmp_path / "home", tmp_path / "home" / ".claude"
+        state, units = cfg / "pit-stop", home / ".config" / "systemd" / "user"
+        for d in (state, units):
+            d.mkdir(parents=True)
+        (units / "pit-stop-restart.timer").write_text("[Unit]\nDescription=Windstorm Pit Stop every 5 minutes\n")
+        for d in (home, cfg, home / ".config"):
+            os.chmod(d, 0o755)
+        os.chmod(state, 0o777)
+        for d in (units, units.parent):
+            os.chmod(d, 0o777)
+        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent"}
+        code = ("import sys, time; sys.path.insert(0, sys.argv[1]); import needs_you as ny; now = time.time(); "
+                "d = ny.collect([], None, now, open_=ny.open_now()); print(ny.render(d, now)); print('HEAD', ny.headline(d))")
+        status = lambda: subprocess.run([sys.executable, "-I", "-c", code, os.path.join(ROOT, "scripts")], env=env,
+                                        capture_output=True, text=True, timeout=60)
+        r = status()
+        assert r.returncode == 0, r.stderr[-400:]
+        assert "Can be written by another account" in r.stdout and "Nothing needs you" not in r.stdout
+        assert "1. 1 of Pit Stop's own files or folders (such as ~/.claude/pit-stop, 777)" in r.stdout, r.stdout
+        assert f"2. ~/.config/systemd (777)" in r.stdout and f"3. ~/.config/systemd/user (777)" in r.stdout
+        assert f"To close it: chmod go-w {units}" in r.stdout and "3 thing(s) another account can write" in r.stdout
+        subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--no-tune-now"],
+                       cwd=str(home), env=env, capture_output=True, timeout=120)
+        r = status()                                                   # setup closed its own; the folders stay named
+        assert "of Pit Stop's own" not in r.stdout and "1. ~/.config/systemd (777)" in r.stdout, r.stdout
+        r = status()                                                   # and again, each time
+        assert "2. ~/.config/systemd/user (777)" in r.stdout
+        os.chmod(home, 0o700)                                          # nobody else can enter the home: nothing to name
+        r = status()
+        assert "Can be written by another account" not in r.stdout and "Nothing needs you." in r.stdout, r.stdout
+        os.chmod(home, 0o755)
+        for d in (units, units.parent):                                # closed by the person: no longer said
+            os.chmod(d, 0o755)
+        r = status()
+        assert "Can be written by another account" not in r.stdout and "Nothing needs you." in r.stdout, r.stdout
+    finally:
+        shutil.rmtree(tmp_path)

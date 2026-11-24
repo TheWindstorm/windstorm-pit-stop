@@ -22,6 +22,9 @@ as a list:
   - THIS MACHINE'S CLAUDE CODE: behind the newest release for a day or more,
     however it was installed (native, npm, Homebrew, WinGet, apt/dnf/apk, mise,
     asdf, nix), with what holds it and the one command that moves it.
+  - WRITABLE BY ANOTHER ACCOUNT: what Pit Stop wrote, or a folder on the way
+    to what it runs, that another account can reach and write (an earlier
+    setup under a wide-open umask). Repeated here until it is closed.
 Names, versions and durations only: nothing a session says or shows is read
 out. Standard library only.
 """
@@ -41,6 +44,7 @@ STUCK_AFTER = 24 * 3600
 EVERY = 3600
 OFF_LIST_AFTER = 7 * 86400
 MACHINE_NAME = "(this machine's Claude Code)"
+OPEN_NAME = "(writable by another account)"
 
 
 def _rab():
@@ -65,8 +69,22 @@ def off_reasons(cfg):
         if isinstance(r, dict) else {}
 
 
-def collect(sessions, newest, now, panes=None, machine=None, machine_behind_s=None, herdr=None):
-    """PANES: the helper's map of terminal -> tmux pane, when it has one. With it,
+def open_now():
+    """Rule 28 (G12.14): what another account can reach and write, as numbered lines; [] when nothing."""
+    try:
+        import setup as su
+        scan = su.open_scan()
+    except Exception as e:                                  # rule 6: said, not skipped
+        return [f"1. could not be checked: {e}"]
+    mine = [(p, m) for p, m in scan["mine"] if su.writable_by_others(p, m)]
+    first = [f"{len(mine)} of Pit Stop's own files or folders (such as {mine[0][0].replace(pc.HOME, '~', 1)}, "
+             f"{oct(mine[0][1])[2:]}): run Pit Stop's setup with --apply once (/pit-stop setup); it closes them."] if mine else []
+    return su.open_lines(scan, first)
+
+
+def collect(sessions, newest, now, panes=None, machine=None, machine_behind_s=None, herdr=None, open_=None):
+    """OPEN_: open_now()'s lines (rule 28), when checked.
+    PANES: the helper's map of terminal -> tmux pane, when it has one. With it,
     a session the helper cannot type into (no tmux pane) is named as that.
     HERDR: the helper's map of session id -> Herdr pane (when switched on); such a session has a pane too.
     MACHINE: install_method.machine() for this machine (and MACHINE_BEHIND_S,
@@ -124,7 +142,7 @@ def collect(sessions, newest, now, panes=None, machine=None, machine_behind_s=No
     return {"newest": newest, "total": len(sessions), "on_newest": on_newest, "waiting": waiting, "stuck": stuck,
             "behind_new": behind_new, "unloaded": unloaded, "nohook": nohook, "off_reasons": off_reasons(cfg), "reload_on": bool(cfg.get("reload_plugins")),
             "machine": machine if machine_behind_s is not None and machine_behind_s >= STUCK_AFTER else None,
-            "machine_behind_s": machine_behind_s}
+            "machine_behind_s": machine_behind_s, "open": open_ or []}
 
 
 def render(d, now):
@@ -163,7 +181,9 @@ def render(d, now):
         out += ["", " ".join(parts) + " " + (
             "The helper reloads them at a break (reload_plugins is on)." if d["reload_on"] else
             "Switch on \"reload_plugins\" in restart.json, or type /reload-plugins in each.")]
-    if not (d["waiting"] or d["stuck"] or d.get("machine")):
+    if d.get("open"):
+        out += ["", "Can be written by another account (until it is closed, this is said here each time):"] + d["open"]
+    if not (d["waiting"] or d["stuck"] or d.get("machine") or d.get("open")):
         out += ["", "Nothing needs you."]
     return "\n".join(out) + "\n"
 
@@ -182,6 +202,8 @@ def headline(d):
     stuck = [x for x in d["stuck"] if x[3] != NOT_LISTED]
     if stuck:
         parts.append(f"{len(stuck)} cannot be updated")
+    if d.get("open"):
+        parts.append(f"{len(d['open'])} thing(s) another account can write")
     return ("pit-stop: " + "; ".join(parts) + f"; see {OUT}") if parts else ""
 
 
@@ -213,7 +235,7 @@ def refresh(sessions, newest, now, force=False, panes=None, herdr=None):
         pass
     rab = _rab()
     m, mb = machine_now(now, write=rab.LIVE)
-    d = collect(sessions, newest, now, panes, m, mb, herdr=herdr)
+    d = collect(sessions, newest, now, panes, m, mb, herdr=herdr, open_=open_now())
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     tmp = OUT + ".tmp-pitstop"
     with open(tmp, "w") as f:
@@ -222,7 +244,7 @@ def refresh(sessions, newest, now, force=False, panes=None, herdr=None):
     if not rab.LIVE:
         return d
     names = sorted({n for n, _ in d["waiting"]} | {n for n, _, _, why in d["stuck"] if why != NOT_LISTED}
-                   | ({MACHINE_NAME} if d.get("machine") else set()))
+                   | ({MACHINE_NAME} if d.get("machine") else set()) | ({OPEN_NAME} if d.get("open") else set()))
     lastf = os.path.join(rab.BASE, "state", "needs-you.last")
     try:
         with open(lastf) as f:
@@ -274,7 +296,7 @@ def main():
         d = refresh(sessions, newest, now, force=True, panes=panes, herdr=herdr)
     else:
         m, mb = machine_now(now, write=False)
-        d = collect(sessions, newest, now, panes, m, mb, herdr=herdr)
+        d = collect(sessions, newest, now, panes, m, mb, herdr=herdr, open_=open_now())
     sys.stdout.write(render(d, now))
     return 0
 
