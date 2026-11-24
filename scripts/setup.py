@@ -400,7 +400,7 @@ def setup_again():
 def job_state(job):
     """launchd's own word for JOB's run, from the job's state line in `launchctl print` (one tab in; the lines two
     tabs in belong to its parts): 'not running', 'running' (any other word), or None when it could not be read."""
-    p = run(["launchctl", "print", job], 15)
+    p = run(["launchctl", "print", job], 15, env=c_locale())     # its words are read: C (rule 30, ONE LANGUAGE)
     if not p or p.returncode != 0:
         return None
     for line in (p.stdout or "").splitlines():
@@ -459,7 +459,7 @@ def install_timer(interval, apply):
                 f.write(body)
             keep_record(PLIST)
             job = f"gui/{os.getuid()}/{LAUNCHD_LABEL}"
-            was = run(["launchctl", "print", job], 15)
+            was = run(["launchctl", "print", job], 15, env=c_locale())
             was = bool(was and was.returncode == 0)
             if was:     # rule 30 (G12.26): loaded from a file that is gone; bootstrap over it is refused (exit 5)
                 ended = run_has_ended(job)
@@ -470,7 +470,7 @@ def install_timer(interval, apply):
                     return True
                 run(["launchctl", "bootout", job])
                 for _ in range(20):          # bootout is not done when it returns: wait until launchd lets go
-                    p = run(["launchctl", "print", job], 15)
+                    p = run(["launchctl", "print", job], 15, env=c_locale())
                     if p and p.returncode != 0:
                         break
                     time.sleep(0.5)

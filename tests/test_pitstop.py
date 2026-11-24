@@ -4692,6 +4692,8 @@ def test_G12_26_setup_loads_the_job_file_it_wrote_over_a_job_already_loaded(tmp_
         def run(c, t=30, env=None):
             calls.append(" ".join(c[:2]))
             if c[1] == "print":
+                # rule 30 (ONE LANGUAGE): launchd's words are read, so the call runs in C, LANGUAGE removed
+                assert env and env.get("LC_ALL") == "C" and "LANGUAGE" not in env, env
                 if state["after_bootout"] is not None:
                     state["after_bootout"] -= 1
                     if state["after_bootout"] <= 0:
