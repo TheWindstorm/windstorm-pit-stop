@@ -455,6 +455,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.15 A private group of one is not another account.** A folder's group bits count only for an account in that group, by user number, not the owner's or 0 (its members, and every account whose primary group it is); a stock home at 755 with `~/.config` at 775 in the person's own group of one is named nowhere; with a second member it is; unreadable membership is said on the line. Seen 2026-11-24, rule 28's naming paragraph. Proof: `test_G12_15_a_private_group_of_one_is_not_another_account`.
 
+**G12.16 A folder the person does not own gets no command.** A named folder whose owner number is not the one Pit Stop runs as says who owns it (the administrator, or the account by number) and that only an administrator can close it, with no chmod. Each named line says what runs under it: the launch agent, the systemd timer, the launcher, the installed code. Seen 2026-11-24 in two other walks. Proof: `test_G12_16_a_folder_the_person_does_not_own_gets_no_command`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

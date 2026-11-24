@@ -3858,7 +3858,7 @@ def _g12_13(tmp_path, stat):
     assert "closed ~/.claude/pit-stop: 777 -> 755" in r.stdout
     named = [l.strip() for l in r.stdout.splitlines() if "Pit Stop cannot tell whether it made this folder" in l]
     assert [l.split(" (")[0] for l in named] == ["1. ~/.config", "2. ~/.config/systemd", "3. ~/.config/systemd/user"], r.stdout
-    assert named[2].endswith(f"Pit Stop's timer runs under it, as you. Pit Stop cannot tell whether it made this folder, "
+    assert named[2].endswith(f"Pit Stop's systemd timer runs under it, as you. Pit Stop cannot tell whether it made this folder, "
                              f"so it stays. To close it: chmod go-w {units}") and "rm " not in r.stdout
     r = run("--apply")                                                 # a second run finds nothing of ours open
     assert "none of what Pit Stop wrote has group or other write in its permission bits (access lists are not read)" in r.stdout, r.stdout
@@ -3967,3 +3967,38 @@ def test_G12_15_a_private_group_of_one_is_not_another_account():
         assert r.stdout.strip() == "[]", r.stdout + r.stderr[-400:]
     finally:
         shutil.rmtree(tmp_path)
+
+
+def test_G12_16_a_folder_the_person_does_not_own_gets_no_command():
+    """Rule 28 (12:03 AM ET clause): a named folder whose owner number is not the one Pit Stop runs as says who
+    owns it and that only an administrator can close it, and gives no command the person cannot run. Each line
+    names what runs under the folder: the launch agent for a Mac plist, the systemd timer for a unit."""
+    import json as _json
+    import shutil
+    tmp_path = _open_home()
+    try:
+        home, cfg = tmp_path / "home", tmp_path / "home" / ".claude"
+        agents = home / "Library" / "LaunchAgents"
+        for d in (cfg / "pit-stop", agents):
+            d.mkdir(parents=True)
+        (agents / "ai.thewindstorm.pit-stop-restart.plist").write_text(
+            "<plist><dict><key>Label</key><string>ai.thewindstorm.pit-stop-restart</string></dict></plist>\n")
+        for d in (home, cfg, cfg / "pit-stop", home / "Library"):
+            os.chmod(d, 0o755)
+        os.chmod(agents, 0o777)
+        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent"}
+        code = ("import json, os, sys; sys.path.insert(0, sys.argv[1]); import setup as su; me = int(sys.argv[2]); "
+                "os.getuid = lambda: me; su.group_members = lambda gid: set(); "
+                "print(json.dumps([l for l in su.open_lines(su.open_scan()) if 'LaunchAgents' in l]))")
+        run = lambda me: _json.loads(subprocess.run([sys.executable, "-I", "-c", code, os.path.join(ROOT, "scripts"), str(me)],
+                                                    env=env, capture_output=True, text=True, timeout=60).stdout or "null")
+        own = run(os.getuid())                                          # the person's folder: the chmod
+        assert len(own) == 1 and "Pit Stop's launch agent runs under it" in own[0] and own[0].endswith(f"chmod go-w {agents}"), own
+        other = run(os.getuid() + 4242)                                 # Pit Stop runs as another number: not the person's
+        assert len(other) == 1 and "chmod" not in other[0], other
+        assert f"(number {os.getuid()}), not to you, so only an administrator can close it." in other[0], other
+    finally:
+        shutil.rmtree(tmp_path)
+    r = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import setup as su; "
+                        "print(su.owner_name(0))", os.path.join(ROOT, "scripts")], capture_output=True, text=True, timeout=60)
+    assert r.stdout.strip() == "the administrator (root, number 0)", r.stderr

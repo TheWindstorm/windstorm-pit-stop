@@ -348,7 +348,7 @@ def open_scan(home=None):
       mine:  [(path, mode)] what Pit Stop wrote that has group or other write: the state folder and, inside it,
              the names Pit Stop writes (everything under its own folders), and the launcher, unit, timer and
              plist when ours. Setup closes these whoever can reach them; symlinks and other owners' are left.
-      ways:  [(path, mode, what runs under it, note)] every other folder from the home down to each thing of ours that
+      ways:  [(path, mode, what runs under it, note, owner number)] every other folder from the home down to each thing of ours that
              runs or is read (the launcher, the timer files, the installed code, the settings) that another
              account can reach and write. Not ours to change (rule 23): named with the one command.
       copy:  (installed code folder, how many entries in it another account can reach and write).
@@ -389,7 +389,8 @@ def open_scan(home=None):
             add(f)
     code = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     runs = [(pc.STATE_DIR, "Pit Stop's settings and state")] + ([(BIN, "Pit Stop's launcher")] if os.path.exists(BIN) else []) \
-        + [(f, "Pit Stop's timer") for f in timer if ours(f)] + [(os.path.join(code, "hooks"), "Pit Stop's installed code")]
+        + [(f, "Pit Stop's launch agent" if f == PLIST else "Pit Stop's systemd timer") for f in timer if ours(f)] \
+        + [(os.path.join(code, "hooks"), "Pit Stop's installed code")]
     state = os.path.realpath(pc.STATE_DIR)
     for target, what in runs:
         d = os.path.dirname(os.path.abspath(target))
@@ -414,7 +415,8 @@ def open_scan(home=None):
                 continue
             note = None if os.path.islink(d) else exposure(d, st.st_mode)
             if note is not None:
-                ways.append((d, st.st_mode & 0o7777, what + (" runs" if what != "Pit Stop's settings and state" else " are"), note))
+                ways.append((d, st.st_mode & 0o7777, what + (" runs" if what != "Pit Stop's settings and state" else " are"), note,
+                             st.st_uid))
     n = 0
     for d, dirs, files in os.walk(code, followlinks=False, onerror=lambda e: unread.append(e.filename)):
         dirs[:] = [x for x in dirs if x != ".git"]
@@ -431,13 +433,29 @@ def open_scan(home=None):
     return {"mine": mine, "ways": ways, "copy": (code, n), "unread": unread}
 
 
+def owner_name(uid):
+    """Who owns a folder, by number (rule 28, AN ACCOUNT IS ITS NUMBER): 0 is the administrator."""
+    if uid == 0:
+        return "the administrator (root, number 0)"
+    try:
+        import pwd
+        return f"account {pwd.getpwuid(uid).pw_name} (number {uid})"
+    except (ImportError, KeyError):
+        return f"account number {uid}"
+
+
 def open_lines(scan, first=()):
     """The numbered lines that name what Pit Stop may not change (rule 28): which folder, what it means, the one
     command. Setup prints them; /pit-stop status repeats them until they are closed."""
     short = lambda p: p.replace(pc.HOME, "~", 1) if p.startswith(pc.HOME) else p
-    out = list(first) + [f"{short(d)} ({oct(m)[2:]}) can be written by another account{note}, by its permission bits: it could delete and replace "
-           f"what is in it, and {what} under it, as you. Pit Stop cannot tell whether it made this folder, so it stays. "
-           f"To close it: chmod go-w {d}" for d, m, what, note in scan["ways"]]
+    out = list(first)
+    for d, m, what, note, owner in scan["ways"]:
+        head = (f"{short(d)} ({oct(m)[2:]}) can be written by another account{note}, by its permission bits: it could "
+                f"delete and replace what is in it, and {what} under it, as you.")
+        if owner == os.getuid():
+            out.append(f"{head} Pit Stop cannot tell whether it made this folder, so it stays. To close it: chmod go-w {d}")
+        else:                                   # rule 28: no command the person cannot run (G12.16)
+            out.append(f"{head} It belongs to {owner_name(owner)}, not to you, so only an administrator can close it.")
     code, n = scan["copy"]
     if n:
         out.append(f"{n} file(s) or folder(s) in Pit Stop's installed code ({short(code)}) can be written by another "
