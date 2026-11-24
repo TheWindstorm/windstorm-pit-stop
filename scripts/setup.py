@@ -374,10 +374,12 @@ def open_scan(home=None):
       mine:  [(path, mode)] what Pit Stop wrote that has group or other write: the state folder and, inside it,
              the names Pit Stop writes (everything under its own folders), and the launcher, unit, timer and
              plist when ours. Setup closes these whoever can reach them; symlinks and other owners' are left.
-      ways:  [(path, mode, what runs under it, note, owner number)] every other folder from the home down to each thing of ours that
-             runs or is read (the launcher, the timer files, the installed code, the settings) that another
-             account can reach and write. Not ours to change (rule 23): named with the one command.
-      copy:  (installed code folder, how many entries in it another account can reach and write).
+      ways:  [(path, mode, what it is or holds, note, owner number)] every other folder from the home down to each
+             thing that runs or decides what runs (the settings, the launcher, the timer files, the installed code,
+             installed_plugins.json, the session list, the claude, tmux and Python programs; those files too)
+             that another account can reach and write. Not ours to change (rule 23): named with the one command.
+      copies: [(installed code folder, how many entries in it another account can reach and write)], this copy
+             first, then every other copy in the plugin cache (the launcher may run any of them).
       unread: [path] what could not be read (rule 6)."""
     home = os.path.realpath(home or pc.HOME)
     mine, ways, unread, seen = [], [], [], set()
@@ -414,11 +416,28 @@ def open_scan(home=None):
         if ours(f):
             add(f)
     code = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    runs = [(pc.STATE_DIR, "Pit Stop's settings and state")] + ([(BIN, "Pit Stop's launcher")] if os.path.exists(BIN) else []) \
-        + [(f, "Pit Stop's launch agent" if f == PLIST else "Pit Stop's systemd timer") for f in timer if ours(f)] \
-        + [(os.path.join(code, "hooks"), "Pit Stop's installed code")]
+    # what runs, and what decides what runs (rule 28): (path, what it is, check the file itself too)
+    runs = [(pc.STATE_DIR, "Pit Stop's settings and state, which decide what it runs", False)] \
+        + ([(BIN, "Pit Stop's launcher, which runs as you", False)] if os.path.exists(BIN) else []) \
+        + [(f, ("Pit Stop's launch agent" if f == PLIST else "Pit Stop's systemd timer") + ", which runs as you", False)
+           for f in timer if ours(f)] \
+        + [(os.path.join(code, "hooks"), "Pit Stop's installed code, which Claude Code runs as you", False),
+           (os.path.join(pc.CLAUDE_DIR, "plugins", "installed_plugins.json"),
+            "the plugin list that tells Pit Stop's launcher which code to run", True),
+           (os.path.join(pc.SESSIONS, "-"), "Claude Code's list of sessions, which tells Pit Stop's helper where to type",
+            False)]
+    copies = [code] + sorted(v for v in glob.glob(os.path.join(pc.CLAUDE_DIR, "plugins", "cache", "*", "windstorm-pit-stop", "*"))
+                             if os.path.isdir(v) and os.path.realpath(v) != os.path.realpath(code))
+    runs += [(os.path.join(v, "scripts"), "another installed copy of Pit Stop, which its launcher may run as you", False)
+             for v in copies[1:]]
+    for name, p in (("claude", shutil.which("claude")), ("tmux", shutil.which("tmux")), ("Python", sys.executable)):
+        if p:
+            what = f"the {name} program Pit Stop runs as you"
+            runs.append((p, what, True))
+            if os.path.realpath(p) != os.path.abspath(p):
+                runs.append((os.path.realpath(p), what, True))
     state = os.path.realpath(pc.STATE_DIR)
-    for target, what in runs:
+    for target, what, itself in runs:
         d = os.path.dirname(os.path.abspath(target))
         chain = []
         while True:
@@ -427,7 +446,7 @@ def open_scan(home=None):
             if r == home or not r.startswith(home + os.sep) or os.path.dirname(d) == d:
                 break
             d = os.path.dirname(d)
-        for d in reversed(chain):                       # from the home down
+        for d in list(reversed(chain)) + ([os.path.abspath(target)] if itself else []):   # from the home down
             r = os.path.realpath(d)
             if r in seen or r == state or r.startswith(state + os.sep):
                 continue
@@ -441,22 +460,24 @@ def open_scan(home=None):
                 continue
             note = None if os.path.islink(d) else exposure(d, st.st_mode)
             if note is not None:
-                ways.append((d, st.st_mode & 0o7777, what + (" runs" if what != "Pit Stop's settings and state" else " are"), note,
-                             st.st_uid))
-    n = 0
-    for d, dirs, files in os.walk(code, followlinks=False, onerror=lambda e: unread.append(e.filename)):
-        dirs[:] = [x for x in dirs if x != ".git"]
-        for x in dirs + files:
-            p = os.path.join(d, x)
-            try:
-                st = os.lstat(p)
-            except FileNotFoundError:
-                continue
-            except OSError:
-                unread.append(p)
-                continue
-            n += not os.path.islink(p) and writable_by_others(p, st.st_mode)
-    return {"mine": mine, "ways": ways, "copy": (code, n), "unread": unread}
+                ways.append((d, st.st_mode & 0o7777, what, note, st.st_uid))
+    counts = []
+    for c in copies:
+        n = 0
+        for d, dirs, files in os.walk(c, followlinks=False, onerror=lambda e: unread.append(e.filename)):
+            dirs[:] = [x for x in dirs if x != ".git"]
+            for x in dirs + files:
+                p = os.path.join(d, x)
+                try:
+                    st = os.lstat(p)
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    unread.append(p)
+                    continue
+                n += not os.path.islink(p) and writable_by_others(p, st.st_mode)
+        counts.append((c, n))
+    return {"mine": mine, "ways": ways, "copies": counts, "unread": unread}
 
 
 def owner_name(uid):
@@ -476,16 +497,19 @@ def open_lines(scan, first=()):
     short = lambda p: p.replace(pc.HOME, "~", 1) if p.startswith(pc.HOME) else p
     out = list(first)
     for d, m, what, note, owner in scan["ways"]:
-        head = (f"{short(d)} ({oct(m)[2:]}) can be written by another account{note}, by its permission bits: it could "
-                f"delete and replace what is in it, and {what} under it, as you.")
+        folder = os.path.isdir(d) and not os.path.islink(d)
+        head = (f"{short(d)} ({oct(m)[2:]}) can be written by another account{note}, by its permission bits: "
+                + (f"it could delete and replace what is in it, and below it is {what}." if folder else f"it is {what}."))
         if owner == os.getuid():
-            out.append(f"{head} Pit Stop cannot tell whether it made this folder, so it stays. To close it: chmod go-w {d}")
+            out.append(f"{head} " + ("Pit Stop cannot tell whether it made this folder, so it stays."
+                                     if folder else "It is not Pit Stop's, so it stays.") + f" To close it: chmod go-w {d}")
         else:                                   # rule 28: no command the person cannot run (G12.16)
             out.append(f"{head} It belongs to {owner_name(owner)}, not to you, so only an administrator can close it.")
-    code, n = scan["copy"]
-    if n:
-        out.append(f"{n} file(s) or folder(s) in Pit Stop's installed code ({short(code)}) can be written by another "
-                   f"account, and Claude Code runs that code as you. To close them: chmod -R go-w {code}")
+    for i, (code, n) in enumerate(scan["copies"]):
+        if n:
+            which = "Pit Stop's installed code" if i == 0 else "another installed copy of Pit Stop"
+            out.append(f"{n} file(s) or folder(s) in {which} "
+                       f"({short(code)}) can be written by another account, and it runs as you. To close them: chmod -R go-w {code}")
     out += [f"could not be read, so not checked: {short(p)}" for p in scan["unread"]]
     return [f"{i}. {x}" for i, x in enumerate(out, 1)]
 

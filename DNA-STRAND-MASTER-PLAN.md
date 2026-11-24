@@ -461,6 +461,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.17 Undo leaves the home as it was before setup.** Setup records each folder and the config.json it makes; `--undo` removes, by that record, config.json while nothing of the person's is in it, released.json, backups of a file Pit Stop made, and the folders with rmdir only; what holds the person's settings stays, named on a numbered line. In a home where setup made everything, the listing after undo equals the one before. Seen 2026-11-24 on a Mac. Proof: `test_G12_17_undo_leaves_the_home_as_it_was_before_setup`.
 
+**G12.18 The walk covers what decides what runs.** Besides Pit Stop's settings, launcher, timer files and code, the rule-28 walk names, when another account can reach and write them, installed_plugins.json, Claude Code's session list, every other installed copy of Pit Stop, and the claude, tmux and Python programs the helper runs, with their folders. Seen 2026-11-24 in another lane's stock machine sitting. Proof: `test_G12_18_the_walk_covers_what_decides_what_runs`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

@@ -3868,7 +3868,7 @@ def _g12_13(tmp_path, stat):
     assert "closed ~/.claude/pit-stop: 777 -> 755" in r.stdout
     named = [l.strip() for l in r.stdout.splitlines() if "Pit Stop cannot tell whether it made this folder" in l]
     assert [l.split(" (")[0] for l in named] == ["1. ~/.config", "2. ~/.config/systemd", "3. ~/.config/systemd/user"], r.stdout
-    assert named[2].endswith(f"Pit Stop's systemd timer runs under it, as you. Pit Stop cannot tell whether it made this folder, "
+    assert named[2].endswith(f"below it is Pit Stop's systemd timer, which runs as you. Pit Stop cannot tell whether it made this folder, "
                              f"so it stays. To close it: chmod go-w {units}") and "rm " not in r.stdout
     r = run("--apply")                                                 # a second run finds nothing of ours open
     assert "none of what Pit Stop wrote has group or other write in its permission bits (access lists are not read)" in r.stdout, r.stdout
@@ -4003,7 +4003,7 @@ def test_G12_16_a_folder_the_person_does_not_own_gets_no_command():
         run = lambda me: _json.loads(subprocess.run([sys.executable, "-I", "-c", code, os.path.join(ROOT, "scripts"), str(me)],
                                                     env=env, capture_output=True, text=True, timeout=60).stdout or "null")
         own = run(os.getuid())                                          # the person's folder: the chmod
-        assert len(own) == 1 and "Pit Stop's launch agent runs under it" in own[0] and own[0].endswith(f"chmod go-w {agents}"), own
+        assert len(own) == 1 and "below it is Pit Stop's launch agent, which runs as you." in own[0] and own[0].endswith(f"chmod go-w {agents}"), own
         other = run(os.getuid() + 4242)                                 # Pit Stop runs as another number: not the person's
         assert len(other) == 1 and "chmod" not in other[0], other
         assert f"(number {os.getuid()}), not to you, so only an administrator can close it." in other[0], other
@@ -4061,3 +4061,45 @@ def test_G12_17_undo_leaves_the_home_as_it_was_before_setup(tmp_path):
     assert "3. config.json: auto_tune removed (it was not set); it stays: it holds your settings" in r.stdout, r.stdout
     assert "kept the folder ~/.claude/pit-stop (setup made it): it holds" in r.stdout and "config.json" in r.stdout
     assert "kept the folder ~/.claude (setup made it): it holds 1 item(s): pit-stop" in r.stdout
+
+
+def test_G12_18_the_walk_covers_what_decides_what_runs():
+    """Rule 28, WHAT RUNS INCLUDES WHAT DECIDES WHAT RUNS: besides Pit Stop's own settings, launcher, timer and
+    code, status names, when another account can write them, installed_plugins.json (it tells the launcher
+    which code to run), Claude Code's session list (it tells the helper where to type), every other installed
+    copy of Pit Stop the launcher may pick, and the folder of the claude program the helper runs."""
+    import shutil
+    tmp_path = _open_home()
+    try:
+        home, cfg = tmp_path / "home", tmp_path / "home" / ".claude"
+        plist = cfg / "plugins" / "installed_plugins.json"
+        other = cfg / "plugins" / "cache" / "m" / "windstorm-pit-stop" / "0.1.0" / "scripts"
+        sessions, bindir = cfg / "sessions", home / ".local" / "bin"
+        for d in (cfg / "pit-stop", other, sessions, bindir):
+            d.mkdir(parents=True)
+        plist.write_text("{}")
+        (other / "restart_at_break.py").write_text("")
+        (bindir / "claude").write_text("#!/bin/sh\n")
+        for d in (home, cfg, cfg / "pit-stop", cfg / "plugins", cfg / "plugins" / "cache", cfg / "plugins" / "cache" / "m",
+                  cfg / "plugins" / "cache" / "m" / "windstorm-pit-stop", other.parent, other, home / ".local"):
+            os.chmod(d, 0o755)
+        os.chmod(bindir / "claude", 0o755)
+        for f in (plist, other / "restart_at_break.py"):
+            os.chmod(f, 0o666)
+        for d in (sessions, bindir):
+            os.chmod(d, 0o777)
+        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": str(bindir)}
+        r = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import setup as su; "
+                            "su.group_members = lambda gid: set(); print('\\n'.join(su.open_lines(su.open_scan())))",
+                            os.path.join(ROOT, "scripts")], env=env, capture_output=True, text=True, timeout=60)
+        out = r.stdout
+        assert r.returncode == 0, r.stderr[-600:]
+        assert (f"~/.claude/plugins/installed_plugins.json (666) can be written by another account, by its permission bits: "
+                f"it is the plugin list that tells Pit Stop's launcher which code to run. It is not Pit Stop's, so it stays. "
+                f"To close it: chmod go-w {plist}") in out, out
+        assert "~/.claude/sessions (777)" in out and "Claude Code's list of sessions, which tells Pit Stop's helper where to type" in out
+        assert "~/.local/bin (777)" in out and "below it is the claude program Pit Stop runs as you" in out
+        assert (f"1 file(s) or folder(s) in another installed copy of Pit Stop "
+                f"(~/.claude/plugins/cache/m/windstorm-pit-stop/0.1.0) can be written by another account") in out, out
+    finally:
+        shutil.rmtree(tmp_path)
