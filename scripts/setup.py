@@ -270,17 +270,29 @@ def install_timer(interval, apply):
                                                "systemctl --user enable --now pit-stop-restart.timer")
 
 
+def accounts_in_group(gid, passwd, listed, me):
+    """The accounts that hold group GID, by user NUMBER (rule 28, AN ACCOUNT IS ITS NUMBER, NOT ITS NAME): every
+    entry of PASSWD [(name, uid, primary gid)] whose primary group it is, and each name LISTED in the group
+    (a listed name with no passwd entry stays as its name: another account we cannot place). Leaves out ME (the
+    number the tool runs as, under any of its names) and 0 (the administrator)."""
+    uid_of = {}
+    for n, u, _ in passwd:
+        uid_of.setdefault(n, u)
+    out = {u for _, u, g in passwd if g == gid} | {uid_of.get(n, n) for n in listed}
+    return out - {me, 0}
+
+
 def group_members(gid):
-    """The accounts other than the owner (and root) that hold group GID: its member list and every account whose
-    primary group it is. None when it cannot be read (no such group entry, or no grp/pwd on this system)."""
+    """accounts_in_group for this system, or None when the group cannot be read (no such group entry, or no
+    grp/pwd here)."""
     try:
         import grp
         import pwd
-        me = pwd.getpwuid(os.getuid()).pw_name
-        names = set(grp.getgrgid(gid).gr_mem) | {p.pw_name for p in pwd.getpwall() if p.pw_gid == gid}
+        passwd = [(p.pw_name, p.pw_uid, p.pw_gid) for p in pwd.getpwall()]
+        listed = grp.getgrgid(gid).gr_mem
     except (ImportError, KeyError, OSError):
         return None
-    return names - {me, "root"}
+    return accounts_in_group(gid, passwd, listed, os.getuid())
 
 
 OTHER = "(an account in none of these groups)"
@@ -290,7 +302,7 @@ def exposure(path, mode):
     """None when no account other than the owner can reach PATH (every folder from the root down passable for
     it) and write it; else the note for its line: "" when known, or which group's members could not be read.
     The group's bits count only for an account in that folder's group, and only when the group has a member
-    other than the owner (rule 28, WHEN A PERSON'S FOLDER IS NAMED): a private group of one is not another
+    whose user number is not the owner's (rule 28, WHEN A PERSON'S FOLDER IS NAMED): a private group of one is not another
     account. Everyone else goes by the "other" bits."""
     chain, d = [], os.path.dirname(os.path.abspath(path))
     while True:
@@ -322,7 +334,7 @@ def exposure(path, mode):
                 ok = False
                 break
         if ok:
-            return f" (the members of group {c[7:-1]} could not be read)" if c.startswith("(group ") else ""
+            return f" (the members of group {c[7:-1]} could not be read)" if isinstance(c, str) and c.startswith("(group ") else ""
     return None
 
 

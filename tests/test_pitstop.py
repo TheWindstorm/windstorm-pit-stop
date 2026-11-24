@@ -3913,7 +3913,8 @@ def test_G12_14_status_repeats_an_open_folder_until_it_is_closed():
 def test_G12_15_a_private_group_of_one_is_not_another_account():
     """Rule 28, WHEN A PERSON'S FOLDER IS NAMED: a stock Linux home is 755 with ~/.config 775 in the person's own
     group with nobody else in it; that is named nowhere. The same folders in a group with a second member are
-    named; where the group's members cannot be read, the line says so."""
+    named; where the group's members cannot be read, the line says so. AN ACCOUNT IS ITS NUMBER: a second name
+    with the person's user number is the person, and number 0 is the administrator."""
     import json as _json
     import shutil
     tmp_path = _open_home()
@@ -3941,5 +3942,21 @@ def test_G12_15_a_private_group_of_one_is_not_another_account():
         assert all("(775) can be written by another account, by its permission bits:" in l for l in two)
         unread = lines(None)
         assert len(unread) == 3 and all(f"(the members of group {os.getgid()} could not be read)" in l for l in unread), unread
+        code2 = ("import json, sys; sys.path.insert(0, sys.argv[1]); import setup as su; pw, me = json.loads(sys.argv[2]), "
+                 "__import__('os').getuid(); su.group_members = lambda gid: su.accounts_in_group(gid, pw, [], me); "
+                 "print(json.dumps([l for l in su.open_lines(su.open_scan()) if 'Pit Stop cannot tell' in l]))")
+        def by_passwd(pw):
+            r = subprocess.run([sys.executable, "-I", "-c", code2, os.path.join(ROOT, "scripts"), _json.dumps(pw)], env=env,
+                               capture_output=True, text=True, timeout=60)
+            assert r.returncode == 0, r.stderr[-600:]
+            return _json.loads(r.stdout)
+        uid, gid = os.getuid(), os.getgid()
+        assert by_passwd([["me", uid, gid], ["me-by-another-name", uid, gid]]) == []   # one number, two names: the person
+        assert len(by_passwd([["me", uid, gid], ["someone-else", uid + 4242, gid]])) == 3
+        pure = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import setup as su; "
+                               "print(sorted(map(str, su.accounts_in_group(7, [('a', 5, 7), ('a2', 5, 7), ('root', 0, 7), "
+                               "('b', 6, 1)], ['b', 'ghost'], 5))))", os.path.join(ROOT, "scripts")],
+                              env=env, capture_output=True, text=True, timeout=60)
+        assert pure.stdout.strip() == "['6', 'ghost']", pure.stderr       # the number, not the name; 0 is the administrator
     finally:
         shutil.rmtree(tmp_path)
