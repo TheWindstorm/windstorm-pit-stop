@@ -372,6 +372,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P36",
+   "seen": "2026-11-24, by the code with P35 (family rule 6): panes() keeps only lines that split at a TAB; when tmux answers with lines and not one splits (a TAB turned into \"_\" for a client with no UTF-8 setting, seen with tmux 3.4), the map is empty and each session is passed over as having no pane, with no line in restart.log: a run that could read nothing looks like a run with nothing to do. With -u on every call in 0.6.2 this is not met by a timer's run.",
+   "promise": "When tmux answers list-panes with lines and none of them can be split into its fields, the helper says the panes \"could not be read\" (with tmux's first line and the call), types nothing that run, and never passes a session over as having no pane from that answer; lines that do split and hold no such terminal still mean no pane.",
+   "codon": "G4.40",
+   "issue": null,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

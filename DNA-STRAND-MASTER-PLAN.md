@@ -281,6 +281,8 @@ The helper `scripts/restart_at_break.py` types `/compact`, `/restart` or a short
 
 **G4.39 A pane is addressed by its id, and tmux is read whole.** The helper types into a pane by its id (`#{pane_id}`, the same text in every environment, one pane only), never by a session's name, which a tmux client with no UTF-8 language setting prints with "_" for non-ASCII letters, and which matches by prefix; every tmux call of the helper carries -u (family rule 30). Proof: `test_G4_39_a_pane_is_addressed_by_its_id_and_tmux_is_read_whole`.
 
+**G4.40 Panes that could not be parsed are "could not be read", not "no pane" (open).** When tmux answers list-panes with lines and none splits into its fields, the helper logs that the panes could not be read, with tmux's first line, types nothing that run, and never passes a session over as having no pane; lines that split and hold no such terminal still mean no pane (family rule 6). Proof: `test_G4_40_panes_that_could_not_be_parsed_are_could_not_be_read`.
+
 ### G5 Hook reload
 
 With `reload_plugins: true` in `restart.json`, the helper types `/reload-plugins` (no turn starts) into a session whose Pit Stop hooks are missing or of the wrong hook generation, at a break, and confirms it from the screen.
