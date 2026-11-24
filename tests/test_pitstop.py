@@ -3787,7 +3787,7 @@ def test_G12_12_nothing_made_is_writable_by_another_account(tmp_path):
     local = proj / ".claude" / "settings.local.json"
     local.write_text("{}")
     os.chmod(local, 0o600)
-    env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent"}
+    env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
     for _ in range(2):                                                  # twice: the second run is not refused
         r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--no-tune-now"],
                            cwd=str(proj), env=env, capture_output=True, text=True, timeout=120, preexec_fn=lambda: os.umask(0))
@@ -3850,7 +3850,7 @@ def _g12_13(tmp_path, stat):
     for d in (home, cfg, proj, proj / ".claude"):
         os.chmod(d, 0o755)
     mode = lambda p: stat.S_IMODE(os.lstat(p).st_mode)
-    env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent"}
+    env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
     run = lambda *x: subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), *x, "--no-tune-now"],
                                     cwd=str(proj), env=env, capture_output=True, text=True, timeout=120)
     r = run()                                                          # the plan names them and changes nothing
@@ -3891,7 +3891,7 @@ def test_G12_14_status_repeats_an_open_folder_until_it_is_closed():
         os.chmod(state, 0o777)
         for d in (units, units.parent):
             os.chmod(d, 0o777)
-        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent"}
+        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
         code = ("import sys, time; sys.path.insert(0, sys.argv[1]); import needs_you as ny; now = time.time(); "
                 "d = ny.collect([], None, now, open_=ny.open_now()); print(ny.render(d, now)); print('HEAD', ny.headline(d))")
         status = lambda: subprocess.run([sys.executable, "-I", "-c", code, os.path.join(ROOT, "scripts")], env=env,
@@ -3939,7 +3939,7 @@ def test_G12_15_a_private_group_of_one_is_not_another_account():
             os.chmod(d, 0o755)
         for d in (home / ".config", units.parent, units):
             os.chmod(d, 0o775)
-        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent"}
+        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
         code = ("import json, sys; sys.path.insert(0, sys.argv[1]); import setup as su; m = json.loads(sys.argv[2]); "
                 "su.group_members = lambda gid: None if m is None else set(m); "
                 "print(json.dumps([l for l in su.open_lines(su.open_scan()) if 'Pit Stop cannot tell' in l]))")
@@ -3996,7 +3996,7 @@ def test_G12_16_a_folder_the_person_does_not_own_gets_no_command():
         for d in (home, cfg, cfg / "pit-stop", home / "Library"):
             os.chmod(d, 0o755)
         os.chmod(agents, 0o777)
-        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent"}
+        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
         code = ("import json, os, sys; sys.path.insert(0, sys.argv[1]); import setup as su; me = int(sys.argv[2]); "
                 "os.getuid = lambda: me; su.group_members = lambda gid: set(); "
                 "print(json.dumps([l for l in su.open_lines(su.open_scan()) if 'LaunchAgents' in l]))")
@@ -4035,7 +4035,7 @@ def test_G12_17_undo_leaves_the_home_as_it_was_before_setup(tmp_path):
                 out[os.path.relpath(p, home)] = (oct(st.st_mode), None if os.path.isdir(p) else
                                                  hashlib.sha256(open(p, "rb").read()).hexdigest())
         return out
-    env = {"HOME": str(home), "PATH": str(stub)}
+    env = {"HOME": str(home), "PATH": str(stub), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}   # no network in a test
     setup = lambda *x: subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), *x], cwd=str(proj),
                                       env=env, capture_output=True, text=True, timeout=120)
     before = listing()
@@ -4045,10 +4045,12 @@ def test_G12_17_undo_leaves_the_home_as_it_was_before_setup(tmp_path):
     for p in (".claude/pit-stop/config.json", ".claude/pit-stop/bin/pit-stop-restart", ".claude/pit-stop/restart.json",
               ".config/systemd/user/pit-stop-restart.timer"):
         assert p in made, (p, sorted(made))
+    (home / ".claude" / "pit-stop" / "released.json").write_text('{"latest": {"version": "2.1.331"}}')   # what the check writes
     r = setup("--undo")
     assert r.returncode == 0 and r.stdout.strip().splitlines()[-1].startswith("Done:"), r.stdout
     assert listing() == before, (r.stdout, sorted(set(listing()) - set(before)))
     assert "removed the folder ~/.claude (setup made it; empty now)" in r.stdout and "rm -r" not in r.stdout
+    assert "6. removed what Pit Stop made that held nothing of yours: released.json" in r.stdout
 
     # the person's own setting in the config.json setup made: it stays and is named, with the folders that hold it
     setup("--apply")
