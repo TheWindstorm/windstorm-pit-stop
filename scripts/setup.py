@@ -384,6 +384,46 @@ def timer_path():
     return ":".join(out)
 
 
+RUN_BOUND = 960   # rule 30: a run's longest road by the helper's own limits: Claude Code's update (600 s), then
+                  # plugin updates (300 s in all), and 60 s for the rest; launchd itself sets a job no time limit
+WAIT_STEP = 5
+
+
+def job_state(job):
+    """launchd's own word for JOB's run, from the job's state line in `launchctl print` (one tab in; the lines two
+    tabs in belong to its parts): 'not running', 'running' (any other word), or None when it could not be read."""
+    p = run(["launchctl", "print", job], 15)
+    if not p or p.returncode != 0:
+        return None
+    for line in (p.stdout or "").splitlines():
+        if line.startswith("\tstate = "):
+            return "not running" if line.split("=", 1)[1].strip() == "not running" else "running"
+    return None
+
+
+def run_has_ended(job, bound=RUN_BOUND):
+    """Rule 30 (ii): a bootout ends a job's run wherever it is (mid Claude Code update, mid plugin update, mid
+    typing into a pane), so nothing is taken off while launchd reads the job as in a run. Waits up to BOUND
+    seconds, a line a minute. 'ended', or the words for why not."""
+    waited = 0
+    try:
+        while True:
+            st = job_state(job)
+            if st == "not running":
+                return "ended"
+            if st is None:
+                return "state could not be read"
+            if waited >= bound:
+                return f"is still in a run after {bound} s"
+            time.sleep(WAIT_STEP)
+            waited += WAIT_STEP
+            if waited % 60 == 0:
+                print(f"    launchd's job is in a run; waiting for it to end ({waited} s of at most {bound} s; "
+                      f"nothing is taken off while it waits; you can leave with Ctrl-C)", flush=True)
+    except KeyboardInterrupt:
+        return "was still in a run when you left"
+
+
 def install_timer(interval, apply):
     py = sys.executable
     if platform.system() == "Darwin":
@@ -414,6 +454,11 @@ def install_timer(interval, apply):
             was = run(["launchctl", "print", job], 15)
             was = bool(was and was.returncode == 0)
             if was:     # rule 30 (G12.26): loaded from a file that is gone; bootstrap over it is refused (exit 5)
+                ended = run_has_ended(job)
+                if ended != "ended":
+                    print(f"    written; launchd's job {ended}, so it was not taken off: nothing was cut. When the run "
+                          f"has ended: launchctl bootout {job}, then launchctl bootstrap gui/{os.getuid()} {PLIST}")
+                    return True
                 run(["launchctl", "bootout", job])
                 for _ in range(20):          # bootout is not done when it returns: wait until launchd lets go
                     p = run(["launchctl", "print", job], 15)

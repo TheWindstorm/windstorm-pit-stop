@@ -4686,8 +4686,8 @@ def test_G12_26_setup_loads_the_job_file_it_wrote_over_a_job_already_loaded(tmp_
     uid, label = os.getuid(), su.LAUNCHD_LABEL
     P = subprocess.CompletedProcess
 
-    def world(loaded, bootout_takes, bootstrap_ok=True):
-        calls, state = [], {"loaded": loaded, "after_bootout": None}
+    def world(loaded, bootout_takes, bootstrap_ok=True, running=0):
+        calls, state = [], {"loaded": loaded, "after_bootout": None, "running": running}
 
         def run(c, t=30, env=None):
             calls.append(" ".join(c[:2]))
@@ -4696,7 +4696,11 @@ def test_G12_26_setup_loads_the_job_file_it_wrote_over_a_job_already_loaded(tmp_
                     state["after_bootout"] -= 1
                     if state["after_bootout"] <= 0:
                         state["loaded"] = False
-                return P(c, 0 if state["loaded"] else 113, "", "" if state["loaded"] else "Bad request.\n")
+                if state["loaded"] and state["running"] > 0:
+                    state["running"] -= 1
+                    return P(c, 0, "\tpath = x\n\tstate = running\n\tpid = 4242\n", "")
+                return P(c, 0 if state["loaded"] else 113, "\tstate = not running\n\t\tstate = active\n" if state["loaded"]
+                         else "", "" if state["loaded"] else "Bad request.\n")
             if c[1] == "bootout":
                 state["after_bootout"] = bootout_takes
                 return P(c, 0, "", "")
@@ -4730,6 +4734,35 @@ def test_G12_26_setup_loads_the_job_file_it_wrote_over_a_job_already_loaded(tmp_
     out = capsys.readouterr().out
     assert (f"launchctl bootout gui/{uid}/{label}, then launchctl bootstrap gui/{uid} {su.PLIST}") in out, out
     assert "written; load it with: launchctl bootstrap" not in out, out
+    # A RUN IN FLIGHT IS NEVER CUT (rule 30 (ii)): a bootout ends the job's run wherever it is (mid Claude Code
+    # update, mid plugin update, mid typing). While launchd reads the job as in a run, setup waits, a line a minute,
+    # and takes nothing off; when the run has ended it goes on as above.
+    os.remove(su.PLIST)
+    calls = world(True, 3, running=30)                       # 30 reads in a run, 5 s apart: 150 s
+    assert su.install_timer(5, True) is True
+    out = capsys.readouterr().out
+    first_off = calls.index("launchctl bootout")
+    assert calls[:first_off].count("launchctl print") >= 31, calls[:first_off]
+    assert out.count("is in a run; waiting for it to end") == 2, out              # at 60 s and 120 s
+    assert "nothing is taken off while it waits" in out and "Ctrl-C" in out, out
+    assert "written; asked launchd to load it (the job loaded from an earlier file was taken off first)" in out, out
+    # still in a run at the bound: no bootout at all, the line says so and names what to type after the run ends
+    os.remove(su.PLIST)
+    calls = world(True, 3, running=10 ** 6)
+    assert su.install_timer(5, True) is True
+    out = capsys.readouterr().out
+    assert "launchctl bootout" not in calls and "launchctl bootstrap" not in calls, calls
+    assert calls.count("launchctl print") <= su.RUN_BOUND // 5 + 2, len(calls)
+    assert (f"still in a run after {su.RUN_BOUND} s, so it was not taken off: nothing was cut. When the run has ended: "
+            f"launchctl bootout gui/{uid}/{label}, then launchctl bootstrap gui/{uid} {su.PLIST}") in out, out
+    # a state that cannot be read is not "not running": nothing taken off
+    os.remove(su.PLIST)
+    calls = world(True, 3)
+    real = su.run
+    monkeypatch.setattr(su, "run", lambda c, t=30, env=None: P(c, 0, "", "") if c[1] == "print" else real(c, t, env))
+    assert su.install_timer(5, True) is True
+    out = capsys.readouterr().out
+    assert "launchctl bootout" not in calls and "could not be read, so it was not taken off" in out, (calls, out)
 
 def test_G12_18_the_walk_covers_what_decides_what_runs():
     """Rule 28, WHAT RUNS INCLUDES WHAT DECIDES WHAT RUNS: besides Pit Stop's own settings, launcher, timer and
