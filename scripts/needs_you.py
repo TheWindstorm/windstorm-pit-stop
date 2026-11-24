@@ -23,15 +23,16 @@ as a list:
     however it was installed (native, npm, Homebrew, WinGet, apt/dnf/apk, mise,
     asdf, nix), with what holds it and the one command that moves it.
   - WRITABLE BY ANOTHER ACCOUNT: what Pit Stop wrote, or a folder on the way
-    to what it runs, that another account can reach and write (an earlier
-    setup under a wide-open umask). Repeated here until it is closed.
+    to what it runs, that another account can reach and write by the
+    permission bits (an earlier setup under a wide-open umask; access lists
+    are not read). Repeated here until it is closed.
 Names, versions and durations only: nothing a session says or shows is read
 out. Standard library only.
 """
 import os
 import sys
 sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
-os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make is writable by another account (G12.12)
+os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make has group or other write (G12.12)
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -182,7 +183,8 @@ def render(d, now):
             "The helper reloads them at a break (reload_plugins is on)." if d["reload_on"] else
             "Switch on \"reload_plugins\" in restart.json, or type /reload-plugins in each.")]
     if d.get("open"):
-        out += ["", "Can be written by another account (until it is closed, this is said here each time):"] + d["open"]
+        out += ["", "Can be written by another account, by the permission bits (access lists are not read; until it is closed, "
+                    "this is said here each time):"] + d["open"]
     if not (d["waiting"] or d["stuck"] or d.get("machine") or d.get("open")):
         out += ["", "Nothing needs you."]
     return "\n".join(out) + "\n"

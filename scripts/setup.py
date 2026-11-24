@@ -76,7 +76,7 @@ import shutil
 import subprocess
 import sys
 sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
-os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make is writable by another account (G12.12)
+os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make has group or other write (G12.12)
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import pitstop_common as pc  # noqa: E402
@@ -417,7 +417,7 @@ def open_lines(scan, first=()):
     """The numbered lines that name what Pit Stop may not change (rule 28): which folder, what it means, the one
     command. Setup prints them; /pit-stop status repeats them until they are closed."""
     short = lambda p: p.replace(pc.HOME, "~", 1) if p.startswith(pc.HOME) else p
-    out = list(first) + [f"{short(d)} ({oct(m)[2:]}) can be written by another account{note}: it could delete and replace "
+    out = list(first) + [f"{short(d)} ({oct(m)[2:]}) can be written by another account{note}, by its permission bits: it could delete and replace "
            f"what is in it, and {what} under it, as you. Pit Stop cannot tell whether it made this folder, so it stays. "
            f"To close it: chmod go-w {d}" for d, m, what, note in scan["ways"]]
     code, n = scan["copy"]
@@ -437,7 +437,7 @@ def close_open(apply, home=None):
     mine = scan["mine"]
     short = lambda p: p.replace(pc.HOME, "~", 1) if p.startswith(pc.HOME) else p
     if not mine:
-        out = ["   none of what Pit Stop wrote can be written by another account"]
+        out = ["   none of what Pit Stop wrote has group or other write in its permission bits (access lists are not read)"]
     elif apply:
         out = []
         for p, m in mine:

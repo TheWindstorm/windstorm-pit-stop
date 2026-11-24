@@ -11,7 +11,7 @@ import re
 import subprocess
 import sys
 sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
-os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make is writable by another account (G12.12)
+os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make has group or other write (G12.12)
 
 TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 WATCHED = ("hooks/", "scripts/", "skills/")

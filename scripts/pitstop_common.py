@@ -205,7 +205,7 @@ def backup(path):
         return None
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     dst = f"{path}.bak-pitstop-{stamp}"
-    mode = os.stat(path).st_mode & 0o755          # the original's mode, never writable by another account (G12.12)
+    mode = os.stat(path).st_mode & 0o755          # the original's mode without group or other write (G12.12)
     with open(path, "rb") as a, os.fdopen(os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode), "wb") as b:
         b.write(a.read())
     os.chmod(dst, mode)

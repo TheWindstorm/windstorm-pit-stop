@@ -3861,7 +3861,7 @@ def _g12_13(tmp_path, stat):
     assert named[2].endswith(f"Pit Stop's timer runs under it, as you. Pit Stop cannot tell whether it made this folder, "
                              f"so it stays. To close it: chmod go-w {units}") and "rm " not in r.stdout
     r = run("--apply")                                                 # a second run finds nothing of ours open
-    assert "none of what Pit Stop wrote can be written by another account" in r.stdout, r.stdout
+    assert "none of what Pit Stop wrote has group or other write in its permission bits (access lists are not read)" in r.stdout, r.stdout
 
 
 def test_G12_14_status_repeats_an_open_folder_until_it_is_closed():
@@ -3938,7 +3938,7 @@ def test_G12_15_a_private_group_of_one_is_not_another_account():
         assert lines([]) == []                                          # a group of one: nothing named
         two = lines(["someone-else"])
         assert [l.split(" (")[0] for l in two] == ["1. ~/.config", "2. ~/.config/systemd", "3. ~/.config/systemd/user"], two
-        assert all("(775) can be written by another account:" in l for l in two)
+        assert all("(775) can be written by another account, by its permission bits:" in l for l in two)
         unread = lines(None)
         assert len(unread) == 3 and all(f"(the members of group {os.getgid()} could not be read)" in l for l in unread), unread
     finally:
