@@ -74,6 +74,14 @@ def test_G1_3_hook_default_flex_ceiling(tmp_path):
     assert run_hook({"trigger": "auto", "transcript_path": p2, "session_id": "flex"}, tmp_path)[0] == 2
     p3 = transcript(tmp_path, "f3", [a("tool_use", 180000)])
     assert run_hook({"trigger": "auto", "transcript_path": p3, "session_id": "flex"}, tmp_path)[0] == 0
+    # the factor is a constant: the old PIT_STOP_DEFAULT_FLEX is not read (0.5 would have stopped every hold)
+    q1 = transcript(tmp_path, "g1", [a("tool_use", 160000)])
+    assert run_hook({"trigger": "auto", "transcript_path": q1, "session_id": "flex2"}, tmp_path,
+                    {"PIT_STOP_DEFAULT_FLEX": "0.5"})[0] == 2
+    q2 = transcript(tmp_path, "g2", [a("tool_use", 170000)])
+    assert run_hook({"trigger": "auto", "transcript_path": q2, "session_id": "flex2"}, tmp_path,
+                    {"PIT_STOP_DEFAULT_FLEX": "0.5"})[0] == 2
+    assert "PIT_STOP_DEFAULT_FLEX" not in open(os.path.join(ROOT, "hooks", "precompact_wait_for_break.py")).read()
 
 
 def test_G1_4_hook_profile_ceiling(tmp_path):
@@ -949,7 +957,7 @@ def test_G3_1_odd_transcript_lines_do_not_break_the_readers(tmp_path, monkeypatc
     assert code == 0
     for bad in ("[]", "null", '"x"', "7"):                   # stdin that is JSON but not an object
         assert run_hook(bad, tmp_path) == (0, "")
-    assert run_hook({"trigger": "auto"}, tmp_path, {"PIT_STOP_DEFAULT_FLEX": "lots"}) == (0, "")
+    assert run_hook({"trigger": "auto"}, tmp_path) == (0, "")                  # no transcript
 
 
 def test_G2_8_thin_history_leaves_the_window_where_it_is(tmp_path, monkeypatch):

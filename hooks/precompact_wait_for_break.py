@@ -53,10 +53,7 @@ TAIL_BYTES = 4_000_000
 CLAUDE_DIR = os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude"))
 STATE = os.path.join(CLAUDE_DIR, "pit-stop")
 LOG = os.path.join(STATE, "precompact.log")
-try:
-    DEFAULT_FLEX = float(os.environ.get("PIT_STOP_DEFAULT_FLEX", "1.10"))
-except ValueError:
-    DEFAULT_FLEX = 1.10
+DEFAULT_FLEX = 1.10     # with no configured ceiling: 1.10x the first hold; no setting changes it (G1.3)
 MAX_FLEX = 1.5          # a configured ceiling is at most 1.5x the first hold
 MAX_SHARE = 0.95        # ... and at most 95% of the model's context size
 LOG_MAX_BYTES = 5_000_000
