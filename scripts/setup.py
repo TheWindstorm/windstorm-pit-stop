@@ -79,6 +79,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import time
 sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
 os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make has group or other write (G12.12)
 
@@ -409,9 +410,25 @@ def install_timer(interval, apply):
             with open(PLIST, "w") as f:
                 f.write(body)
             keep_record(PLIST)
+            job = f"gui/{os.getuid()}/{LAUNCHD_LABEL}"
+            was = run(["launchctl", "print", job], 15)
+            was = bool(was and was.returncode == 0)
+            if was:     # rule 30 (G12.26): loaded from a file that is gone; bootstrap over it is refused (exit 5)
+                run(["launchctl", "bootout", job])
+                for _ in range(20):          # bootout is not done when it returns: wait until launchd lets go
+                    p = run(["launchctl", "print", job], 15)
+                    if p and p.returncode != 0:
+                        break
+                    time.sleep(0.5)
             r = run(["launchctl", "bootstrap", f"gui/{os.getuid()}", PLIST])
-            print("    written; asked launchd to load it" if r and r.returncode == 0
-                  else f"    written; load it with: launchctl bootstrap gui/{os.getuid()} {PLIST}")
+            if r and r.returncode == 0:
+                print("    written; asked launchd to load it"
+                      + (" (the job loaded from an earlier file was taken off first)" if was else ""))
+            elif was:
+                print(f"    written; launchd still has the job loaded from an earlier file. To load this one: "
+                      f"launchctl bootout {job}, then launchctl bootstrap gui/{os.getuid()} {PLIST}")
+            else:
+                print(f"    written; load it with: launchctl bootstrap gui/{os.getuid()} {PLIST}")
         return True
     svc, tmr = os.path.join(UNIT_DIR, "pit-stop-restart.service"), os.path.join(UNIT_DIR, "pit-stop-restart.timer")
     print(f"  timer: {tmr} (systemd user timer, every {interval} min)")

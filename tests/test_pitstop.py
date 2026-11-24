@@ -4623,6 +4623,67 @@ def test_G12_23_setup_run_from_a_cache_version_folder_writes_that_path_nowhere(t
     hits = [str(f.relative_to(home)) for f in wrote if str(ver).encode() in f.read_bytes()]
     assert hits == [], f"setup wrote the cache version folder's path into: {hits}"
 
+
+def test_G12_26_setup_loads_the_job_file_it_wrote_over_a_job_already_loaded(tmp_path, monkeypatch, capsys):
+    """Family rule 30 (setup again while its own service runs). Seen on a real Mac (macOS 27.2.1, 2026-11-24): with
+    Pit Stop's job loaded and its file gone, setup wrote the file, `launchctl bootstrap` was refused (exit 5,
+    "Input/output error"), and the line it printed, "load it with: launchctl bootstrap ...", was refused the same
+    way when taken. Now setup takes the loaded job off first, waits until launchd reads it as not loaded (bootout is
+    not done when it returns), then loads the file it wrote; if launchd still refuses, it prints the two commands
+    that work, in order. A job that is not loaded is loaded as before, with no bootout."""
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    monkeypatch.setattr(su.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(su, "PLIST", str(tmp_path / "LaunchAgents" / "ai.thewindstorm.pit-stop-restart.plist"))
+    monkeypatch.setattr(su.time, "sleep", lambda s: None)
+    uid, label = os.getuid(), su.LAUNCHD_LABEL
+    P = subprocess.CompletedProcess
+
+    def world(loaded, bootout_takes, bootstrap_ok=True):
+        calls, state = [], {"loaded": loaded, "after_bootout": None}
+
+        def run(c, t=30, env=None):
+            calls.append(" ".join(c[:2]))
+            if c[1] == "print":
+                if state["after_bootout"] is not None:
+                    state["after_bootout"] -= 1
+                    if state["after_bootout"] <= 0:
+                        state["loaded"] = False
+                return P(c, 0 if state["loaded"] else 113, "", "" if state["loaded"] else "Bad request.\n")
+            if c[1] == "bootout":
+                state["after_bootout"] = bootout_takes
+                return P(c, 0, "", "")
+            if c[1] == "bootstrap":
+                if state["loaded"] or not bootstrap_ok:
+                    return P(c, 5, "", "Bootstrap failed: 5: Input/output error\n")
+                state["loaded"] = True
+                return P(c, 0, "", "")
+            raise AssertionError(c)
+        monkeypatch.setattr(su, "run", run)
+        return calls
+    # not loaded before: loaded as before, no bootout
+    calls = world(False, 0)
+    capsys.readouterr()
+    assert su.install_timer(5, True) is True
+    out = capsys.readouterr().out
+    assert "bootout" not in " ".join(calls) and "written; asked launchd to load it" in out, (calls, out)
+    # loaded from a file that is gone, and launchd lets go after a few reads: off first, then loaded
+    os.remove(su.PLIST)
+    calls = world(True, 3)
+    assert su.install_timer(5, True) is True
+    out = capsys.readouterr().out
+    assert calls.index("launchctl bootout") < calls.index("launchctl bootstrap"), calls
+    assert "launchctl print" in calls[calls.index("launchctl bootout") + 1:calls.index("launchctl bootstrap")], calls
+    assert "written; asked launchd to load it (the job loaded from an earlier file was taken off first)" in out, out
+    assert "load it with" not in out, out
+    # launchd never lets go: the line names the two commands that work, in order, never the one that is refused
+    os.remove(su.PLIST)
+    calls = world(True, 10 ** 6)
+    assert su.install_timer(5, True) is True
+    out = capsys.readouterr().out
+    assert (f"launchctl bootout gui/{uid}/{label}, then launchctl bootstrap gui/{uid} {su.PLIST}") in out, out
+    assert "written; load it with: launchctl bootstrap" not in out, out
+
 def test_G12_18_the_walk_covers_what_decides_what_runs():
     """Rule 28, WHAT RUNS INCLUDES WHAT DECIDES WHAT RUNS: besides Pit Stop's own settings, launcher, timer and
     code, status names, when another account can write them, installed_plugins.json (it tells the launcher

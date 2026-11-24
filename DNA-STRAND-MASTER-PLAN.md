@@ -477,6 +477,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.25 "Removed" is said only from Claude Code's own list, read.** `list_answer()` in `scripts/launcher.py` answers read, not there, or could not be read; `gone` and the advice to take the timer off come only from a read list naming Pit Stop nowhere. Without CLAUDE_CONFIG_DIR, the copy at <Claude folder>/pit-stop/bin/pit-stop-restart reads that folder's list and hands the folder to the helper (family rule 29 (e)). Proof: `test_G12_25_removed_is_said_only_from_claude_codes_own_list_read`.
 
+**G12.26 Setup loads the job file it wrote, even over a job already loaded.** On a Mac, when Pit Stop's job is loaded and its file was gone, setup takes the loaded job off, waits until launchd reads it as not loaded, then loads the file it wrote; if launchd still refuses, it prints bootout then bootstrap, the two commands that work. A job not loaded is loaded as before (family rule 30). Proof: `test_G12_26_setup_loads_the_job_file_it_wrote_over_a_job_already_loaded`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.
