@@ -3604,3 +3604,24 @@ def test_G2_26_a_headless_session_never_starts_tuning(tmp_path, monkeypatch):
         assert pc.headless({"CLAUDE_CODE_ENTRYPOINT": v}) is False
     monkeypatch.delenv("CLAUDE_CODE_ENTRYPOINT")                                    # absent: a person's session
     assert pc.start_tune(str(proj), on, now) is True and len(started) == 1
+
+
+def test_G2_27_the_helper_never_tunes_a_headless_runs_folder(tmp_path, monkeypatch):
+    rab = _rab(tmp_path, monkeypatch)
+    import pitstop_common as pc
+    tuned = tmp_path / "tuned"
+    tuned.mkdir()
+    run, lane = tmp_path / "harness-run", tmp_path / "lane"
+    run.mkdir(), lane.mkdir()
+    now = time.time()
+    f = tuned / pc.project_key(str(lane))
+    f.write_text("x")
+    os.utime(f, (now - 2 * 86400, now - 2 * 86400))                                 # the lane: tuned two days ago
+    cfg = dict(rab.CFG, allow_names=[], deny_names=[], deny_name_globs=[], deny_paths=[])
+    run_row = {"name": "harness-run-1a", "cwd": str(run), "entrypoint": "sdk-cli", "kind": "interactive"}
+    lane_row = {"name": "Lane", "cwd": str(lane), "entrypoint": "cli", "kind": "interactive"}
+    assert rab.tune_due([run_row, lane_row], now, cfg, str(tuned), week=86400) == str(lane)   # never tuned, still passed over
+    assert rab.tune_due([run_row], now, cfg, str(tuned), week=86400) is None
+    assert rab.tune_due([dict(run_row, entrypoint="sdk-ts")], now, cfg, str(tuned), week=86400) is None
+    no_field = {k: v for k, v in run_row.items() if k != "entrypoint"}               # no entrypoint read: a person's
+    assert rab.tune_due([no_field], now, cfg, str(tuned), week=86400) == str(run)

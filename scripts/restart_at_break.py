@@ -1393,6 +1393,8 @@ def tune_due(sessions, now, cfg, tuned_dir=None, week=None):
         cwd = s.get("cwd")
         if not cwd or not s.get("name") or not allowed(s["name"], cwd, cfg) or not os.path.isdir(cwd):
             continue
+        if str(s.get("entrypoint") or "").startswith("sdk-"):   # a running `claude -p` or SDK run (G2.27)
+            continue
         folder = os.path.abspath(cwd)
         if not pc.tune_wanted(folder):          # config.json "tune_folders": a test group only
             continue

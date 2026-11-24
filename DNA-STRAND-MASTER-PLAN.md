@@ -172,6 +172,8 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 
 **G2.26 No tuning in a session nobody sits at.** `pitstop_common.start_tune()` returns at once when `headless()` reads the session's `CLAUDE_CODE_ENTRYPOINT` as `sdk-*` (`claude -p`, an SDK); absent or anything else is a person's session and tunes as before. Seen 2026-11-23: with daily tuning on, a folder where only a headless run had worked got a settings file once it had history, a compaction point nobody chose in a tree nobody was watching. Proof: `test_G2_26_a_headless_session_never_starts_tuning`.
 
+**G2.27 The helper tunes no headless run's folder.** `restart_at_break.tune_due()` passes over a running session whose registry row says `entrypoint` `sdk-*`. A headless run gets a name made from its folder, so the name and allow-list gates alone let it through on a machine with no lists. Proof: `test_G2_27_the_helper_never_tunes_a_headless_runs_folder`.
+
 ### G3 Shared readers
 One shared module, `scripts/pitstop_common.py`, plus the hook generation file, reads Claude Code's transcripts, session listings, plugin records and Pit Stop's own state the same way for every part of the plugin.
 
