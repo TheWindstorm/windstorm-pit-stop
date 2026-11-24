@@ -483,7 +483,9 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.27 Undo stops only the timer, waits out a run, says off only when read off (open).** `setup --undo` stops the timer, never the service; while a run is in flight it waits (a line a minute, up to the run's bound), then reads timer and service off (words and exit codes; no user bus: could not be read) before removing anything; otherwise it removes nothing and names one whole command line (family rule 30). Proof: `test_G12_27_undo_stops_only_the_timer_and_says_off_only_when_it_read_both_off`.
 
-**G12.28 The service's time limit is above the run's longest road.** The unit setup writes gives a run more time (TimeoutStartSec=1200) than the helper's own limits add up to (CLAUDE_UPDATE_LIMIT 600 s, UPDATE_BUDGET 300 s, and 60 s for the rest: RUN_BOUND 960 s), so systemd never ends a run in the middle of an update (family rule 30). Proof: `test_G12_28_the_services_time_limit_is_above_the_runs_longest_road`.
+**G12.28 The service's time limit is above the helper's own limits.** The unit setup writes carries TimeoutStartSec=1200, above RUN_BOUND 960 s: CLAUDE_UPDATE_LIMIT 600 s plus UPDATE_BUDGET 300 s by the helper's limits, plus an allowance of 60 s for the reads before them (an allowance, not a sum: a pane read may take 15 s; seen: longest of 228 runs 7.6 s with about a hundred panes) (family rule 30). Proof: `test_G12_28_the_services_time_limit_is_above_the_runs_longest_road`.
+
+**G12.29 The helper never starts an update its unit's limit would cut (open).** It reads the limit of the unit it runs under, from its own cgroup, any name (could not be read: it says nothing), says once a day when that limit is below its road, and never starts an update when the time left before the limit is less than that update's own limit: it writes "next run" and goes on (family rule 30). Proof: `test_G12_29_the_helper_never_starts_an_update_its_units_limit_would_cut`.
 
 ### G13 Self-update for everyone (open)
 
