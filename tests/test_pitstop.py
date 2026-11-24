@@ -3046,7 +3046,7 @@ def test_G12_7_setup_undo_puts_back_what_apply_changed(tmp_path, monkeypatch, ca
         monkeypatch.setattr(mod, k, v)
     ran = []
     no_cron = subprocess.CompletedProcess(["crontab", "-l"], 1, "", "no crontab for x\n")   # cron 3.0pl1's words
-    monkeypatch.setattr(su, "run", lambda cmd, timeout=30: ran.append(cmd) or (no_cron if cmd[:2] == ["crontab", "-l"] else None))
+    monkeypatch.setattr(su, "run", lambda cmd, timeout=30, env=None: ran.append(cmd) or (no_cron if cmd[:2] == ["crontab", "-l"] else None))
     monkeypatch.setattr(su, "tmux_servers", lambda: {})
     monkeypatch.setattr(su.platform, "system", lambda: "Linux")
     monkeypatch.setattr(su.shutil, "which", lambda n: "/usr/bin/" + n)
@@ -4202,8 +4202,11 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     import setup as su
     env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
-    hits, unread = su.schedule_read(run_cmd=lambda cmd, t: None)        # crontab gave no answer at all
-    assert "crontab" in unread and "crontab" not in hits
+    hits, unread, said = su.schedule_read(run_cmd=lambda cmd, t: None)        # crontab gave no answer at all
+    assert "crontab" in unread and "crontab" not in hits and said == "`crontab -l` gave no answer in 10 s"
+    assert su.schedule_read(run_cmd=lambda cmd, t: None, cron_none_said=True)[1] == []   # the person's word
+    secret = subprocess.CompletedProcess(["crontab", "-l"], 0, "0 * * * * curl -H 'token: s3cret' x\n", "")
+    assert su.schedule_read(run_cmd=lambda cmd, t: secret)[:2] == ([], [])       # read: none of it is said
     # rule 6 on the decision (the row IS there): what could not be read is not "none there"; no second schedule
     for case, cron in (("a unit that cannot be read", 'echo "no crontab for x" >&2; exit 1'),
                        ("crontab not allowed", 'echo "You (x) are not allowed to use this program (crontab)" >&2; exit 1'),
@@ -4232,9 +4235,60 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
             assert r.returncode == 0 and made and "fleet mode is set up" in r.stdout, (case, r.stdout[-600:])
             continue
         assert r.returncode == 1 and not made, (case, r.stdout[-800:])
-        assert "6. timer: not checked: " in r.stdout and "what it runs is not known, so no timer is made" in r.stdout, (case, r.stdout[-800:])
-        assert "Fleet mode is NOT set up: no timer was made" in r.stdout and "fleet mode is set up" not in r.stdout, case
-        assert ("~/.config/systemd/user/my-fleet.service" if case.startswith("a unit") else "your crontab") in r.stdout, case
+        assert "6. timer: not checked, so no timer is made (never a second schedule):" in r.stdout, (case, r.stdout[-800:])
+        assert "Fleet mode is NOT set up: no timer was made; step 6 says why and the next step." in r.stdout, case
+        assert "fleet mode is set up" not in r.stdout, case
+        if case.startswith("a unit"):
+            assert ("~/.config/systemd/user/my-fleet.service could not be read here; what it runs is not known. It is in "
+                    "your own folder: once you can read it (ls -l ~/.config/systemd/user/my-fleet.service), run this setup "
+                    "again.") in r.stdout, r.stdout[-800:]
+            continue
+        want = {"crontab not allowed": '`crontab -l` answered exit 1: "You (x) are not allowed to use this program (crontab)"',
+                "crontab killed": "`crontab -l` answered exit -9, with no words"}[case]
+        assert (f"your crontab: {want}, which is not the answer Pit Stop knows as \"none\". Run `crontab -l` yourself: if "
+                f"it shows no line with pit-stop-restart or restart_at_break.py, run this setup again with "
+                f"--crontab-has-no-pit-stop-line.") in r.stdout, r.stdout[-800:]
+        r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--fleet",
+                            "--crontab-has-no-pit-stop-line"], cwd=str(h2 / "proj"), env=e2, capture_output=True,
+                           text=True, timeout=120)
+        assert r.returncode == 0 and (u2 / "pit-stop-restart.timer").exists() and "fleet mode is set up" in r.stdout, r.stdout[-600:]
+
+    # the C locale: a cron that says "none" in another language says it in its own words under LC_ALL=C
+    h3, s3 = tmp_path / "de", tmp_path / "de-stub"
+    (h3 / "proj").mkdir(parents=True)
+    s3.mkdir()
+    for n, body in (("tmux", "exit 0"), ("systemctl", "exit 0"), ("crontab",
+                    'if [ "$LC_ALL" = C ] && [ -z "$LANGUAGE" ]; then echo "no crontab for x" >&2; '
+                    'else echo "keine Crontab fuer x" >&2; fi; exit 1')):
+        (s3 / n).write_text(f"#!/bin/sh\n{body}\n")
+        os.chmod(s3 / n, 0o755)
+    (h3 / ".claude" / "plugins").mkdir(parents=True)
+    (h3 / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
+    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--fleet"],
+                       cwd=str(h3 / "proj"), env=dict(env, HOME=str(h3), PATH=str(s3), LANG="de_DE.UTF-8",
+                                                      LC_ALL="de_DE.UTF-8", LANGUAGE="de"),
+                       capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0 and "fleet mode is set up" in r.stdout, r.stdout[-800:]
+    assert (h3 / ".config" / "systemd" / "user" / "pit-stop-restart.timer").exists()
+
+    # the word never outweighs a Pit Stop line that WAS read
+    h4, s4 = tmp_path / "read", tmp_path / "read-stub"
+    (h4 / "proj").mkdir(parents=True)
+    s4.mkdir()
+    for n, body in (("tmux", "exit 0"), ("systemctl", "exit 0"),
+                    ("crontab", 'echo "*/5 * * * * ~/.claude/pit-stop/bin/pit-stop-restart --live"; exit 0')):
+        (s4 / n).write_text(f"#!/bin/sh\n{body}\n")
+        os.chmod(s4 / n, 0o755)
+    (h4 / ".claude" / "plugins").mkdir(parents=True)
+    (h4 / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
+    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--fleet",
+                        "--crontab-has-no-pit-stop-line"], cwd=str(h4 / "proj"), env=dict(env, HOME=str(h4), PATH=str(s4)),
+                       capture_output=True, text=True, timeout=120)
+    assert "6. timer: something already schedules the restart helper; nothing changed:" in r.stdout, r.stdout[-600:]
+    assert not (h4 / ".config" / "systemd" / "user" / "pit-stop-restart.timer").exists()
+    assert "*/5" not in r.stdout
 
 
 def test_G12_18_the_walk_covers_what_decides_what_runs():

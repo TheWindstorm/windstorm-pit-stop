@@ -467,7 +467,7 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.20 The way back in is walked.** With --fleet, setup's first and last act is the check the timer's launcher makes. With no Pit Stop row it makes and changes nothing of fleet mode, names a timer an earlier install left, says NOT set up with the install command, and answers 1; "fleet mode is set up" and 0 only when the check passes. A test walks --undo, uninstall and a cut --undo. Proof: `test_G12_20_the_way_back_in_is_walked`.
 
-**G12.21 A schedule that could not be read is not none there.** With Pit Stop installed, setup --fleet makes a timer only when it has read that nothing else schedules the helper: a unit file it cannot open, or a `crontab -l` refused, killed or silent, is "not checked", no timer is made, fleet mode is NOT set up, exit 1. "no crontab for <user>" and no crontab program are none. Proof: `test_G12_21_a_schedule_that_could_not_be_read_is_not_none`.
+**G12.21 A schedule that could not be read is not none there.** Setup --fleet makes a timer only when it has read that nothing else schedules the helper. An unreadable unit, or a `crontab -l` (C locale) refused, killed or silent, is "not checked": no timer, NOT set up, exit 1, with what crontab answered and the next step; --crontab-has-no-pit-stop-line is the person's way through. Proof: `test_G12_21_a_schedule_that_could_not_be_read_is_not_none`.
 
 ### G13 Self-update for everyone (open)
 

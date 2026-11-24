@@ -16,6 +16,10 @@ Options:
   --no-self-update            leave Claude Code's auto-update for Pit Stop's
                               marketplace as it is
   --interval MIN              minutes between fleet runs (default 5)
+  --crontab-has-no-pit-stop-line
+                              fleet mode: you ran `crontab -l` and it shows no
+                              Pit Stop line (setup asks for this only when it
+                              could not read your crontab's answer itself)
   --days N                    days of history to read when tuning (default 14)
   --budget economy|balanced|roomy
                               how hard tuning holds down usage (kept in
@@ -209,11 +213,19 @@ def sha(path):
         return None
 
 
-def run(cmd, timeout=30):
+def run(cmd, timeout=30, env=None):
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
     except Exception:
         return None
+
+
+def c_locale():
+    """The environment for a program whose words are read: LC_ALL=C and no LANGUAGE, so the text is the program's
+    own and not a translation (rule 6: "no crontab for" is read in cron's own words)."""
+    env = {k: v for k, v in os.environ.items() if k != "LANGUAGE"}
+    env["LC_ALL"] = "C"
+    return env
 
 
 def is_wsl():
@@ -248,12 +260,15 @@ def session_tty(pid):
         return f"/dev/{t}" if t and t != "??" else None
 
 
-def schedule_read(run_cmd=None):
-    """(hits, unread): the timers or cron lines that already run restart_at_break.py or the launcher, and the
-    places that could not be read, so what they run is not known (rule 6: never taken for "none there").
-    `crontab -l`: exit 0 is read; "no crontab for <user>" is none (cron 3.0pl1-184ubuntu2's own text); no crontab
-    program is none; anything else (not allowed, no answer) is unread."""
-    hits, unread = [], []
+def schedule_read(run_cmd=None, cron_none_said=False):
+    """(hits, unread, said): the timers or cron lines that already run restart_at_break.py or the launcher; the
+    places that could not be read, so what they run is not known (rule 6: never taken for "none there"); and for
+    the crontab, what `crontab -l` answered when it was not read (its exit code and the first line it wrote on
+    stderr; never anything of the crontab itself).
+    `crontab -l` runs in the C locale. Exit 0 is read; "no crontab for <user>" (cron 3.0pl1-184ubuntu2's own text)
+    is none; no crontab program is none; anything else is unread, unless the person said, by running setup with
+    --crontab-has-no-pit-stop-line, that their crontab has no Pit Stop line (a line READ here still wins)."""
+    hits, unread, said = [], [], ""
     for f in glob.glob(os.path.join(UNIT_DIR, "*.service")) + glob.glob(os.path.join(pc.HOME, "Library", "LaunchAgents", "*.plist")):
         try:
             with open(f, errors="replace") as fh:
@@ -264,18 +279,21 @@ def schedule_read(run_cmd=None):
         if "restart_at_break.py" in t or "pit-stop-restart" in t:
             hits.append(f)
     if shutil.which("crontab"):
-        r = (run_cmd or run)(["crontab", "-l"], 10)
+        r = (run_cmd or (lambda c, t: run(c, t, env=c_locale())))(["crontab", "-l"], 10)
         if r and r.returncode == 0:
             if "restart_at_break.py" in r.stdout or "pit-stop-restart" in r.stdout:
                 hits.append("crontab")
-        elif not (r and "no crontab for" in (r.stderr or "")):
+        elif not (r and "no crontab for" in (r.stderr or "")) and not cron_none_said:
             unread.append("crontab")
-    return hits, unread
+            first = ((r.stderr or "").strip().splitlines() or [""])[0][:160] if r else ""
+            said = (f"`crontab -l` answered exit {r.returncode}" + (f": \"{first}\"" if first else ", with no words")
+                    if r else "`crontab -l` gave no answer in 10 s")
+    return hits, unread, said
 
 
 def already_scheduled():
     """Paths of timers or cron lines that already run restart_at_break.py or the launcher."""
-    return schedule_read()[0]
+    return schedule_read(cron_none_said=True)[0]
 
 
 def timer_path():
@@ -884,6 +902,8 @@ def main():
     ap.add_argument("--days", type=int, default=14)
     ap.add_argument("--budget", choices=op.BUDGETS)
     ap.add_argument("--plugin-updates", choices=("pit-stop", "all", "off"), default="pit-stop")
+    ap.add_argument("--crontab-has-no-pit-stop-line", action="store_true",
+                    help="you ran `crontab -l` and it shows no Pit Stop line: fleet setup may make its timer")
     a = ap.parse_args()
     if a.undo:
         for line in undo():
@@ -1019,7 +1039,7 @@ def main():
             pc.write_json_atomic(rj, {"tmux_socket": best, "allow_names": [], "deny_names": [],
                                       "deny_name_globs": [], "deny_paths": [], "plugin_updates": a.plugin_updates})
             note(UNDO, "restart_json", {"path": rj, "sha256": sha(rj)})
-    hits, unread = schedule_read()
+    hits, unread, said = schedule_read(cron_none_said=a.crontab_has_no_pit_stop_line)
     placed = True
     if hits:
         print("6. timer: something already schedules the restart helper; nothing changed:")
@@ -1028,15 +1048,20 @@ def main():
         print(f"   To follow plugin updates by itself, make its command: {sys.executable} -I {BIN} --live")
     elif unread:      # rule 6: what could not be read is not "none there"; never a second schedule
         placed = False
-        print("6. timer: not checked: " + ", ".join("your crontab (crontab -l did not list it)" if u == "crontab"
-                                                   else u.replace(pc.HOME, "~") for u in unread)
-              + " could not be read here; what it runs is not known, so no timer is made (never a second schedule).")
+        files = [u.replace(pc.HOME, "~") for u in unread if u != "crontab"]
+        print("6. timer: not checked, so no timer is made (never a second schedule):")
+        for f in files:
+            print(f"   {f} could not be read here; what it runs is not known. It is in your own folder: once you can "
+                  f"read it (ls -l {f}), run this setup again.")
+        if "crontab" in unread:
+            print(f"   your crontab: {said}, which is not the answer Pit Stop knows as \"none\". Run `crontab -l` "
+                  f"yourself: if it shows no line with pit-stop-restart or restart_at_break.py, run this setup again "
+                  f"with --crontab-has-no-pit-stop-line.")
     else:
         print("6. timer:")
         placed = install_timer(max(2, min(a.interval, 30)), a.apply)
     if not placed:
-        print("   Fleet mode is NOT set up: no timer was made. Once what step 6 names can be read (or is not Pit "
-              "Stop's to keep), run this setup again.")
+        print("   Fleet mode is NOT set up: no timer was made; step 6 says why and the next step.")
         return 1 if a.apply else 0
     # rule 8 (G12.20): the last act is the same check again (a row can go between the two); "set up" and 0 only then
     root, why = ln.find(pc.CLAUDE_DIR)
