@@ -3,6 +3,7 @@ import glob
 import html
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -4442,6 +4443,52 @@ def test_G12_22_launchd_answers_as_seen(tmp_path, monkeypatch):
     assert "Log in at this Mac's screen as " in line and "then run this setup again" in line and "not checked" in line
     assert "stopped" not in line and "NOT running" not in line
     assert "launchctl print gui/" in su.fleet_stop_line("unread", su.LAUNCHD_LABEL, False, True)
+
+
+FIXED_VERSION_FOLDER = re.compile(r"plugins/cache/[^\s<>\"']+/\d+\.\d+\.\d+")   # a path into ONE version folder
+
+
+def test_G12_23_nothing_setup_writes_names_a_plugin_cache_folder(tmp_path, monkeypatch):
+    """Family rule 29, NOTHING OF OURS NAMES A PLUGIN CACHE VERSION FOLDER: Claude Code's documentation says it removes a
+    plugin's old version folder 14 days after an update. Read here, every file `setup --fleet --apply` writes (the
+    launcher copy, restart.json, the systemd unit and timer, and the macOS job file) names no path in the plugin cache:
+    the timer runs the launcher copy outside it, which finds the installed folder each run."""
+    home, stub = tmp_path / "home", tmp_path / "stub"
+    (home / "proj").mkdir(parents=True)
+    stub.mkdir()
+    for n, b in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
+        (stub / n).write_text(f"#!/bin/sh\n{b}\n")
+        os.chmod(stub / n, 0o755)
+    cache = home / ".claude" / "plugins" / "cache" / "thewindstorm" / "windstorm-pit-stop" / "0.6.2"
+    (home / ".claude" / "plugins").mkdir(parents=True)
+    (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
+    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--fleet", "--no-tune-now"],
+                       cwd=str(home / "proj"), env={"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home),
+                                                    "PATH": str(stub), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
+                       capture_output=True, text=True, timeout=120)
+    unit_dir = home / ".config" / "systemd" / "user"
+    written = [home / ".claude" / "pit-stop" / "bin" / "pit-stop-restart", home / ".claude" / "pit-stop" / "restart.json",
+               unit_dir / "pit-stop-restart.service", unit_dir / "pit-stop-restart.timer"]
+    for f in written:
+        assert f.exists(), (f, r.stdout[-600:])
+        text = f.read_text()
+        if f.name != "pit-stop-restart":      # the launcher's own text may name the cache it reads; no unit or setting may
+            assert "plugins/cache" not in text, f
+        assert not FIXED_VERSION_FOLDER.search(text) and str(ROOT) not in text, f
+    exec_line = [l for l in (unit_dir / "pit-stop-restart.service").read_text().splitlines() if l.startswith("ExecStart=")]
+    assert exec_line == [f"ExecStart={sys.executable} -I {home}/.claude/pit-stop/bin/pit-stop-restart --live"], exec_line
+    # the macOS job file, written in-process with the platform said to be Darwin
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    plist = tmp_path / "LaunchAgents" / "ai.thewindstorm.pit-stop-restart.plist"
+    monkeypatch.setattr(su.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(su, "PLIST", str(plist))
+    monkeypatch.setattr(su, "run", lambda c, t=30, env=None: subprocess.CompletedProcess(c, 0, "", ""))
+    assert su.install_timer(5, True) is True
+    body = plist.read_text()
+    assert not FIXED_VERSION_FOLDER.search(body) and "plugins/cache" not in body and "restart_at_break.py" not in body
+    assert f"<string>{su.BIN}</string><string>--live</string>" in body and "/pit-stop/bin/pit-stop-restart" in su.BIN
 
 
 def test_G12_18_the_walk_covers_what_decides_what_runs():
