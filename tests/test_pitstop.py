@@ -4404,7 +4404,7 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
     import setup as su
     env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
     hits, unread, said = su.schedule_read(run_cmd=lambda cmd, t: None)        # crontab gave no answer at all
-    assert "crontab" in unread and "crontab" not in hits and said == "`crontab -l` gave no answer in 10 s"
+    assert "crontab" in unread and "crontab" not in hits and said == "crontab -l gave no answer in 10 s"
     assert su.schedule_read(run_cmd=lambda cmd, t: None, cron_none_said=True)[1] == []   # the person's word
     secret = subprocess.CompletedProcess(["crontab", "-l"], 0, "0 * * * * curl -H 'token: s3cret' x\n", "")
     assert su.schedule_read(run_cmd=lambda cmd, t: secret)[:2] == ([], [])       # read: none of it is said
@@ -4440,19 +4440,33 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
         assert "Fleet mode is NOT set up: no timer was made; step 6 says why and the next step." in r.stdout, case
         assert "fleet mode is set up" not in r.stdout, case
         if case.startswith("a unit"):
-            assert ("~/.config/systemd/user/my-fleet.service could not be read here; what it runs is not known. It is in "
-                    "your own folder: once you can read it (ls -l ~/.config/systemd/user/my-fleet.service), run this setup "
-                    "again.") in r.stdout, r.stdout[-800:]
+            assert "   ls -l ~/.config/systemd/user/my-fleet.service" in r.stdout.splitlines(), r.stdout[-800:]
+            assert ("   ~/.config/systemd/user/my-fleet.service could not be read here; what it runs is not known. It is "
+                    "in your own folder. To see why, run:\n   ls -l ~/.config/systemd/user/my-fleet.service\n   Once you can "
+                    "read it, run this setup again.\n") in r.stdout, r.stdout[-800:]
             continue
-        want = {"crontab not allowed": '`crontab -l` answered exit 1: "You (x) are not allowed to use this program (crontab)"',
-                "crontab killed": "`crontab -l` answered exit -9, with no words"}[case]
-        assert (f"your crontab: {want}, which is not the answer Pit Stop knows as \"none\". Run `crontab -l` yourself: if "
-                f"it shows no line with pit-stop-restart or restart_at_break.py, run this setup again with "
-                f"--crontab-has-no-pit-stop-line.") in r.stdout, r.stdout[-800:]
+        # rule 31 (B), read from the road that prints it (rule 31 (v)): no backtick on a line that names crontab, and
+        # the command the person is told to run stands on a line of its own, its last character the line's last
+        cron_lines = [ln for ln in r.stdout.splitlines() if "crontab" in ln]
+        assert cron_lines and not [ln for ln in cron_lines if "`" in ln], (case, cron_lines)
+        assert "   crontab -l" in r.stdout.splitlines(), (case, cron_lines)
+        want = {"crontab not allowed": 'crontab -l answered exit 1: "You (x) are not allowed to use this program (crontab)"',
+                "crontab killed": "crontab -l answered exit -9, with no words"}[case]
+        assert (f"   your crontab: {want}, which is not the answer Pit Stop knows as \"none\". Run this yourself:\n"
+                f"   crontab -l\n   If it shows no line with pit-stop-restart or restart_at_break.py, run this setup "
+                f"again with --crontab-has-no-pit-stop-line.\n") in r.stdout, r.stdout[-800:]
         r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--fleet",
                             "--crontab-has-no-pit-stop-line"], cwd=str(h2 / "proj"), env=e2, capture_output=True,
                            text=True, timeout=120)
         assert r.returncode == 0 and (u2 / "pit-stop-restart.timer").exists() and "fleet mode is set up" in r.stdout, r.stdout[-600:]
+
+    # rule 31 (B) on the --help road: the docstring and the option's own help both print there; no backtick on a
+    # line that names crontab
+    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--help"],
+                       env=dict(env, HOME=str(tmp_path), PATH=str(tmp_path / "help-stub")), capture_output=True, text=True,
+                       timeout=60)
+    helped = [ln for ln in r.stdout.splitlines() if "crontab" in ln]
+    assert r.returncode == 0 and len(helped) >= 2 and not [ln for ln in helped if "`" in ln], helped
 
     # the C language: a cron that says "none" in another language says it in its own words under LC_ALL=C.UTF-8
     # (rule 30 (3): a moved call is given "C.UTF-8", never plain "C")

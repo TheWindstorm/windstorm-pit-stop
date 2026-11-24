@@ -17,7 +17,7 @@ Options:
                               marketplace as it is
   --interval MIN              minutes between fleet runs (default 5)
   --crontab-has-no-pit-stop-line
-                              fleet mode: you ran `crontab -l` and it shows no
+                              fleet mode: you ran crontab -l and it shows no
                               Pit Stop line (setup asks for this only when it
                               could not read your crontab's answer itself)
   --days N                    days of history to read when tuning (default 14)
@@ -76,6 +76,7 @@ import argparse
 import glob
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -370,8 +371,8 @@ def schedule_read(run_cmd=None, cron_none_said=False):
         elif not (r and "no crontab for" in (r.stderr or "")) and not cron_none_said:
             unread.append("crontab")
             first = ((r.stderr or "").strip().splitlines() or [""])[0][:160] if r else ""
-            said = (f"`crontab -l` answered exit {r.returncode}" + (f": \"{first}\"" if first else ", with no words")
-                    if r else "`crontab -l` gave no answer in 10 s")
+            said = (f"crontab -l answered exit {r.returncode}" + (f": \"{first}\"" if first else ", with no words")
+                    if r else "crontab -l gave no answer in 10 s")
     return hits, unread, said
 
 
@@ -1059,7 +1060,7 @@ def main():
     ap.add_argument("--budget", choices=op.BUDGETS)
     ap.add_argument("--plugin-updates", choices=("pit-stop", "all", "off"), default="pit-stop")
     ap.add_argument("--crontab-has-no-pit-stop-line", action="store_true",
-                    help="you ran `crontab -l` and it shows no Pit Stop line: fleet setup may make its timer")
+                    help="you ran crontab -l and it shows no Pit Stop line: fleet setup may make its timer")
     a = ap.parse_args()
     if a.undo:
         for line in undo():
@@ -1207,12 +1208,15 @@ def main():
         files = [u.replace(pc.HOME, "~") for u in unread if u != "crontab"]
         print("6. timer: not checked, so no timer is made (never a second schedule):")
         for f in files:
-            print(f"   {f} could not be read here; what it runs is not known. It is in your own folder: once you can "
-                  f"read it (ls -l {f}), run this setup again.")
+            shown = "~/" + shlex.quote(f[2:]) if f.startswith("~/") else shlex.quote(f)   # rule 31 (iv): a name not ours
+            print(f"   {f} could not be read here; what it runs is not known. It is in your own folder. To see why, run:")
+            print(f"   ls -l {shown}")
+            print("   Once you can read it, run this setup again.")
         if "crontab" in unread:
-            print(f"   your crontab: {said}, which is not the answer Pit Stop knows as \"none\". Run `crontab -l` "
-                  f"yourself: if it shows no line with pit-stop-restart or restart_at_break.py, run this setup again "
-                  f"with --crontab-has-no-pit-stop-line.")
+            print(f"   your crontab: {said}, which is not the answer Pit Stop knows as \"none\". Run this yourself:")
+            print("   crontab -l")
+            print("   If it shows no line with pit-stop-restart or restart_at_break.py, run this setup again with "
+                  "--crontab-has-no-pit-stop-line.")
     else:
         print("6. timer:")
         placed = install_timer(max(2, min(a.interval, 30)), a.apply)

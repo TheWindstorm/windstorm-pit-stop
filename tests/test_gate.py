@@ -285,9 +285,13 @@ def test_G19_5_the_suite_never_uses_the_home_of_the_account_running_it(tmp_path)
 def test_G19_6_undo_in_the_suite_reaches_only_its_made_home(tmp_path, monkeypatch):
     """Seen 2026-11-24 03:32:14Z, before G19.5's guard: a test that moved only STATE_DIR called setup's undo, which
     with no record turns daily tuning off in pc.CONFIG, and that was this account's real config.json (and the real
-    settings.json's marketplace entry). Now: undo with nothing moved changes the made home's config.json, and the
-    real one's time and size do not move. The check is shown to see a move: pointed at a stand-in outside the made
-    home, the same undo moves that file's time."""
+    settings.json's marketplace entry). Now: before undo is called, every place it writes, by the module's own name,
+    resolves inside the run's made home, or the test stops having called nothing; undo then changes the made home's
+    config.json, and the real config.json's and settings.json's time and size do not move (stat only, never opened).
+    The check is shown to see a move: pointed at a stand-in outside the made home, the same undo moves that file.
+    G19.5's hook REPORTS a reach into the real home AFTER it happens (the test fails); it does not refuse it.
+    Not seen red on the code of 03:32Z: not run again, that run would be the fault itself; the control stands for red.
+    The place check was seen red with setup.SETTINGS alone moved outside the made home, before undo, nothing written."""
     import json
     import pwd
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
@@ -296,7 +300,15 @@ def test_G19_6_undo_in_the_suite_reaches_only_its_made_home(tmp_path, monkeypatc
     real_home = pwd.getpwuid(os.getuid()).pw_dir
     real = os.path.join(real_home, ".claude", "pit-stop", "config.json")
     real_settings = os.path.join(real_home, ".claude", "settings.json")
-    assert os.path.realpath(pc.CONFIG) != os.path.realpath(real), pc.CONFIG     # the module reads the made home
+    # Before undo is called, EVERY place it writes, each by the module's own name for it, lies INSIDE the run's made
+    # home: a world that moved only some of them (the fault of 03:32:14Z) stops here, having written nothing.
+    made = os.path.realpath(os.environ["HOME"])
+    assert made != os.path.realpath(real_home), ("the run's home is the real one", made)
+    places = {"pitstop_common.CONFIG": pc.CONFIG, "pitstop_common.STATE_DIR": pc.STATE_DIR,
+              "setup.SETTINGS": su.SETTINGS, "setup.UNDO": su.UNDO, "setup.BIN": su.BIN,
+              "setup.UNIT_DIR": su.UNIT_DIR, "setup.PLIST": su.PLIST}
+    outside = {k: v for k, v in places.items() if not os.path.realpath(v).startswith(made + os.sep)}
+    assert not outside, ("undo would write outside the run's made home; undo NOT called", outside)
 
     def mark(p):
         try:
