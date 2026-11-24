@@ -13,9 +13,9 @@ the plugin cache. It never runs code from a folder Claude Code marked
 orphaned (an .orphaned_at file).
 
 Once the plugin is gone it runs nothing and says so in the helper's log:
-seen 2026-11-23 (Claude Code 2.1.280), `claude plugin uninstall` empties the
-plugin's row in installed_plugins.json but leaves its cache folder, marked
-.orphaned_at. A registry that cannot be read is not "gone": that pass runs
+seen (Claude Code 2.1.280 and 2.1.331, Linux), `claude plugin uninstall` takes
+the plugin's entry off installed_plugins.json at once and leaves its cache
+folder, marked .orphaned_at. A registry that cannot be read is not "gone": that pass runs
 nothing, and the next one reads it again. "Gone" is said only when Claude
 Code's own list was read and names Pit Stop nowhere; a list that is not there
 is its own answer, never "not installed" (family rule 29 (e), G12.25).
@@ -81,8 +81,17 @@ def list_answer(claude_dir=None):
     plugins = data.get("plugins") if isinstance(data, dict) else None
     if not isinstance(plugins, dict):
         return "unreadable", None
-    return "read", [r for k, v in plugins.items() if k.split("@")[0] == PLUGIN and isinstance(v, list)
-                    for r in v if isinstance(r, dict)]
+    rows = []
+    for k, v in plugins.items():
+        if k.split("@")[0] != PLUGIN:
+            continue
+        # seen (2.1.331): a key holds rows, each with an installPath; uninstall takes the KEY away. A key with an
+        # empty list, a row with no installPath, or a key that is not a list was not seen: "could not be read".
+        if not isinstance(v, list) or not v or not all(
+                isinstance(r, dict) and isinstance(r.get("installPath"), str) and r["installPath"] for r in v):
+            return "unreadable", None
+        rows += v
+    return "read", rows
 
 
 def registry_rows(claude_dir=None):

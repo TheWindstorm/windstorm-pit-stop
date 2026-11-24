@@ -735,6 +735,22 @@ def test_G12_25_removed_is_said_only_from_claude_codes_own_list_read(tmp_path, m
     still reads the list of the folder setup ran for, and hands that folder to the helper."""
     launcher = _launcher()
     assert launcher.find(str(tmp_path)) == (None, "nolist") and launcher.state(None, str(tmp_path)) == "nolist"
+    # what Claude Code's list was SEEN to hold (2.1.331, Linux, read by the family's reviewer 2026-11-24): after
+    # install one row with an installPath; after `claude plugin uninstall` the plugin's KEY is gone. Only that is
+    # "not installed"; a key with an empty list, a row with no installPath, or a key that is not a list was not seen,
+    # so it is "could not be read" and nothing runs from a guess.
+    (tmp_path / "plugins").mkdir()
+    lst = tmp_path / "plugins" / "installed_plugins.json"
+    for shape, want in (({"other@x": [{"installPath": "/x"}]}, "gone"),
+                        ({"windstorm-pit-stop@thewindstorm": []}, "unreadable"),
+                        ({"windstorm-pit-stop@thewindstorm": [{"scope": "user", "version": "0.6.2"}]}, "unreadable"),
+                        ({"windstorm-pit-stop@thewindstorm": [{"installPath": ""}]}, "unreadable"),
+                        ({"windstorm-pit-stop@thewindstorm": {"installPath": "/x"}}, "unreadable"),
+                        ({"windstorm-pit-stop@thewindstorm": ["a string"]}, "unreadable")):
+        lst.write_text(json.dumps({"version": 2, "plugins": shape}))
+        assert launcher.state(None, str(tmp_path)) == want and launcher.find(str(tmp_path))[1] == want, shape
+    os.remove(lst)
+    os.rmdir(tmp_path / "plugins")
     for word in ("not installed", "removed from", "take it off"):
         assert word not in launcher.SAY["nolist"]
     ran = []

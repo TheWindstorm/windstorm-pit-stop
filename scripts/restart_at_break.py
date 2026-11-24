@@ -1350,9 +1350,9 @@ def timer_off_command():
 
 def gone_line(here=None):
     """None while Pit Stop is installed and HERE (this helper's plugin folder) is not one Claude Code left
-    behind; else the one line a pass logs before it does nothing (G12.8). Seen 2026-11-23 (Claude Code
-    2.1.280): `claude plugin uninstall` empties the registry row and leaves the cache folder, marked
-    .orphaned_at. A registry that cannot be read is not "gone": that pass changes no session, and the line
+    behind; else the one line a pass logs before it does nothing (G12.8). Seen (Claude Code 2.1.280 and
+    2.1.331, Linux): `claude plugin uninstall` takes the plugin's entry off the list at once and leaves the
+    cache folder, marked .orphaned_at. A registry that cannot be read is not "gone": that pass changes no session, and the line
     neither says Pit Stop is not installed nor advises taking the timer off."""
     import launcher
     here = here or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
