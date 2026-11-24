@@ -359,6 +359,8 @@ def open_scan(home=None):
     def add(p):
         try:
             st = os.lstat(p)
+        except FileNotFoundError:                       # gone since it was listed: nothing there to be open
+            return
         except OSError:
             unread.append(p)
             return
@@ -405,6 +407,8 @@ def open_scan(home=None):
             seen.add(r)
             try:
                 st = os.lstat(d)
+            except FileNotFoundError:                   # not there (no Pit Stop state yet): nothing to be open
+                continue
             except OSError:
                 unread.append(d)
                 continue
@@ -418,6 +422,8 @@ def open_scan(home=None):
             p = os.path.join(d, x)
             try:
                 st = os.lstat(p)
+            except FileNotFoundError:
+                continue
             except OSError:
                 unread.append(p)
                 continue

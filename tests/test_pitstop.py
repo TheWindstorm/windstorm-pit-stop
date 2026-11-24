@@ -3958,5 +3958,12 @@ def test_G12_15_a_private_group_of_one_is_not_another_account():
                                "('b', 6, 1)], ['b', 'ghost'], 5))))", os.path.join(ROOT, "scripts")],
                               env=env, capture_output=True, text=True, timeout=60)
         assert pure.stdout.strip() == "['6', 'ghost']", pure.stderr       # the number, not the name; 0 is the administrator
+        bare = tmp_path / "bare"                                       # no ~/.claude yet (a Mac read): missing is not unreadable
+        bare.mkdir()
+        os.chmod(bare, 0o755)
+        r = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import needs_you as ny; "
+                            "print(ny.open_now())", os.path.join(ROOT, "scripts")],
+                           env=dict(env, HOME=str(bare), CLAUDE_CONFIG_DIR=str(bare / ".claude")), capture_output=True, text=True, timeout=60)
+        assert r.stdout.strip() == "[]", r.stdout + r.stderr[-400:]
     finally:
         shutil.rmtree(tmp_path)
