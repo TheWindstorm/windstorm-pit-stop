@@ -198,6 +198,11 @@ def pytest_sessionfinish(session, exitstatus):
     _run["whole"] = whole
     _run["lines"] = here + (["partial run: rows and codons not checked"] if not whole else []) + \
         [f"G19 gate: {p}" for p in problems]
+    if whole and not problems:                         # a pass is said by the gate itself, never by a count alone
+        need = _gate.required(ROOT)
+        passed = sum(1 for t in need if (_gate.outcome(results.get(t) or []) or ("",))[0] == "passed")
+        _run["lines"].append(f"G19 gate PASSED: whole run; {passed} of {len(need)} named proofs passed; 0 problems"
+                             + (f" ({len(need) - passed} not run here, listed above)" if passed < len(need) else ""))
     if problems:
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 

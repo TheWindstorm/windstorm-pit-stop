@@ -139,8 +139,13 @@ def test_G19_1_a_built_proof_that_did_not_pass_fails_the_whole_run(tmp_path):
     good = _world(tmp_path / "good", "def test_G1_1_good():\n    assert True\n", {"1": "good"}, rows=["test_G1_1_good"])
     code, out = _pytest(good, "-v")
     assert code == 0 and _gate_lines(out) == [] and "partial run" not in out, out
+    # a pass is said by the gate itself, in its own line (a count alone is not a verdict)
+    assert "G19 gate PASSED: whole run; 1 of 1 named proofs passed; 0 problems" in out, out
     code, out = _pytest(root, "-v", "-k", "good")
     assert code == 0 and "partial run: rows and codons not checked" in out and _gate_lines(out) == [], out
+    assert "G19 gate PASSED" not in out, out
+    code, out = _pytest(root, "-v")
+    assert code == 1 and "G19 gate PASSED" not in out, out
 
 
 def test_G19_1_a_rows_test_counts_the_same_way(tmp_path):
