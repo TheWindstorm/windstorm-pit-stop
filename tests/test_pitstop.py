@@ -743,8 +743,9 @@ def test_G12_25_removed_is_said_only_from_claude_codes_own_list_read(tmp_path, m
     monkeypatch.setattr(sys, "argv", ["pit-stop-restart", "--live"])
     assert launcher.main() == 0 and ran == []
     last = (tmp_path / "pit-stop" / "restart" / "restart.log").read_text().splitlines()[-1]
-    assert "is not there" in last and str(tmp_path) in last, last
-    assert "not installed" not in last and "take it off" not in last, last
+    assert "could not be read: plugins/installed_plugins.json is not there" in last and str(tmp_path) in last, last
+    assert "not installed" not in last and "take it off" not in last and "names" not in last, last
+    assert "If Claude Code was removed from this machine, or this folder was, the way off is: " in last, last
     # the real road: a launcher copy in a Claude folder that is not ~/.claude, run with no CLAUDE_CONFIG_DIR
     import shutil
     home, cfg = tmp_path / "home", tmp_path / "cfg"
@@ -4564,6 +4565,47 @@ def test_G12_23_nothing_setup_writes_names_a_plugin_cache_folder(tmp_path, monke
     assert not FIXED_VERSION_FOLDER.search(body) and "plugins/cache" not in body and "restart_at_break.py" not in body
     assert f"<string>{su.BIN}</string><string>--live</string>" in body and "/pit-stop/bin/pit-stop-restart" in su.BIN
 
+
+
+def test_G12_23_setup_run_from_a_cache_version_folder_writes_that_path_nowhere(tmp_path):
+    """Family rule 29 (a), AN ANSWER TO (a) IS THE TEST'S OUTCOME, NEVER A READING: a copy of the plugin is put in a
+    made-up <home>/.claude/plugins/cache/<catalog>/<plugin>/<version>/ folder, Claude Code's list names it, setup
+    --fleet --apply runs FROM there, and every file setup wrote or changed (records included: the undo ledger,
+    config.json, settings.json, released.json, restart.json, the launcher copy, the unit and timer) is read byte by
+    byte for that folder's path. The only files that may hold it are Claude Code's own list and the copy itself."""
+    import shutil
+    home, stub = tmp_path / "home", tmp_path / "stub"
+    (home / "proj").mkdir(parents=True)
+    stub.mkdir()
+    for n, b in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
+        (stub / n).write_text(f"#!/bin/sh\n{b}\n")
+        os.chmod(stub / n, 0o755)
+    cfg = home / ".claude"
+    ver = cfg / "plugins" / "cache" / "thewindstorm" / "windstorm-pit-stop" / "0.6.2"
+    for part in ("scripts", "hooks", "skills", ".claude-plugin"):
+        shutil.copytree(os.path.join(ROOT, part), ver / part, ignore=shutil.ignore_patterns("__pycache__"))
+    reg = cfg / "plugins" / "installed_plugins.json"
+    reg.write_text(json.dumps({"version": 2, "plugins": {"windstorm-pit-stop@thewindstorm": [
+        {"scope": "user", "installPath": str(ver), "version": "0.6.2"}]}}))
+    (cfg / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thewindstorm": {
+        "source": {"source": "github", "repo": "TheWindstorm/windstorm-pit-stop"}, "installLocation": str(
+            cfg / "plugins" / "marketplaces" / "thewindstorm")}}))
+    (cfg / "settings.json").write_text(json.dumps({"enabledPlugins": {"windstorm-pit-stop@thewindstorm": True},
+                                                   "extraKnownMarketplaces": {}}, indent=2))
+    before = {f: f.stat().st_mtime_ns for f in home.rglob("*") if f.is_file()}
+    r = subprocess.run([sys.executable, "-I", str(ver / "scripts" / "setup.py"), "--apply", "--fleet", "--no-tune-now"],
+                       cwd=str(home / "proj"), env={"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home),
+                                                    "PATH": str(stub), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
+                       capture_output=True, text=True, timeout=120)
+    unit = home / ".config" / "systemd" / "user" / "pit-stop-restart.service"
+    assert unit.exists() and "fleet mode is set up" in r.stdout, r.stdout[-1500:] + r.stderr[-800:]
+    wrote = [f for f in home.rglob("*") if f.is_file() and not str(f).startswith(str(ver) + os.sep) and f != reg
+             and before.get(f) != f.stat().st_mtime_ns]
+    names = {f.name for f in wrote}
+    for must in ("pit-stop-restart", "restart.json", "pit-stop-restart.service", "pit-stop-restart.timer"):
+        assert must in names, (must, sorted(names))
+    hits = [str(f.relative_to(home)) for f in wrote if str(ver).encode() in f.read_bytes()]
+    assert hits == [], f"setup wrote the cache version folder's path into: {hits}"
 
 def test_G12_18_the_walk_covers_what_decides_what_runs():
     """Rule 28, WHAT RUNS INCLUDES WHAT DECIDES WHAT RUNS: besides Pit Stop's own settings, launcher, timer and

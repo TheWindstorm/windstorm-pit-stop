@@ -57,8 +57,8 @@ SAY = {
     "gone": "Pit Stop is not installed (Claude Code's plugin registry has no windstorm-pit-stop row)",
     "orphaned": "this Pit Stop folder was left by Claude Code after an uninstall or update (it carries .orphaned_at)",
     "unreadable": "Claude Code's plugin registry could not be read; no session changed this pass, the next pass reads it again",
-    "nolist": ("Claude Code's plugin list (plugins/installed_plugins.json) is not there in the Claude folder this run "
-               "reads; no session changed this pass, the next pass reads it again"),
+    "nolist": ("Claude Code's plugin list could not be read: plugins/installed_plugins.json is not there in the Claude "
+               "folder this run reads; no session changed this pass, the next pass reads it again"),
     "missing": "no folder Claude Code recorded for Pit Stop holds its helper",
 }
 
@@ -164,8 +164,10 @@ def note(line, claude_dir=None):
 def main():
     root, why = find()
     if not root:
+        off = timer_off() or "see \"Leaving Pit Stop\" in Pit Stop's README"
         note(f"pit-stop launcher: nothing run: {SAY[why]}" + (" " + gone_advice() if why == "gone" else "")
-             + (f" (folder read: {CLAUDE_DIR})" if why == "nolist" else ""))
+             + (f" (folder read: {CLAUDE_DIR}). If Claude Code was removed from this machine, or this folder was, "
+                f"the way off is: {off}" if why == "nolist" else ""))
         return 0
     env = dict(os.environ, PIT_STOP_LAUNCHER="1")   # the helper then knows it follows plugin updates
     if CLAUDE_DIR != DEFAULT_DIR and not env.get("CLAUDE_CONFIG_DIR"):
