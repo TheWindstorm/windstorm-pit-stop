@@ -389,6 +389,14 @@ RUN_BOUND = 960   # rule 30: a run's longest road by the helper's own limits: Cl
 WAIT_STEP = 5
 
 
+def setup_again():
+    """This setup's own command line, whole, as it was run (rule 30: the one next step is the tool's own command),
+    quoted for a shell."""
+    import shlex
+    argv = getattr(sys, "orig_argv", None) or ([sys.executable] + (["-I"] if sys.flags.isolated else []) + sys.argv)
+    return " ".join(shlex.quote(a) for a in argv)
+
+
 def job_state(job):
     """launchd's own word for JOB's run, from the job's state line in `launchctl print` (one tab in; the lines two
     tabs in belong to its parts): 'not running', 'running' (any other word), or None when it could not be read."""
@@ -457,7 +465,8 @@ def install_timer(interval, apply):
                 ended = run_has_ended(job)
                 if ended != "ended":
                     print(f"    written; launchd's job {ended}, so it was not taken off: nothing was cut. When the run "
-                          f"has ended: launchctl bootout {job}, then launchctl bootstrap gui/{os.getuid()} {PLIST}")
+                          f"has ended, run this setup again (it then finds the job not in a run and loads this file "
+                          f"itself): {setup_again()}")
                     return True
                 run(["launchctl", "bootout", job])
                 for _ in range(20):          # bootout is not done when it returns: wait until launchd lets go
@@ -491,7 +500,7 @@ def install_timer(interval, apply):
     os.makedirs(UNIT_DIR, exist_ok=True)
     with open(svc, "w") as f:
         f.write(f"[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
-                f"Environment=PATH={timer_path()}\nExecStart={py} -I {BIN} --live\nTimeoutStartSec=600\nNice=10\n")
+                f"Environment=PATH={timer_path()}\nExecStart={py} -I {BIN} --live\nTimeoutStartSec=1200\nNice=10\n")
     with open(tmr, "w") as f:
         f.write(f"[Unit]\nDescription=Windstorm Pit Stop every {interval} minutes\n\n[Timer]\nOnBootSec=3min\n"
                 f"OnUnitActiveSec={interval}min\nAccuracySec=20s\n\n[Install]\nWantedBy=timers.target\n")

@@ -1141,6 +1141,7 @@ def handle(s, newest, target, now, counts):
 
 PIT_STOP = "windstorm-pit-stop"
 UPDATE_BUDGET = 300   # seconds one run may spend on plugin updates in all
+CLAUDE_UPDATE_LIMIT = 600   # seconds Claude Code's own update may take (setup.py's unit limit and RUN_BOUND add these)
 
 
 def plugin_update_targets(scope, installed=None):
@@ -1326,7 +1327,7 @@ def update_claude_code(now, run=None, machine=None):
         return None
     pc.write_json_atomic(stampf, {"released": m.get("released"), "at": now, "cmd": plan}, mode=0o644)  # first
     try:
-        r = run(plan, 600)
+        r = run(plan, CLAUDE_UPDATE_LIMIT)
         ok = r.returncode == 0
         tail = ((r.stdout or "") + (r.stderr or "")).strip().splitlines()
         first = (tail[-1] if tail else "")[:200]

@@ -4753,8 +4753,10 @@ def test_G12_26_setup_loads_the_job_file_it_wrote_over_a_job_already_loaded(tmp_
     out = capsys.readouterr().out
     assert "launchctl bootout" not in calls and "launchctl bootstrap" not in calls, calls
     assert calls.count("launchctl print") <= su.RUN_BOUND // 5 + 2, len(calls)
-    assert (f"still in a run after {su.RUN_BOUND} s, so it was not taken off: nothing was cut. When the run has ended: "
-            f"launchctl bootout gui/{uid}/{label}, then launchctl bootstrap gui/{uid} {su.PLIST}") in out, out
+    again = ("When the run has ended, run this setup again (it then finds the job not in a run and loads this file "
+             f"itself): {su.setup_again()}")
+    assert f"still in a run after {su.RUN_BOUND} s, so it was not taken off: nothing was cut. {again}" in out, out
+    assert "launchctl bootout" not in out and "launchctl bootstrap" not in out, out   # the tool's own step, not launchd's
     # a state that cannot be read is not "not running": nothing taken off
     os.remove(su.PLIST)
     calls = world(True, 3)
@@ -4763,6 +4765,36 @@ def test_G12_26_setup_loads_the_job_file_it_wrote_over_a_job_already_loaded(tmp_
     assert su.install_timer(5, True) is True
     out = capsys.readouterr().out
     assert "launchctl bootout" not in calls and "could not be read, so it was not taken off" in out, (calls, out)
+    assert again in out and "launchctl bootout" not in out, out
+    # the whole command line is the one this setup was run with, quoted for a shell
+    monkeypatch.setattr(su.sys, "orig_argv", ["/usr/bin/python3", "-I", "/a b/scripts/setup.py", "--fleet", "--apply"],
+                        raising=False)
+    assert su.setup_again() == "/usr/bin/python3 -I '/a b/scripts/setup.py' --fleet --apply", su.setup_again()
+
+def test_G12_28_the_services_time_limit_is_above_the_runs_longest_road(tmp_path, monkeypatch):
+    """Family rule 30 (ii): at the unit's time limit systemd ends the whole group wherever it is, an update of Claude
+    Code or of a plugin in the middle included. So the limit setup writes must be above the helper's own longest
+    road, added from the helper's own limits (read from its code, not copied here): Claude Code's update, then the
+    plugin updates' budget, plus 60 s for the rest; and RUN_BOUND, the wait setup and undo use, is that road."""
+    import ast
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    src = open(os.path.join(ROOT, "scripts", "restart_at_break.py"), encoding="utf-8").read()
+    consts = {t.id: n.value.value for n in ast.parse(src).body if isinstance(n, ast.Assign)
+              for t in n.targets if isinstance(t, ast.Name) and isinstance(n.value, ast.Constant)}
+    road = consts["CLAUDE_UPDATE_LIMIT"] + consts["UPDATE_BUDGET"] + 60
+    assert "run(plan, CLAUDE_UPDATE_LIMIT)" in src, "Claude Code's update runs under the named limit"
+    assert su.RUN_BOUND >= road, (su.RUN_BOUND, road)
+    monkeypatch.setattr(su, "UNIT_DIR", str(tmp_path / "units"))
+    monkeypatch.setattr(su, "UNDO", str(tmp_path / "setup-undo.json"))
+    monkeypatch.setattr(su, "BIN", str(tmp_path / "bin" / "pit-stop-restart"))
+    monkeypatch.setattr(su.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(su, "run", lambda cmd, timeout=30, env=None: subprocess.CompletedProcess(cmd, 0, "", ""))
+    assert su.install_timer(5, True) is True
+    unit = (tmp_path / "units" / "pit-stop-restart.service").read_text()
+    limits = re.findall(r"^TimeoutStartSec=(\d+)$", unit, re.M)
+    assert len(limits) == 1 and int(limits[0]) > su.RUN_BOUND, (limits, su.RUN_BOUND, unit)
+
 
 def test_G12_18_the_walk_covers_what_decides_what_runs():
     """Rule 28, WHAT RUNS INCLUDES WHAT DECIDES WHAT RUNS: besides Pit Stop's own settings, launcher, timer and

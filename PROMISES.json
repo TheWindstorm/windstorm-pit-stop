@@ -320,7 +320,7 @@
   {
    "id": "P32",
    "seen": "2026-11-24, reading `setup --undo` against family rule 30 (setup.py undo() at the 0.6.2 branch's head that day): on Linux it sends `systemctl --user disable --now pit-stop-restart.timer` and reads no answer, never names pit-stop-restart.service, removes both unit files and prints \"stopped and removed\"; from a shell with no user bus that stop is refused (\"Failed to connect to bus\") and the same line is printed over a timer the account's manager still runs. On a Mac `launchctl bootout` is not read either (an account not logged in at the screen answers 125). A run in flight goes on after \"off\". Released 0.6.1 does the same. By the code; the stock-VM sitting that night walks it, and its version is set after that sighting.",
-   "promise": "`setup --undo` stops pit-stop-restart.timer (no new run starts) and sends no stop, restart or kill to pit-stop-restart.service, which ends the whole group wherever it is (Claude Code's update, a plugin update or the typing into a person's pane cut in the middle); while a run is in flight it waits, a line a minute, up to the run's own bound (Linux: the unit's TimeoutStartSec plus systemd's stop time; Mac: launchd sets no limit, so the helper's longest road, 960 s), removing nothing, and the person can leave; then it reads the timer and the service off (Linux: the `is-active` and `is-enabled` words with their exit codes, a user bus that cannot connect being \"could not be read\"; Mac: launchd's state word reads \"not running\", then bootout, then `launchctl print` 113) before it removes anything; while any is not read off it removes nothing, says what was read and \"nothing was removed\", and names the one step as a whole command line. A test reads the tool's own code for every stop it can send to that unit.",
+   "promise": "`setup --undo` stops pit-stop-restart.timer (no new run starts) and sends no stop, restart or kill to pit-stop-restart.service, since a stop of it ends the whole group wherever it is (Claude Code's update, a plugin update or the typing into a person's pane cut in the middle); while a run is in flight it waits, a line a minute, up to the run's own bound (Linux: the unit's TimeoutStartSec plus systemd's stop time; Mac: launchd sets no limit, so the helper's longest road, 960 s), removing nothing, and the person can leave; then it reads the timer and the service off (Linux: the `is-active` and `is-enabled` words with their exit codes, a user bus that cannot connect being \"could not be read\"; Mac: launchd's state word reads \"not running\", then bootout, then `launchctl print` 113) before it removes anything; while any is not read off it removes nothing, says what was read and \"nothing was removed\", and names the one step as a whole command line. A test reads the tool's own code for every stop it can send to that unit.",
    "codon": "G12.27",
    "issue": null,
    "owner": "maintainer",
@@ -338,9 +338,9 @@
    "codon": "G12.28",
    "issue": null,
    "owner": "maintainer",
-   "first_ship_in": "0.6.3",
-   "ship_in": "0.6.3",
-   "test": "",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "test_G12_28_the_services_time_limit_is_above_the_runs_longest_road",
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
