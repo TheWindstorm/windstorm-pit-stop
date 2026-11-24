@@ -481,6 +481,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.26 Setup loads the job file it wrote, even over a job already loaded.** On a Mac, when Pit Stop's job is loaded and its file was gone, setup takes the loaded job off, waits until launchd reads it as not loaded, then loads the file it wrote; if launchd still refuses, it prints bootout then bootstrap, the two commands that work. A job not loaded is loaded as before (family rule 30). Proof: `test_G12_26_setup_loads_the_job_file_it_wrote_over_a_job_already_loaded`.
 
+**G12.27 Undo says off only when it read the timer and its service off (open).** `setup --undo` sends the stop to pit-stop-restart.timer AND pit-stop-restart.service on every run, reads each (rule 6: off, still there, or could not be read: a user bus that cannot connect is could not be read), and while any is not read off it removes nothing more and names the one step as a whole command line (family rule 30). Proof: `test_G12_27_undo_says_off_only_when_it_read_the_timer_and_its_service_off`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

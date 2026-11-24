@@ -316,6 +316,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P32",
+   "seen": "2026-11-24, reading `setup --undo` against family rule 30 (setup.py undo() at the 0.6.2 branch's head that day): on Linux it sends `systemctl --user disable --now pit-stop-restart.timer` and reads no answer, never names pit-stop-restart.service, removes both unit files and prints \"stopped and removed\"; from a shell with no user bus that stop is refused (\"Failed to connect to bus\") and the same line is printed over a timer the account's manager still runs. On a Mac `launchctl bootout` is not read either (an account not logged in at the screen answers 125). A run in flight goes on after \"off\". Released 0.6.1 does the same. By the code; the stock-VM sitting that night walks it, and its version is set after that sighting.",
+   "promise": "`setup --undo` stops the timer and its service and reads each one off before it removes anything (Linux: the `is-active` and `is-enabled` words with their exit codes, a user bus that cannot connect being \"could not be read\"; Mac: `launchctl print` 113, or 125 for the whole domain, after a bounded wait); while any is not read off it removes nothing more, says what was read, what is already off and \"nothing was removed\", and names the one step as a whole command line.",
+   "codon": "G12.27",
+   "issue": null,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "test": "test_G12_27_undo_says_off_only_when_it_read_the_timer_and_its_service_off",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
