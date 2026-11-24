@@ -4445,6 +4445,31 @@ def test_G12_22_launchd_answers_as_seen(tmp_path, monkeypatch):
     assert "launchctl print gui/" in su.fleet_stop_line("unread", su.LAUNCHD_LABEL, False, True)
 
 
+
+def test_G12_24_a_group_number_the_system_refuses_is_said_and_the_walk_goes_on(monkeypatch):
+    """Family rule 28's A REAL MAC BEFORE THE TAG paragraph: on two Macs (macOS 13.7.8, 27.2.1; Apple's python3
+    3.9.6) 28 account entries carry the "nobody" group 4294967294, and Python refuses it written as -2
+    (OverflowError: gid is less than minimum). Read on both Macs 2026-11-24: os.stat gives
+    4294967294 and grp.getgrgid answers it, so Pit Stop's walk did not meet it; but a group number the system
+    refuses must give "could not be read" for that group (rule 6) and the walk goes on, never a traceback."""
+    import grp
+    import setup as su
+    assert su.group_members(-2) is None                             # the real call: refused on Linux and macOS
+    for exc in (OverflowError("gid is less than minimum"), ValueError("not a group number"), TypeError("bad")):
+        monkeypatch.setattr(grp, "getgrgid", lambda g, e=exc: (_ for _ in ()).throw(e))
+        assert su.group_members(4294967294) is None, exc
+    monkeypatch.setattr(grp, "getgrgid", lambda g: (_ for _ in ()).throw(OverflowError("gid is less than minimum")))
+    import shutil
+    base = _open_home()
+    try:
+        f = base / "pit-stop-file"
+        f.write_text("x")
+        os.chmod(f, 0o664)                                          # group write: the walk must ask the group
+        note = su.exposure(str(f), 0o100664)
+        assert note == f" (the members of group {os.stat(f).st_gid} could not be read)", note   # said; walk ended
+    finally:
+        shutil.rmtree(base)
+
 FIXED_VERSION_FOLDER = re.compile(r"plugins/cache/[^\s<>\"']+/\d+\.\d+\.\d+")   # a path into ONE version folder
 
 

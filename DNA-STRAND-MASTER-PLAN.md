@@ -473,6 +473,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.23 Nothing setup writes names a plugin cache version folder.** Claude Code's documentation says it removes a plugin's old version folder 14 days after an update. The launcher copy, restart.json, the systemd unit and timer, and the macOS job file name no path in the plugin cache; the timer runs the launcher copy, which finds the installed folder each run (family rule 29). Proof: `test_G12_23_nothing_setup_writes_names_a_plugin_cache_folder`.
 
+**G12.24 A group number the system refuses is said, and the walk goes on.** `group_members()` in `scripts/setup.py` gives "could not be read" for a group whose number the system refuses (OverflowError, ValueError, TypeError), as for a group with no entry; the folder walk names that group as not read and goes on, never a traceback (family rule 28, A REAL MAC BEFORE THE TAG; the Mac's "nobody" group 4294967294 written as -2). Proof: `test_G12_24_a_group_number_the_system_refuses_is_said_and_the_walk_goes_on`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

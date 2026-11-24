@@ -454,14 +454,15 @@ def accounts_in_group(gid, passwd, listed, me):
 
 
 def group_members(gid):
-    """accounts_in_group for this system, or None when the group cannot be read (no such group entry, or no
-    grp/pwd here)."""
+    """accounts_in_group for this system, or None when the group cannot be read (no such group entry, no
+    grp/pwd here, or a group number the system refuses: Python refuses the Mac's "nobody" group written as -2 with
+    OverflowError; that group is then "could not be read" and the walk goes on, never a traceback)."""
     try:
         import grp
         import pwd
         passwd = [(p.pw_name, p.pw_uid, p.pw_gid) for p in pwd.getpwall()]
         listed = grp.getgrgid(gid).gr_mem
-    except (ImportError, KeyError, OSError):
+    except (ImportError, KeyError, OSError, OverflowError, ValueError, TypeError):
         return None
     return accounts_in_group(gid, passwd, listed, os.getuid())
 
