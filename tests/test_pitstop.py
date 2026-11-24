@@ -3705,3 +3705,53 @@ def test_G12_10_undo_names_only_what_pit_stop_wrote(tmp_path, monkeypatch, capsy
     assert "autotune.log" in left and "notes.txt" not in left and "theirs" not in left
     assert "2 other file(s) or folder(s) this version of Pit Stop did not write; they stay." in out
     assert (st / "notes.txt").exists() and (st / "theirs").is_dir()
+
+
+def test_G12_11_undo_removes_only_timer_files_setup_wrote(tmp_path, monkeypatch):
+    import pitstop_common as pc
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    st, units = tmp_path / "state", tmp_path / "units"
+    st.mkdir()
+    units.mkdir()
+    bin_, plist, ledger = st / "bin" / "pit-stop-restart", tmp_path / "LaunchAgents" / "x.plist", st / "setup-undo.json"
+    for mod, k, v in ((pc, "STATE_DIR", str(st)), (su, "UNDO", str(ledger)), (su, "BIN", str(bin_)),
+                      (su, "UNIT_DIR", str(units)), (su, "PLIST", str(plist))):
+        monkeypatch.setattr(mod, k, v)
+    ran = []
+    monkeypatch.setattr(su, "run", lambda cmd, timeout=30: ran.append(cmd) or None)
+    monkeypatch.setattr(su.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(su, "already_scheduled", lambda: [])
+    svc, tmr = units / "pit-stop-restart.service", units / "pit-stop-restart.timer"
+    undo = lambda: "\n".join(su.undo(ledger=str(ledger), run_cmd=lambda c: ran.append(c) or (0, "")))
+    # 1. a person's files of the same names: setup does not overwrite them, undo names them and leaves them
+    svc.write_text("[Service]\nExecStart=/home/me/my-own-thing\n")
+    tmr.write_text("[Timer]\nOnCalendar=hourly\n")
+    su.install_timer(5, True)
+    assert "my-own-thing" in svc.read_text() and "hourly" in tmr.read_text()
+    out = undo()
+    assert svc.exists() and tmr.exists() and "not written by Pit Stop's setup: left as they are" in out
+    assert ["systemctl", "--user", "disable", "--now", "pit-stop-restart.timer"] not in ran
+    # 2. files setup wrote (recorded): undo stops and removes them
+    svc.unlink(), tmr.unlink()
+    su.install_timer(5, True)
+    assert "Windstorm Pit Stop" in svc.read_text()
+    ran.clear()
+    out = undo()
+    assert not svc.exists() and not tmr.exists() and "stopped and removed" in out
+    assert ["systemctl", "--user", "disable", "--now", "pit-stop-restart.timer"] in ran
+    # 3. recorded, then changed by the person: the record decides, it stays
+    su.install_timer(5, True)
+    svc.write_text(svc.read_text() + "# mine now\n")
+    out = undo()
+    assert svc.exists() and "left as they are" in out
+    # 4. no record (a setup before 0.6.2) but Pit Stop's mark: ours, removed
+    ledger.unlink(missing_ok=True)
+    out = undo()
+    assert not svc.exists() and not tmr.exists()
+    # 5. a launcher that is not ours: setup does not overwrite it, undo leaves it and says so
+    bin_.parent.mkdir(parents=True, exist_ok=True)
+    bin_.write_text("#!/bin/sh\necho mine\n")
+    assert not su.ours(str(bin_))
+    out = undo()
+    assert bin_.read_text() == "#!/bin/sh\necho mine\n" and "launcher" in out and "left as it is" in out

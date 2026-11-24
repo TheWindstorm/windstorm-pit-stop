@@ -83,6 +83,32 @@ UNIT_DIR = os.path.join(pc.HOME, ".config", "systemd", "user")
 PLIST = os.path.join(pc.HOME, "Library", "LaunchAgents", "ai.thewindstorm.pit-stop-restart.plist")
 UNDO = os.path.join(pc.STATE_DIR, "setup-undo.json")
 
+# What marks a timer file or the launcher as Pit Stop's when the ledger has no record of it (a setup before 0.6.2).
+MARKS = ("Description=Windstorm Pit Stop", "<string>ai.thewindstorm.pit-stop-restart</string>",
+         '"""Pit Stop launcher: one fixed path for timers')
+
+
+def ours(path, ledger=None):
+    """True when PATH is a file setup wrote: its sha256 is the one the ledger recorded for it, or (no record)
+    it carries Pit Stop's own mark. A file of the same name with other content is not ours (rule 23, G12.11)."""
+    if not os.path.isfile(path):
+        return False
+    rec = (pc.read_json(ledger or UNDO, {}) or {}).get("files")
+    want = (rec.get(path) or {}).get("set") if isinstance(rec, dict) and isinstance(rec.get(path), dict) else None
+    if want:
+        return sha(path) == want
+    try:
+        with open(path, errors="replace") as f:
+            head = f.read(4096)
+    except OSError:
+        return False
+    return any(m in head for m in MARKS)
+
+
+def keep_record(path):
+    """Record in the ledger the sha256 of a file setup just wrote, so --undo removes it only while unchanged."""
+    wrote(UNDO, "files", sha(path), sub=path)
+
 
 def note(ledger, key, value, sub=None):
     """Keep in LEDGER what was there before setup's first change of KEY (or of KEY's SUB): a later
@@ -207,15 +233,23 @@ def install_timer(interval, apply):
 </dict></plist>
 """
         print(f"  timer: {PLIST} (launchd, every {interval} min)")
+        if os.path.exists(PLIST) and not ours(PLIST):
+            print(f"    {PLIST} exists and is not Pit Stop's: left as it is, no timer written")
+            return
         if apply:
             os.makedirs(os.path.dirname(PLIST), exist_ok=True)
             with open(PLIST, "w") as f:
                 f.write(body)
+            keep_record(PLIST)
             r = run(["launchctl", "bootstrap", f"gui/{os.getuid()}", PLIST])
             print("    loaded" if r and r.returncode == 0 else f"    written; load it with: launchctl bootstrap gui/{os.getuid()} {PLIST}")
         return
     svc, tmr = os.path.join(UNIT_DIR, "pit-stop-restart.service"), os.path.join(UNIT_DIR, "pit-stop-restart.timer")
     print(f"  timer: {tmr} (systemd user timer, every {interval} min)")
+    theirs = [f for f in (svc, tmr) if os.path.exists(f) and not ours(f)]
+    if theirs:
+        print(f"    {', '.join(theirs)} exist(s) and are not Pit Stop's: left as they are, no timer written")
+        return
     if not apply:
         return
     os.makedirs(UNIT_DIR, exist_ok=True)
@@ -225,6 +259,7 @@ def install_timer(interval, apply):
     with open(tmr, "w") as f:
         f.write(f"[Unit]\nDescription=Windstorm Pit Stop every {interval} minutes\n\n[Timer]\nOnBootSec=3min\n"
                 f"OnUnitActiveSec={interval}min\nAccuracySec=20s\n\n[Install]\nWantedBy=timers.target\n")
+    keep_record(svc), keep_record(tmr)
     ok = all((r := run(c)) and r.returncode == 0 for c in (["systemctl", "--user", "daemon-reload"],
                                                            ["systemctl", "--user", "enable", "--now", "pit-stop-restart.timer"]))
     print("    enabled and started" if ok else "    written; start it with: systemctl --user daemon-reload && "
@@ -310,23 +345,31 @@ def undo(ledger=None, run_cmd=None):
                                       "each step says what it could tell)")]
     home = lambda p: p.replace(pc.HOME, "~")            # noqa: E731
 
-    # 1. timer and launcher
+    # 1. timer and launcher: only files setup wrote (its record, or Pit Stop's mark); others are named and left (G12.11)
     svc, tmr = os.path.join(UNIT_DIR, "pit-stop-restart.service"), os.path.join(UNIT_DIR, "pit-stop-restart.timer")
-    if os.path.exists(tmr) or os.path.exists(svc):
+    units = [f for f in (svc, tmr) if os.path.exists(f)]
+    if units and all(ours(f, ledger) for f in units):
         run_cmd(["systemctl", "--user", "disable", "--now", "pit-stop-restart.timer"])
-        for f in (tmr, svc):
-            if os.path.exists(f):
-                os.remove(f)
+        for f in units:
+            os.remove(f)
         run_cmd(["systemctl", "--user", "daemon-reload"])
         out.append(f"1. timer: stopped and removed {home(tmr)} and its .service")
-    elif os.path.exists(PLIST):
+    elif units:
+        out.append(f"1. timer: {', '.join(home(f) for f in units)} not written by Pit Stop's setup: left as they are. "
+                   f"To switch it off: systemctl --user disable --now pit-stop-restart.timer")
+    elif os.path.exists(PLIST) and ours(PLIST, ledger):
         run_cmd(["launchctl", "bootout", f"gui/{os.getuid()}", PLIST])
         os.remove(PLIST)
         out.append(f"1. timer: stopped and removed {home(PLIST)}")
+    elif os.path.exists(PLIST):
+        out.append(f"1. timer: {home(PLIST)} not written by Pit Stop's setup: left as it is. "
+                   f"To switch it off: launchctl bootout gui/{os.getuid()} {PLIST}")
     else:
         out.append("1. timer: none of setup's here")
-    others = [h for h in already_scheduled() if h not in (svc, tmr, PLIST)]
-    if os.path.exists(BIN) and others:
+    others = [h for h in already_scheduled() if h not in (svc, tmr, PLIST) or not ours(h, ledger)]
+    if os.path.exists(BIN) and not ours(BIN, ledger):
+        out.append(f"   launcher {home(BIN)} not written by Pit Stop's setup: left as it is")
+    elif os.path.exists(BIN) and others:
         out.append(f"   launcher {home(BIN)} kept: something else still runs it: {', '.join(home(h) for h in others)}")
     elif os.path.exists(BIN):
         os.remove(BIN)
@@ -572,10 +615,13 @@ def main():
     in_tmux = len(servers.get(best, set()) & ttys) if servers else 0
     print(f"  {in_tmux} of {len(sessions)} session(s) run in tmux" + (f" (server: {best or 'default'})" if servers else ""))
     print(f"4. launcher: {BIN}")
-    if a.apply:
+    if os.path.exists(BIN) and not ours(BIN):
+        print(f"   {BIN} exists and is not Pit Stop's: left as it is")
+    elif a.apply:
         os.makedirs(os.path.dirname(BIN), exist_ok=True)
         shutil.copyfile(os.path.join(os.path.dirname(os.path.abspath(__file__)), "launcher.py"), BIN)
         os.chmod(BIN, 0o755)
+        keep_record(BIN)
     rj = os.path.join(pc.STATE_DIR, "restart.json")
     if os.path.exists(rj):
         print(f"5. {rj}: exists, left exactly as it is")
