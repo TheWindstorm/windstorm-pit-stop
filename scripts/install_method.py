@@ -34,6 +34,7 @@ import shutil
 import subprocess
 import sys
 sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
+os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make is writable by another account (G12.12)
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

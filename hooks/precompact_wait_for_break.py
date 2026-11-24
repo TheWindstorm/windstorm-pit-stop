@@ -48,6 +48,7 @@ import os
 import re
 import sys
 sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
+os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make is writable by another account (G12.12)
 
 TAIL_BYTES = 4_000_000
 CLAUDE_DIR = os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude"))

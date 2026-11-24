@@ -447,6 +447,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.11 Undo removes only the timer files setup wrote.** Setup records each unit, timer, plist and launcher it writes with its sha256 and never overwrites one that is not Pit Stop's; `--undo` stops and removes a file only while it matches that record or, with no record, carries Pit Stop's mark, and names any other with the command that switches it off; it still exits 0 and ends `Done: ... named above.` Proof: `test_G12_11_undo_removes_only_timer_files_setup_wrote`.
 
+**G12.12 Nothing we make is writable by another account.** Every entry file adds 022 to the umask it was started with, right after the G12.9 line; `write_json_atomic` and `backup` create each file with its final mode, a backup keeping the original's mode without group or other write. Seen 2026-11-24: a load gate on a shared machine started jobs with umask 000. Proof: `test_G12_12_nothing_made_is_writable_by_another_account`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

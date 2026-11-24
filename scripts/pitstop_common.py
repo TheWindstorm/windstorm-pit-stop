@@ -192,10 +192,10 @@ def read_json(path, default=None):
 def write_json_atomic(path, data, mode=0o600):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp-pitstop"
-    with open(tmp, "w") as f:
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode & 0o755), "w") as f:   # its mode from the start (G12.12)
         json.dump(data, f, indent=2)
         f.write("\n")
-    os.chmod(tmp, mode)
+    os.chmod(tmp, mode & 0o755)
     os.replace(tmp, path)
 
 
@@ -205,9 +205,10 @@ def backup(path):
         return None
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     dst = f"{path}.bak-pitstop-{stamp}"
-    with open(path, "rb") as a, open(dst, "wb") as b:
+    mode = os.stat(path).st_mode & 0o755          # the original's mode, never writable by another account (G12.12)
+    with open(path, "rb") as a, os.fdopen(os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode), "wb") as b:
         b.write(a.read())
-    os.chmod(dst, os.stat(path).st_mode & 0o777)
+    os.chmod(dst, mode)
     return dst
 
 

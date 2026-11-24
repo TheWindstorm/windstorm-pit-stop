@@ -3758,3 +3758,40 @@ def test_G12_11_undo_removes_only_timer_files_setup_wrote(tmp_path, monkeypatch)
     assert not su.ours(str(bin_))
     out = undo()
     assert bin_.read_text() == "#!/bin/sh\necho mine\n" and "launcher" in out and "left as it is" in out
+
+
+def test_G12_12_nothing_made_is_writable_by_another_account(tmp_path):
+    import re
+    import stat
+    entries = [f for f in sorted(glob.glob(os.path.join(ROOT, "hooks", "*.py")) + glob.glob(os.path.join(ROOT, "scripts", "*.py")))
+               if re.search(r"^if __name__ == .__main__.", open(f).read(), re.M)]
+    for f in entries:                                                   # the line, right after G12.9's, in every entry file
+        lines = open(f).read().splitlines()
+        i = next(i for i, l in enumerate(lines) if l.startswith("sys.dont_write_bytecode = True"))
+        assert lines[i + 1].startswith("os.umask(os.umask(0) | 0o022)"), os.path.basename(f)
+    home, cfg, proj = tmp_path / "home", tmp_path / "home" / ".claude", tmp_path / "home" / "proj"
+    (proj / ".claude").mkdir(parents=True)
+    cfg.mkdir()
+    for d in (home, cfg, proj, proj / ".claude"):                     # the test's own folders: a fixed mode, not the runner's umask
+        os.chmod(d, 0o755)
+    local = proj / ".claude" / "settings.local.json"
+    local.write_text("{}")
+    os.chmod(local, 0o600)
+    env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent"}
+    for _ in range(2):                                                  # twice: the second run is not refused
+        r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--no-tune-now"],
+                           cwd=str(proj), env=env, capture_output=True, text=True, timeout=120, preexec_fn=lambda: os.umask(0))
+        assert r.returncode == 0, r.stderr[-400:]
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import pitstop_common as pc
+    old = os.umask(0)
+    try:
+        b = pc.backup(str(local))
+        pc.write_json_atomic(str(home / "w.json"), {"a": 1})
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(os.stat(b).st_mode) == 0o600                    # a copy of a 600 file stays 600 under umask 000
+    made = [p for p in home.rglob("*") if p != local]
+    assert made
+    loose = [f"{p} {oct(stat.S_IMODE(os.lstat(p).st_mode))}" for p in made if os.lstat(p).st_mode & 0o022]
+    assert not loose, loose
