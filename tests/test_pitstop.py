@@ -2311,15 +2311,23 @@ def test_G2_28_no_fleet_tune_is_started_inside_a_systemd_service(tmp_path, monke
     assert rab.start_tune([], now + 86400 + 1) is None and len(said) == 2
     monkeypatch.setattr(rab, "under_service", lambda: None)
     assert rab.start_tune([], now) == "/work/one" and len(started) == 1
-    # what the process itself says: the last cgroup line's leaf, only when it is a .service
-    for text, want in (("0::/user.slice/user-1000.slice/user@1000.service/app.slice/pit-stop-restart.service\n",
-                        "pit-stop-restart.service"),
-                       ("0::/user.slice/user-1000.slice/user@1000.service/tmux-spawn-1.scope\n", None),
+    # what the process itself says: only the unit setup installs, by name, on any line of the file; never any .service
+    U = "0::/user.slice/user-1000.slice/user@1000.service/app.slice/"
+    for text, want in ((U + "pit-stop-restart.service\n", "pit-stop-restart.service"),          # our own unit's run
+                       ("0::/system.slice/cron.service\n", None),                                  # a crontab line
+                       ("0::/user.slice/user-1000.slice/session-7.scope\n", None),                  # an ssh or desktop shell
+                       (U + "tmux-lanes.service\n", None),                                        # a pane of a tmux server a unit started
+                       (U + "not-pit-stop-restart.service\n", None),
+                       ("12:pids:/user.slice/user-1000.slice/user@1000.service/app.slice/pit-stop-restart.service\n"
+                        "3:cpu,cpuacct:/user.slice\n"
+                        "1:name=systemd:/user.slice/user-1000.slice/user@1000.service/app.slice/pit-stop-restart.service\n",
+                        "pit-stop-restart.service"),                                             # the older layout
+                       ("12:pids:/system.slice/cron.service\n1:name=systemd:/system.slice/cron.service\n", None),
                        ("", None)):
         f = tmp_path / "cgroup"
         f.write_text(text)
         assert real(str(f)) == want, text
-    assert real(str(tmp_path / "none")) is None                       # no such file (a Mac): not a service
+    assert real(str(tmp_path / "none")) is None      # could not be read (a Mac): the tune starts, as 0.6.1 does
 
 def test_G2_23_fleet_tune_runs_only_when_tuning_is_on(tmp_path, monkeypatch):
     rab, _ = _live(tmp_path, monkeypatch)

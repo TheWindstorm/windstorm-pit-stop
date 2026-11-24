@@ -1417,17 +1417,21 @@ def machine_busy():
         return False
 
 
+OWN_UNIT = "pit-stop-restart.service"      # the one unit /pit-stop setup --fleet installs (setup.py install_timer)
+
+
 def under_service(cgroup="/proc/self/cgroup"):
-    """The systemd service this process runs inside (the leaf of its last cgroup line, when it is a .service),
-    else None (no such file: a Mac, or not Linux). Seen 2026-11-24 (systemd 255): a Type=oneshot unit ends what its
-    main process started, even in a new session, when that process exits (G2.28)."""
+    """OWN_UNIT when systemd runs THIS helper as that unit's own run: a line of the process's own cgroup file (one
+    "0::/path" line, or the older layout's several "N:name:/path" lines) whose path ends in /OWN_UNIT. Any other unit
+    (cron.service, a tmux server's own service, a unit of the person's) or a file that could not be read: None, and
+    the tune starts as 0.6.1 does. Seen 2026-11-24 (systemd 255): a Type=oneshot unit ends what its main process
+    started, even in a new session, when that process exits (G2.28); not known of other units."""
     try:
         with open(cgroup) as f:
             lines = f.read().strip().splitlines()
     except OSError:
         return None
-    leaf = lines[-1].rsplit("/", 1)[-1] if lines else ""
-    return leaf if leaf.endswith(".service") else None
+    return OWN_UNIT if any(l.rsplit(":", 1)[-1].rstrip("/").endswith("/" + OWN_UNIT) for l in lines) else None
 
 
 def start_tune(sessions, now):
