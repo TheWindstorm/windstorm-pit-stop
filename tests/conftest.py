@@ -37,7 +37,27 @@ for _n in _SYSTEM:
         _f.write(f'#!/bin/sh\necho "rule 17 stub: {_n} $* (a test brings its own {_n})" >&2\nexit 97\n')
     os.chmod(os.path.join(_STUBS, _n), 0o755)
 os.environ["PATH"] = _STUBS + os.pathsep + os.environ.get("PATH", "")
-_WATCH = [os.path.join(REAL_HOME, x) for x in (".claude", ".config", os.path.join("Library", "LaunchAgents"))] + REAL_TMUX
+# What the guard watches: the WHOLE real home and the real tmux folder, less the checkout under test, this run's own
+# temporary folder and Python's own libraries (its prefixes and the user site). A place left out is never the home
+# itself or a folder above it, nor one holding the home's .claude, .config or Library/LaunchAgents.
+_CHECKOUT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+
+
+def _libraries():
+    out = [sys.prefix, sys.base_prefix, sys.exec_prefix, getattr(sys, "base_exec_prefix", sys.exec_prefix)]
+    try:
+        out.append(site.getusersitepackages())
+    except AttributeError:
+        pass
+    out += [x for x in sys.path if x and ("site-packages" in x or "dist-packages" in x)]
+    return out
+
+
+_KEPT = [os.path.join(REAL_HOME, x) for x in (".claude", ".config", os.path.join("Library", "LaunchAgents"))]
+_LEFT_OUT = sorted({r for r in map(os.path.realpath, [_CHECKOUT, _SESSION_TMP] + _libraries())
+                    if r != REAL_HOME and not REAL_HOME.startswith(r + os.sep)
+                    and not any(k == r or k.startswith(r + os.sep) for k in _KEPT)})
+_WATCH = [REAL_HOME] + REAL_TMUX
 _seen = {"test": None, "hits": []}
 
 
@@ -52,10 +72,13 @@ def _under(p, roots):
 def _audit(event, args):
     if not _seen["test"]:
         return
-    if event in ("open", "os.listdir", "os.scandir", "glob.glob", "os.chmod", "os.remove", "os.rename", "os.mkdir",
-                 "os.rmdir", "shutil.rmtree", "os.utime"):
-        if args and isinstance(args[0], (str, bytes, os.PathLike)) and _under(args[0], _WATCH):
-            _seen["hits"].append(f"{event} {os.fsdecode(args[0])}")
+    if event in ("open", "os.listdir", "os.scandir", "glob.glob", "os.chmod", "os.chown", "os.remove", "os.mkdir",
+                 "os.rmdir", "shutil.rmtree", "os.utime", "os.truncate", "os.rename", "os.symlink", "os.link",
+                 "shutil.copyfile", "shutil.copytree", "shutil.move"):
+        two = event in ("os.rename", "os.symlink", "os.link", "shutil.copyfile", "shutil.copytree", "shutil.move")
+        for a in (args[:2] if two else args[:1]):          # a rename or copy INTO the home counts as much as out of it
+            if isinstance(a, (str, bytes, os.PathLike)) and _under(a, _WATCH) and not _under(a, _LEFT_OUT):
+                _seen["hits"].append(f"{event} {os.fsdecode(a)}")
     elif event == "subprocess.Popen":
         _exe, argv, _cwd, env = args
         env = os.environ if env is None else env
@@ -83,8 +106,8 @@ def _guard_says(hits):
 
 @pytest.fixture(autouse=True)
 def _own_home_only(request):
-    """The guard (G19.5): a test that opens, lists or changes anything in the real home's .claude, .config or
-    LaunchAgents or the real tmux folder, starts a child with the real HOME or none or without its own tmux
+    """The guard (G19.5): a test that opens, lists or changes anything in the real home (less the checkout, the
+    run's temporary folder and Python's own libraries) or the real tmux folder, starts a child with the real HOME or none or without its own tmux
     folder (TMUX_TMPDIR), or runs this machine's own
     tmux, claude, crontab, systemctl, loginctl or launchctl (found outside a temporary folder), fails: in its
     own result when it happened in the test, else at teardown."""
