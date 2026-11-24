@@ -48,6 +48,9 @@ With --fleet it also:
   6. Installs a timer (systemd user timer on Linux, launchd on macOS) that
      runs the launcher with --live. If something already schedules
      restart_at_break.py, it changes nothing and prints the one line to edit.
+Every run also removes group and other write from what Pit Stop wrote, if an
+earlier setup under an open umask (000) left it open, and names any folder on
+the way that it cannot tell it made.
 Nothing here needs sudo. --apply keeps what it found before each change in
 ~/.claude/pit-stop/setup-undo.json.
 
@@ -265,6 +268,69 @@ def install_timer(interval, apply):
                                                            ["systemctl", "--user", "enable", "--now", "pit-stop-restart.timer"]))
     print("    enabled and started" if ok else "    written; start it with: systemctl --user daemon-reload && "
                                                "systemctl --user enable --now pit-stop-restart.timer")
+
+
+def close_open(apply):
+    """Rule 28 for what an earlier run left open (G12.13): a setup run under a wide-open umask (000, as some job
+    queues start) left Pit Stop's state folder 0777 and its timer files 0666. Removes group and other write from
+    what Pit Stop wrote: ~/.claude/pit-stop and, inside it, the names Pit Stop writes (and everything under its own
+    folders there); the launcher, unit, timer and plist when they are ours. Only narrows, never widens; symlinks
+    and files of another owner are left alone; --undo does not open them again. A folder on the way that Pit Stop
+    may have made but cannot tell (~/.config/systemd/user and its parents, ~/Library/LaunchAgents, ~/.claude) is
+    named with the command to close it, not changed. Returns the lines to print."""
+    mine = []
+
+    def add(p):
+        try:
+            st = os.lstat(p)
+        except OSError:
+            return
+        if not os.path.islink(p) and st.st_uid == os.getuid() and st.st_mode & 0o022:
+            mine.append((p, st.st_mode & 0o7777))
+
+    if os.path.isdir(pc.STATE_DIR) and not os.path.islink(pc.STATE_DIR):
+        add(pc.STATE_DIR)
+        for name in sorted(os.listdir(pc.STATE_DIR)):
+            if not pc.state_name_is_ours(name):
+                continue
+            top = os.path.join(pc.STATE_DIR, name)
+            add(top)
+            if os.path.isdir(top) and not os.path.islink(top):
+                for d, dirs, files in os.walk(top, followlinks=False):
+                    for n in sorted(dirs) + sorted(files):
+                        add(os.path.join(d, n))
+    timer = [os.path.join(UNIT_DIR, "pit-stop-restart.service"), os.path.join(UNIT_DIR, "pit-stop-restart.timer"), PLIST]
+    for f in [BIN] + timer:
+        if ours(f):
+            add(f)
+    if not mine:
+        out = ["   none of what Pit Stop wrote can be written by another account"]
+    elif apply:
+        out = []
+        for p, m in mine:
+            try:
+                os.chmod(p, m & ~0o022)
+                out.append(f"   closed {p.replace(pc.HOME, '~')}: {oct(m)[2:]} -> {oct(m & ~0o022)[2:]}")
+            except OSError as e:
+                out.append(f"   NOT closed {p.replace(pc.HOME, '~')} ({oct(m)[2:]}): {e}")
+    else:
+        out = [f"   would close {p.replace(pc.HOME, '~')}: {oct(m)[2:]} -> {oct(m & ~0o022)[2:]}" for p, m in mine]
+    home = os.path.realpath(pc.HOME)
+    ways = [pc.CLAUDE_DIR] + ([UNIT_DIR] if any(ours(f) for f in timer[:2]) else []) \
+        + ([os.path.dirname(PLIST)] if ours(PLIST) else [])
+    seen = set()
+    for d in ways:
+        while d and os.path.realpath(d) != home and os.path.realpath(d).startswith(home + os.sep) and d not in seen:
+            seen.add(d)
+            try:
+                st = os.lstat(d)
+                if not os.path.islink(d) and st.st_mode & 0o022:
+                    out.append(f"   {d.replace(pc.HOME, '~')} can be written by another account ({oct(st.st_mode & 0o7777)[2:]}); "
+                               f"Pit Stop cannot tell whether it made it, so it stays. To close it: chmod go-w {d}")
+            except OSError:
+                pass
+            d = os.path.dirname(d)
+    return out
 
 
 SETTINGS = os.path.join(pc.CLAUDE_DIR, "settings.json")
@@ -604,6 +670,10 @@ def main():
 
     print("3. Pit Stop's own updates: " + ("left as they are (--no-self-update)" if a.no_self_update
                                           else self_update(a.apply, ledger=UNDO if a.apply else None)))
+
+    print("Write access for other accounts (an earlier setup under an open umask):")
+    for line in close_open(a.apply):
+        print(line)
 
     if not a.fleet:
         print("Fleet mode: not asked for. If you run several sessions in tmux, add --fleet to see that plan.")

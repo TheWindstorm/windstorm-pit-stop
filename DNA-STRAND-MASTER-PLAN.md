@@ -449,6 +449,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.12 Nothing we make is writable by another account.** Every entry file adds 022 to the umask it was started with, right after the G12.9 line; `write_json_atomic` and `backup` create each file with its final mode, a backup keeping the original's mode without group or other write. Seen 2026-11-24: a load gate on a shared machine started jobs with umask 000. Proof: `test_G12_12_nothing_made_is_writable_by_another_account`.
 
+**G12.13 Setup closes what an earlier run left open.** Every setup run removes group and other write from what Pit Stop wrote (the state folder and its own names, the launcher, and the unit, timer or plist when ours) and names, without changing, a folder on the way it cannot tell it made. Seen 2026-11-24: released 0.6.1 under umask 000 left the state folder 0777 and the timer files 0666. Proof: `test_G12_13_setup_closes_what_an_earlier_run_left_open`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

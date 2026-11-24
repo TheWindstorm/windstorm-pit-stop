@@ -3795,3 +3795,48 @@ def test_G12_12_nothing_made_is_writable_by_another_account(tmp_path):
     assert made
     loose = [f"{p} {oct(stat.S_IMODE(os.lstat(p).st_mode))}" for p in made if os.lstat(p).st_mode & 0o022]
     assert not loose, loose
+
+
+def test_G12_13_setup_closes_what_an_earlier_run_left_open(tmp_path):
+    """Released 0.6.1 run under umask 000 left ~/.claude/pit-stop and its bin 0777 and the unit and timer 0666
+    (measured 2026-11-24). Setup closes those, and only those: a person's file in the state folder, a unit
+    without Pit Stop's mark, a symlink's target and the folders on the way keep their modes; the folders on
+    the way are named with the command to close them."""
+    import stat
+    home, cfg, proj = tmp_path / "home", tmp_path / "home" / ".claude", tmp_path / "home" / "proj"
+    state, units, outside = cfg / "pit-stop", tmp_path / "home" / ".config" / "systemd" / "user", tmp_path / "outside.txt"
+    for d in (state / "bin", state / "folders", units, proj / ".claude"):
+        d.mkdir(parents=True)
+    files = {state / "bin" / "pit-stop-restart": '"""Pit Stop launcher: one fixed path for timers\n',
+             units / "pit-stop-restart.service": "[Unit]\nDescription=Windstorm Pit Stop: restart at the break\n",
+             units / "pit-stop-restart.timer": "[Unit]\nDescription=Windstorm Pit Stop every 5 minutes\n",
+             units / "theirs.service": "[Unit]\nDescription=someone else\n",
+             state / "folders" / "a.json": "{}", state / "notes.txt": "mine", outside: "x"}
+    for p, t in files.items():
+        p.write_text(t)
+        os.chmod(p, 0o666)
+    os.symlink(outside, state / "folders" / "link.json")
+    for d in (state, state / "bin", state / "folders", units, units.parent, units.parent.parent):
+        os.chmod(d, 0o777)
+    for d in (tmp_path, home, cfg, proj, proj / ".claude"):
+        os.chmod(d, 0o755)
+    mode = lambda p: stat.S_IMODE(os.lstat(p).st_mode)
+    env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent"}
+    run = lambda *x: subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), *x, "--no-tune-now"],
+                                    cwd=str(proj), env=env, capture_output=True, text=True, timeout=120)
+    r = run()                                                          # the plan names them and changes nothing
+    assert r.returncode == 0, r.stderr[-400:]
+    assert "would close ~/.claude/pit-stop: 777 -> 755" in r.stdout and mode(state) == 0o777
+    r = run("--apply")
+    assert r.returncode == 0, r.stderr[-400:]
+    closed = {state: 0o755, state / "bin": 0o755, state / "folders": 0o755, state / "folders" / "a.json": 0o644,
+              state / "bin" / "pit-stop-restart": 0o644, units / "pit-stop-restart.service": 0o644,
+              units / "pit-stop-restart.timer": 0o644}
+    kept = {state / "notes.txt": 0o666, units / "theirs.service": 0o666, outside: 0o666, units: 0o777,
+            units.parent: 0o777, units.parent.parent: 0o777}
+    assert {str(p): mode(p) for p in closed} == {str(p): m for p, m in closed.items()}, r.stdout
+    assert {str(p): mode(p) for p in kept} == {str(p): m for p, m in kept.items()}, r.stdout
+    assert "closed ~/.claude/pit-stop: 777 -> 755" in r.stdout
+    assert f"To close it: chmod go-w {units}" in r.stdout and "rm " not in r.stdout
+    r = run("--apply")                                                 # a second run finds nothing of ours open
+    assert "none of what Pit Stop wrote can be written by another account" in r.stdout, r.stdout
