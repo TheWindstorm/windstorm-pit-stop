@@ -692,7 +692,7 @@ def test_G12_8_nothing_runs_once_the_plugin_is_gone(tmp_path, monkeypatch, capsy
     reg.write_text(json.dumps({"version": 2, "plugins": {"other@x": [row("0.6.2")]}}))
     assert launcher.find(str(tmp_path)) == (None, "gone") and launcher.state(None, str(tmp_path)) == "gone"
     os.remove(reg)
-    assert launcher.find(str(tmp_path)) == (None, "gone")                  # no registry file: no plugin installed
+    assert launcher.find(str(tmp_path)) == (None, "nolist")     # no list there: its own answer, not "gone" (G12.25)
     # could not be read is not gone: nothing runs this pass either, and it says which
     for odd in ("{not json", json.dumps(["a list"]), json.dumps({"plugins": "odd"})):
         reg.write_text(odd)
@@ -724,6 +724,52 @@ def test_G12_8_nothing_runs_once_the_plugin_is_gone(tmp_path, monkeypatch, capsy
     _g12_8_checkup_names_a_registry_it_cannot_read(tmp_path / "c")
     assert ran and ran[0][1][2].endswith(os.path.join("0.6.2", "scripts", "restart_at_break.py")) and ran[0][1][3:] == ["--live"]
 
+
+
+def test_G12_25_removed_is_said_only_from_claude_codes_own_list_read(tmp_path, monkeypatch):
+    """Family rule 29 (e), ONE WAY TO KNOW WHETHER THE PLUGIN IS STILL INSTALLED: "removed" is said only when
+    Claude Code's own list (<its folder>/plugins/installed_plugins.json) was READ and names the plugin nowhere; a
+    list that is not there is its own answer (rule 6: "is not there" is not "could not be read"), never "not
+    installed" and never the advice to take the timer off. The list's folder is kept by setup's placement: the
+    launcher copy sits at <Claude folder>/pit-stop/bin/pit-stop-restart, so a timer without CLAUDE_CONFIG_DIR
+    still reads the list of the folder setup ran for, and hands that folder to the helper."""
+    launcher = _launcher()
+    assert launcher.find(str(tmp_path)) == (None, "nolist") and launcher.state(None, str(tmp_path)) == "nolist"
+    for word in ("not installed", "removed from", "take it off"):
+        assert word not in launcher.SAY["nolist"]
+    ran = []
+    monkeypatch.setattr(launcher, "CLAUDE_DIR", str(tmp_path))
+    monkeypatch.setattr(launcher.os, "execve", lambda *a: ran.append(a))
+    monkeypatch.setattr(sys, "argv", ["pit-stop-restart", "--live"])
+    assert launcher.main() == 0 and ran == []
+    last = (tmp_path / "pit-stop" / "restart" / "restart.log").read_text().splitlines()[-1]
+    assert "is not there" in last and str(tmp_path) in last, last
+    assert "not installed" not in last and "take it off" not in last, last
+    # the real road: a launcher copy in a Claude folder that is not ~/.claude, run with no CLAUDE_CONFIG_DIR
+    import shutil
+    home, cfg = tmp_path / "home", tmp_path / "cfg"
+    plug = cfg / "plugins" / "cache" / "thewindstorm" / "windstorm-pit-stop" / "0.6.2"
+    (plug / "scripts").mkdir(parents=True)
+    (home / ".claude").mkdir(parents=True)
+    (plug / "scripts" / "restart_at_break.py").write_text(
+        "import os; print('HELPER', os.environ.get('CLAUDE_CONFIG_DIR'), os.environ.get('PIT_STOP_LAUNCHER'))\n")
+    (cfg / "plugins" / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {
+        "windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": str(plug), "version": "0.6.2"}]}}))
+    for where, want in ((cfg, str(cfg)), (home / ".claude", "None")):
+        b = where / "pit-stop" / "bin"
+        b.mkdir(parents=True, exist_ok=True)
+        shutil.copy(os.path.join(ROOT, "scripts", "launcher.py"), b / "pit-stop-restart")
+        if where != cfg:                                   # the standard place: ~/.claude's own list, as before
+            (where / "plugins").mkdir(exist_ok=True)
+            shutil.copy(cfg / "plugins" / "installed_plugins.json", where / "plugins" / "installed_plugins.json")
+        out = subprocess.run([sys.executable, "-I", str(b / "pit-stop-restart")], capture_output=True, text=True,
+                             timeout=60, env={"HOME": str(home), "PATH": "/nonexistent",
+                                              "TMUX_TMPDIR": os.environ["TMUX_TMPDIR"]}).stdout
+        assert out.strip() == f"HELPER {want} 1", (where, out)
+    # CLAUDE_CONFIG_DIR, when the timer has it, is what is read; scripts/launcher.py itself keeps the old default
+    assert launcher.claude_dir_of(str(cfg / "pit-stop" / "bin" / "pit-stop-restart"), {"CLAUDE_CONFIG_DIR": "/y"}) == "/y"
+    assert launcher.claude_dir_of(os.path.join(ROOT, "scripts", "launcher.py"), {}) == os.path.join(
+        os.path.expanduser("~"), ".claude")
 
 def _g12_8_the_helper_changes_no_session(tmp_path, monkeypatch, capsys):
     capsys.readouterr()
@@ -761,16 +807,19 @@ def _g12_8_the_helper_changes_no_session(tmp_path, monkeypatch, capsys):
     assert line.endswith(rab.timer_off_command()) and "not installed" in line
     # one read: a registry that fails once (Claude Code writing it) and then reads fine never yields "not installed"
     import launcher as ln
-    real, calls = ln.registry_rows, []
+    real, calls = ln.list_answer, []
 
     def flaky(claude_dir=None):
         calls.append(1)
-        return None if len(calls) == 1 else real(claude_dir)
+        return ("unreadable", None) if len(calls) == 1 else real(claude_dir)
     reg.write_text(json.dumps({"plugins": {"windstorm-pit-stop@thewindstorm": [{"installPath": ROOT}]}}))
-    monkeypatch.setattr(ln, "registry_rows", flaky)
+    monkeypatch.setattr(ln, "list_answer", flaky)
     line = rab.gone_line(str(tmp_path / "x"))
     assert "could not be read" in line and "not installed" not in line and len(calls) == 1, line
-    monkeypatch.setattr(ln, "registry_rows", real)
+    monkeypatch.setattr(ln, "list_answer", real)
+    os.remove(reg)                                   # not there: its own line, never "not installed" (G12.25)
+    line = rab.gone_line(str(tmp_path / "x"))
+    assert "is not there" in line and "not installed" not in line and "timer off" not in line, line
     reg.write_text(json.dumps({"plugins": {}}))
     # the command a person pastes is the one setup's own undo runs (setup.py read, not imported or run)
     import ast

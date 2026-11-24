@@ -1356,11 +1356,11 @@ def gone_line(here=None):
     neither says Pit Stop is not installed nor advises taking the timer off."""
     import launcher
     here = here or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    rows = launcher.registry_rows(pc.CLAUDE_DIR)     # read ONCE: two reads can disagree while Claude Code writes it
+    said, rows = launcher.list_answer(pc.CLAUDE_DIR)   # read ONCE: two reads can disagree while Claude Code writes it
     marked = launcher.orphaned(here)
-    if rows is None:
+    if rows is None:                                 # not there or not read: never "not installed" (G12.25)
         marked = f"plugin folder {here} carries .orphaned_at, and " if marked else ""
-        return f"plugin registry: {marked}{launcher.SAY['unreadable']}"
+        return f"plugin registry: {marked}{launcher.SAY[said]}"
     if rows and not marked:
         return None
     if rows:
