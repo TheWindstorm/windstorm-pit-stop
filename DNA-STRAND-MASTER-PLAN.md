@@ -176,6 +176,8 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 
 **G2.28 No fleet tune is started inside Pit Stop's own timer run.** A Type=oneshot unit ends what its run started when the run ends. `under_service()` in `scripts/restart_at_break.py` reads the process's own cgroup: only a path ending in /pit-stop-restart.service (the unit setup installs) stops the tune, said once a day; cron.service, a scope, any other unit or an unreadable file: started as before (G2.22). Proof: `test_G2_28_no_fleet_tune_is_started_inside_a_systemd_service`.
 
+**G2.29 A folder can be left out of daily tuning, and the day's line names it (open).** config.json takes a list of folders never tuned, beside tune_folders; a held folder is put on it at the switch-on, and the 24 h line names each folder left out. Seen 2026-11-23: two folders held on their own users' word were tuned 8 minutes after daily tuning was switched on for a whole machine (family rule 8). Proof: `test_G2_29_a_folder_can_be_left_out_of_daily_tuning`.
+
 ### G3 Shared readers
 One shared module, `scripts/pitstop_common.py`, plus the hook generation file, reads Claude Code's transcripts, session listings, plugin records and Pit Stop's own state the same way for every part of the plugin.
 
@@ -491,6 +493,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.29 The helper never starts an update its unit's limit would cut (open).** It reads the limit of the unit it runs under, from its own cgroup, any name (could not be read: it says nothing), says once a day when that limit is below its road, and never starts an update when the time left before the limit is less than that update's own limit: it writes "next run" and goes on (family rule 30). Proof: `test_G12_29_the_helper_never_starts_an_update_its_units_limit_would_cut`.
 
+**G12.30 A printed line carries no shell form, and a command stands alone (open).** No line Pit Stop prints or logs holds a backtick or a dollar-parenthesis; every command for the person is alone on its line, its last character the line's last; one helper shows each value the tool did not write; a test runs each road and reads what it printed (family rule 31). Proof: `test_G12_30_a_printed_line_carries_no_shell_form`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.
@@ -570,6 +574,8 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 **G19.4 The plan check runs in CI.** CI runs `tests/test_strand.py` on every push and pull request. Its checks, written in this repository: version line; genes under Genes; codon form, heading, numbering; invariant Proofs; named ids exist; no loop in what codons need; genes in Milestones; ASSUMES: on open questions; the changelog's newest Plan entry; the 80-word cap. A built codon's test must pass (G19.1); an open one only names it. Vague words are the lane's hand check, not CI's. Proof: `test_G19_4_ci_runs_the_plan_check`.
 
 **G19.5 The suite never uses the home of the account running it.** `tests/conftest.py` gives the run its own home, Claude Code folder and tmux folder, puts failing stubs for tmux, claude, crontab, systemctl, loginctl and launchctl first on PATH, and fails a test that reaches the real home (less the checkout and Python's libraries) or tmux folder, starts a child with the real HOME, none, or a PATH reaching those programs, or runs one. Seen 2026-11-24. Proof: `test_G19_5_the_suite_never_uses_the_home_of_the_account_running_it`.
+
+**G19.6 Undo in the suite reaches only its made home.** A test calls setup's undo with nothing moved, so its config.json step (with no record it turns daily tuning off) acts on the made home's file, and fails if the real config.json's or settings.json's time or size moves; pointed at a stand-in, the same undo is seen to move it. Seen 2026-11-24 03:32:14Z, before G19.5: a test's undo turned tuning and self-update off in an account's real files. Proof: `test_G19_6_undo_in_the_suite_reaches_only_its_made_home`.
 
 ## Part 5. Milestones
 

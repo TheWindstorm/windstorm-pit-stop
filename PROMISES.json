@@ -386,6 +386,48 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P37",
+   "seen": "2026-11-24 03:32:14Z on a Linux fleet box, before G19.5's guard was built (06:18Z): a test that moved only STATE_DIR called setup's undo, whose config.json step with no record turns daily tuning off, and whose marketplace step put the entry back; both acted on the account's real ~/.claude/pit-stop/config.json and ~/.claude/settings.json. Daily tuning and Pit Stop's self-update stayed off there for 20 hours, unseen until the 24 h tuning line. Put back on the keeper's word at 23:47Z and 23:48Z.",
+   "promise": "A test calls setup's undo with nothing moved; it acts on the made home's config.json, and the test fails if the real config.json's or settings.json's time or size moves; pointed at a stand-in outside the made home, the same undo is seen to move it, so the check is shown to see a move.",
+   "codon": "G19.6",
+   "issue": null,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "test_G19_6_undo_in_the_suite_reaches_only_its_made_home",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
+  },
+  {
+   "id": "P38",
+   "seen": "2026-11-23 23:49:51Z and 23:51:47Z on a Linux fleet box: daily tuning, switched on for the whole machine at 23:41Z, wrote a window and an idle point into two folders held on their own users' word; 0.6.1 can leave a folder out only by listing every folder to tune (tune_folders), and the 24 h line named no held folder.",
+   "promise": "config.json takes a list of folders never tuned, beside tune_folders; setup asks for held folders at a switch-on and puts them on it; the daily tune reads it before any write; the 24 h line names each folder left out.",
+   "codon": "G2.29",
+   "issue": null,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
+  },
+  {
+   "id": "P39",
+   "seen": "2026-11-24, counted in the source by the family's rule 31 (string literals, docstrings left out): 3 printed lines carry a backtick (a restart.log line, setup --help, setup's crontab stop line), 0 a dollar-parenthesis, none of them a command that changes something; the three sudo update commands, the timer-off command at the end of G12.25's line and setup's own command sit inside longer lines. Of the three, only the restart.log line is in released 0.6.1; setup's --help line for --crontab-has-no-pit-stop-line and its crontab stop line are new in 0.6.2 (P29). Stored texts are shown again by restart.log, events.log, needs-you.md, the notes typed into panes and the Stop hook's ask line.",
+   "promise": "No line Pit Stop prints or logs holds a backtick or a dollar-parenthesis; every command for the person stands alone on its own line, its last character the line's last; one helper shows each value the tool did not write (a session's name above all); a test runs each road and reads what it printed, following a stored text to every place it is shown.",
+   "codon": "G12.30",
+   "issue": null,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

@@ -280,3 +280,44 @@ def test_G19_5_the_suite_never_uses_the_home_of_the_account_running_it(tmp_path)
     conf.write_text(conf.read_text().replace("sys.addaudithook(_audit)", "pass"))
     code, out = _pytest(root, "-v")
     assert "rule 17:" not in out and "test_reads_the_real_claude_folder PASSED" in out, out[-4000:]
+
+
+def test_G19_6_undo_in_the_suite_reaches_only_its_made_home(tmp_path, monkeypatch):
+    """Seen 2026-11-24 03:32:14Z, before G19.5's guard: a test that moved only STATE_DIR called setup's undo, which
+    with no record turns daily tuning off in pc.CONFIG, and that was this account's real config.json (and the real
+    settings.json's marketplace entry). Now: undo with nothing moved changes the made home's config.json, and the
+    real one's time and size do not move. The check is shown to see a move: pointed at a stand-in outside the made
+    home, the same undo moves that file's time."""
+    import json
+    import pwd
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import pitstop_common as pc
+    import setup as su
+    real_home = pwd.getpwuid(os.getuid()).pw_dir
+    real = os.path.join(real_home, ".claude", "pit-stop", "config.json")
+    real_settings = os.path.join(real_home, ".claude", "settings.json")
+    assert os.path.realpath(pc.CONFIG) != os.path.realpath(real), pc.CONFIG     # the module reads the made home
+
+    def mark(p):
+        try:
+            st = os.stat(p)
+            return st.st_mtime_ns, st.st_size
+        except OSError:
+            return None
+    before = mark(real), mark(real_settings)
+    os.makedirs(os.path.dirname(pc.CONFIG), exist_ok=True)
+    with open(pc.CONFIG, "w") as f:
+        json.dump({"budget": "economy", "auto_tune": True}, f)
+    out = "\n".join(su.undo(ledger=str(tmp_path / "no-record.json"), run_cmd=lambda *c: (0, "")))
+    assert json.load(open(pc.CONFIG)).get("auto_tune") is None, out       # the made home's file was put back
+    assert (mark(real), mark(real_settings)) == before, ("the real config.json or settings.json moved", before)
+    # the control: the same undo pointed at a stand-in outside the made home moves that file, and the check sees it
+    stand_in = tmp_path / "elsewhere" / "config.json"
+    stand_in.parent.mkdir()
+    stand_in.write_text(json.dumps({"auto_tune": True}))
+    os.utime(stand_in, ns=(1, 1))
+    was = mark(str(stand_in))
+    monkeypatch.setattr(pc, "CONFIG", str(stand_in))
+    su.undo(ledger=str(tmp_path / "no-record-2.json"), run_cmd=lambda *c: (0, ""))
+    assert mark(str(stand_in)) != was and json.loads(stand_in.read_text()).get("auto_tune") is None
+
