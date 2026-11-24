@@ -201,7 +201,7 @@ def tmux_servers():
     """{socket name or None: set of pane ttys} for every tmux server of this user."""
     out = {}
     names = [None]
-    for d in glob.glob(f"/tmp/tmux-{os.getuid()}/*") + glob.glob(os.path.join(os.environ.get("TMUX_TMPDIR", "/nonexistent"), f"tmux-{os.getuid()}", "*")):
+    for d in glob.glob(os.path.join(os.environ.get("TMUX_TMPDIR") or "/tmp", f"tmux-{os.getuid()}", "*")):   # where tmux looks
         n = os.path.basename(d)
         if n != "default" and n not in names:
             names.append(n)

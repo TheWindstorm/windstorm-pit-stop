@@ -463,6 +463,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.18 The walk covers what decides what runs.** Besides Pit Stop's settings, launcher, timer files and code, the rule-28 walk names, when another account can reach and write them, installed_plugins.json, Claude Code's session list, every other installed copy of Pit Stop, and the claude, tmux and Python programs the helper runs, with their folders. Seen 2026-11-24 in another lane's stock machine sitting. Proof: `test_G12_18_the_walk_covers_what_decides_what_runs`.
 
+**G12.19 Setup finds tmux servers where tmux does.** `tmux_servers()` in `scripts/setup.py` lists the server names under TMUX_TMPDIR when it is set, else under /tmp, never both: the helper reaches a server by name (-L), and tmux itself looks in that one place. Seen 2026-11-24: the suite listed the account's own server through a stub. Proof: `test_G12_19_setup_finds_tmux_servers_where_tmux_does`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.
@@ -540,6 +542,8 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 **G19.3 A skip says why and is not a pass.** A skipped test never counts as passed. The summary lists it as `not run here: <test> (<reason>)`. Outside CI, a skip on a condition of the machine, with its reason, does not fail the run; in CI (the environment variable `CI` is `true`), a built proof that did not pass fails it. A skip with no reason, or on no condition of the machine, fails every run. Proof: `test_G19_3_a_skip_is_listed_and_never_counts_as_passed`.
 
 **G19.4 The plan check runs in CI.** CI runs `tests/test_strand.py` on every push and pull request. Its checks, written in this repository: version line; genes under Genes; codon form, heading, numbering; invariant Proofs; named ids exist; no loop in what codons need; genes in Milestones; ASSUMES: on open questions; the changelog's newest Plan entry; the 80-word cap. A built codon's test must pass (G19.1); an open one only names it. Vague words are the lane's hand check, not CI's. Proof: `test_G19_4_ci_runs_the_plan_check`.
+
+**G19.5 The suite never uses the home of the account running it.** `tests/conftest.py` gives the run its own home, Claude Code folder and tmux folder, puts failing stubs for tmux, claude, crontab, systemctl, loginctl and launchctl first on PATH, and fails a test that reaches the real home's .claude, .config or LaunchAgents or tmux folder, starts a child with the real HOME or none, or runs this machine's own of those programs. Seen 2026-11-24. Proof: `test_G19_5_the_suite_never_uses_the_home_of_the_account_running_it`.
 
 ## Part 5. Milestones
 

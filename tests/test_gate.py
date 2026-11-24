@@ -197,3 +197,51 @@ def test_G19_3_the_ci_log_names_every_test_and_every_skip_reason():
         assert "console_output_style=classic" in ln, ln
     cols = re.findall(r"COLUMNS:\s*\"?(\d+)", ci)
     assert cols and min(int(c) for c in cols) >= 1000, "CI needs a wide COLUMNS for its pytest step"
+
+
+GUARDED = '''import glob, os, pwd, shutil, subprocess, sys
+REAL = os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+
+def test_reads_the_real_claude_folder():
+    try:                                    # a name that is never there: the guard sees the try, nothing real is read
+        open(os.path.join(REAL, ".claude", "no-such-file-pit-stop-guard-probe"))
+    except OSError:
+        pass
+
+def test_starts_a_child_with_no_home():
+    subprocess.run([sys.executable, "-I", "-c", "pass"], env={"PATH": os.environ["PATH"]})
+
+def test_runs_this_machines_own_program():
+    real = shutil.which("systemctl", path="/usr/bin:/bin") or shutil.which("launchctl", path="/usr/bin:/bin")
+    assert real, "neither systemctl nor launchctl here"
+    subprocess.run([real, "--version" if real.endswith("systemctl") else "version"], capture_output=True)
+
+def test_the_stub_answers_first():
+    r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+    assert r.returncode == 97 and "rule 17 stub" in r.stderr
+
+def test_stays_in_its_own_home(tmp_path):
+    assert os.path.realpath(os.path.expanduser("~")) != REAL
+    (tmp_path / "x").write_text("x")
+'''
+
+
+def test_G19_5_the_suite_never_uses_the_home_of_the_account_running_it(tmp_path):
+    """Rule 17: conftest gives the run its own home, Claude Code folder and tmux folder, puts failing stubs for
+    tmux, claude, crontab, systemctl, loginctl and launchctl first on PATH, and its guard fails a test that
+    reaches the real home's .claude, starts a child with no HOME, or runs this machine's own systemctl or
+    launchctl. Control: the same planted tests with the guard taken out all pass."""
+    root = _world(tmp_path, GUARDED, {"1": "good"})
+    code, out = _pytest(root, "-v")
+    verdict = {n: ("PASSED" if f"::{n} PASSED" in out else "FAILED" if f"::{n} " in out and "PASSED" not in
+                   [ln for ln in out.splitlines() if f"::{n} " in ln][0] else "?")
+               for n in ("test_reads_the_real_claude_folder", "test_starts_a_child_with_no_home",
+                         "test_runs_this_machines_own_program", "test_the_stub_answers_first", "test_stays_in_its_own_home")}
+    assert verdict == {"test_reads_the_real_claude_folder": "FAILED", "test_starts_a_child_with_no_home": "FAILED",
+                       "test_runs_this_machines_own_program": "FAILED", "test_the_stub_answers_first": "PASSED",
+                       "test_stays_in_its_own_home": "PASSED"}, out[-4000:]
+    assert "3 failed, 2 passed" in out and "rule 17: this test reached the home or the tools" in out, out[-4000:]
+    conf = root / "tests" / "conftest.py"                                # the control: no guard, nothing caught
+    conf.write_text(conf.read_text().replace("sys.addaudithook(_audit)", "pass"))
+    code, out = _pytest(root, "-v")
+    assert "rule 17:" not in out and "test_reads_the_real_claude_folder PASSED" in out, out[-4000:]

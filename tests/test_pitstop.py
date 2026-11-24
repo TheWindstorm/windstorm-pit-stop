@@ -3707,6 +3707,7 @@ def test_G12_10_undo_names_only_what_pit_stop_wrote(tmp_path, monkeypatch, capsy
     (st / "theirs").mkdir()
     (st / "autotune.log").write_text("x")
     monkeypatch.setattr(pc, "STATE_DIR", str(st))
+    monkeypatch.setenv("PATH", str(tmp_path))                          # rule 17: no crontab or systemctl of this machine
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     import setup as su
     out = "\n".join(su.undo(ledger=str(st / "setup-undo.json"), run_cmd=lambda c: (0, "")))
@@ -3787,7 +3788,7 @@ def test_G12_12_nothing_made_is_writable_by_another_account(tmp_path):
     local = proj / ".claude" / "settings.local.json"
     local.write_text("{}")
     os.chmod(local, 0o600)
-    env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
     for _ in range(2):                                                  # twice: the second run is not refused
         r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--no-tune-now"],
                            cwd=str(proj), env=env, capture_output=True, text=True, timeout=120, preexec_fn=lambda: os.umask(0))
@@ -3850,7 +3851,7 @@ def _g12_13(tmp_path, stat):
     for d in (home, cfg, proj, proj / ".claude"):
         os.chmod(d, 0o755)
     mode = lambda p: stat.S_IMODE(os.lstat(p).st_mode)
-    env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
     run = lambda *x: subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), *x, "--no-tune-now"],
                                     cwd=str(proj), env=env, capture_output=True, text=True, timeout=120)
     r = run()                                                          # the plan names them and changes nothing
@@ -3891,7 +3892,7 @@ def test_G12_14_status_repeats_an_open_folder_until_it_is_closed():
         os.chmod(state, 0o777)
         for d in (units, units.parent):
             os.chmod(d, 0o777)
-        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+        env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
         code = ("import sys, time; sys.path.insert(0, sys.argv[1]); import needs_you as ny; now = time.time(); "
                 "d = ny.collect([], None, now, open_=ny.open_now()); print(ny.render(d, now)); print('HEAD', ny.headline(d))")
         status = lambda: subprocess.run([sys.executable, "-I", "-c", code, os.path.join(ROOT, "scripts")], env=env,
@@ -3939,7 +3940,7 @@ def test_G12_15_a_private_group_of_one_is_not_another_account():
             os.chmod(d, 0o755)
         for d in (home / ".config", units.parent, units):
             os.chmod(d, 0o775)
-        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+        env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
         code = ("import json, sys; sys.path.insert(0, sys.argv[1]); import setup as su; m = json.loads(sys.argv[2]); "
                 "su.group_members = lambda gid: None if m is None else set(m); "
                 "print(json.dumps([l for l in su.open_lines(su.open_scan()) if 'Pit Stop cannot tell' in l]))")
@@ -3996,7 +3997,7 @@ def test_G12_16_a_folder_the_person_does_not_own_gets_no_command():
         for d in (home, cfg, cfg / "pit-stop", home / "Library"):
             os.chmod(d, 0o755)
         os.chmod(agents, 0o777)
-        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+        env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
         code = ("import json, os, sys; sys.path.insert(0, sys.argv[1]); import setup as su; me = int(sys.argv[2]); "
                 "os.getuid = lambda: me; su.group_members = lambda gid: set(); "
                 "print(json.dumps([l for l in su.open_lines(su.open_scan()) if 'LaunchAgents' in l]))")
@@ -4035,7 +4036,7 @@ def test_G12_17_undo_leaves_the_home_as_it_was_before_setup(tmp_path):
                 out[os.path.relpath(p, home)] = (oct(st.st_mode), None if os.path.isdir(p) else
                                                  hashlib.sha256(open(p, "rb").read()).hexdigest())
         return out
-    env = {"HOME": str(home), "PATH": str(stub), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}   # no network in a test
+    env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "PATH": str(stub), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}   # no network in a test
     setup = lambda *x: subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), *x], cwd=str(proj),
                                       env=env, capture_output=True, text=True, timeout=120)
     before = listing()
@@ -4088,7 +4089,7 @@ def test_G12_18_the_walk_covers_what_decides_what_runs():
             os.chmod(f, 0o666)
         for d in (sessions, bindir):
             os.chmod(d, 0o777)
-        env = {"HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": str(bindir)}
+        env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": str(bindir)}
         r = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import setup as su; "
                             "su.group_members = lambda gid: set(); print('\\n'.join(su.open_lines(su.open_scan())))",
                             os.path.join(ROOT, "scripts")], env=env, capture_output=True, text=True, timeout=60)
@@ -4103,3 +4104,24 @@ def test_G12_18_the_walk_covers_what_decides_what_runs():
                 f"(~/.claude/plugins/cache/m/windstorm-pit-stop/0.1.0) can be written by another account") in out, out
     finally:
         shutil.rmtree(tmp_path)
+
+
+def test_G12_19_setup_finds_tmux_servers_where_tmux_does(tmp_path, monkeypatch):
+    """The helper reaches a tmux server by name (-L), and tmux looks for that name under TMUX_TMPDIR when it is
+    set, else /tmp. Setup's list of servers looks in the same one place, never both: with TMUX_TMPDIR set it
+    lists the servers there and never reads /tmp's (for a test, the real account's). Seen 2026-11-24: the
+    suite listed the panes of the account's own server through a stub."""
+    stub, tdir = tmp_path / "bin", tmp_path / "tmuxdir"
+    (tdir / f"tmux-{os.getuid()}").mkdir(parents=True)
+    (tdir / f"tmux-{os.getuid()}" / "mine").write_text("")
+    stub.mkdir()
+    log = tmp_path / "calls"
+    (stub / "tmux").write_text(f'#!/bin/sh\necho "$*" >> {log}\necho /dev/pts/9\n')
+    os.chmod(stub / "tmux", 0o755)
+    monkeypatch.setenv("PATH", str(stub))
+    monkeypatch.setenv("TMUX_TMPDIR", str(tdir))
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    servers = su.tmux_servers()
+    assert set(servers) == {None, "mine"}, servers
+    assert log.read_text().splitlines() == ["list-panes -a -F #{pane_tty}", "-L mine list-panes -a -F #{pane_tty}"]
