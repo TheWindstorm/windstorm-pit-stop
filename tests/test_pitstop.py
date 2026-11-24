@@ -4042,9 +4042,21 @@ def test_G12_17_undo_leaves_the_home_as_it_was_before_setup(tmp_path):
     env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "PATH": str(stub), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}   # no network in a test
     setup = lambda *x: subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), *x], cwd=str(proj),
                                       env=env, capture_output=True, text=True, timeout=120)
+    before = listing()                       # an empty home: setup makes ~/.claude itself
+    r = setup("--apply")
+    assert r.returncode == 0, r.stdout[-600:] + r.stderr[-600:]
+    assert ".claude/pit-stop/config.json" in listing()
+    r = setup("--undo")
+    assert r.returncode == 0 and listing() == before, (r.stdout, sorted(set(listing()) - set(before)))
+    assert "removed the folder ~/.claude (setup made it; empty now)" in r.stdout and "rm -r" not in r.stdout
+
+    # with fleet mode: Pit Stop installed (its registry row), as when a person runs setup
+    reg = home / ".claude" / "plugins" / "installed_plugins.json"
+    reg.parent.mkdir(parents=True)
+    reg.write_text(json.dumps({"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
     before = listing()
-    r = setup("--apply", "--fleet")   # nothing installed in this home: setup never says "set up" (rule 8, G12.20)
-    assert r.returncode == 1 and "Fleet mode is NOT set up" in r.stdout, r.stdout[-600:] + r.stderr[-600:]
+    r = setup("--apply", "--fleet")
+    assert r.returncode == 0 and "fleet mode is set up" in r.stdout, r.stdout[-600:] + r.stderr[-600:]
     made = listing()
     for p in (".claude/pit-stop/config.json", ".claude/pit-stop/bin/pit-stop-restart", ".claude/pit-stop/restart.json",
               ".config/systemd/user/pit-stop-restart.timer"):
@@ -4053,10 +4065,10 @@ def test_G12_17_undo_leaves_the_home_as_it_was_before_setup(tmp_path):
     r = setup("--undo")
     assert r.returncode == 0 and r.stdout.strip().splitlines()[-1].startswith("Done:"), r.stdout
     assert listing() == before, (r.stdout, sorted(set(listing()) - set(before)))
-    assert "removed the folder ~/.claude (setup made it; empty now)" in r.stdout and "rm -r" not in r.stdout
+    assert "removed the folder ~/.claude/pit-stop (setup made it; empty now)" in r.stdout and "rm -r" not in r.stdout
     assert "6. removed what Pit Stop made that held nothing of yours: released.json" in r.stdout
 
-    # the person's own setting in the config.json setup made: it stays and is named, with the folders that hold it
+    # the person's own setting in the config.json setup made: it stays and is named, with the folder that holds it
     setup("--apply")
     cfg = home / ".claude" / "pit-stop" / "config.json"
     cfg.write_text(json.dumps(dict(json.loads(cfg.read_text()), mine="yes")))
@@ -4064,7 +4076,6 @@ def test_G12_17_undo_leaves_the_home_as_it_was_before_setup(tmp_path):
     assert json.loads(cfg.read_text()) == {"mine": "yes"}, r.stdout
     assert "3. config.json: auto_tune removed (it was not set); it stays: it holds your settings" in r.stdout, r.stdout
     assert "kept the folder ~/.claude/pit-stop (setup made it): it holds" in r.stdout and "config.json" in r.stdout
-    assert "kept the folder ~/.claude (setup made it): it holds 1 item(s): pit-stop" in r.stdout
 
 
 def test_G12_20_the_way_back_in_is_walked(tmp_path):
@@ -4116,10 +4127,17 @@ def test_G12_20_the_way_back_in_is_walked(tmp_path):
     assert setup("--undo").returncode == 0
     comes_back("setup after --undo")
 
-    uninstall()
+    uninstall()                     # a timer from the earlier install meets no row: nothing changes, it is named
+    fleet_files = lambda: {str(p.relative_to(home)): p.read_bytes() for p in (   # noqa: E731
+        launcher, home / ".claude" / "pit-stop" / "restart.json", *(home / ".config" / "systemd" / "user").glob("*"))}
+    was = fleet_files()
     r = setup("--apply", "--fleet")
     assert r.returncode == 1 and "fleet mode is set up" not in r.stdout, r.stdout[-800:]
-    assert "Fleet mode is NOT set up" in r.stdout and "claude plugin install windstorm-pit-stop@" in r.stdout, r.stdout[-800:]
+    assert "Fleet mode is NOT set up: nothing of it was made or changed" in r.stdout, r.stdout[-800:]
+    assert "claude plugin install windstorm-pit-stop@" in r.stdout and "4. launcher" not in r.stdout, r.stdout[-800:]
+    assert ("Left as it is, from an earlier install: ~/.config/systemd/user/pit-stop-restart.service: it runs Pit Stop's "
+            "launcher, which runs nothing until Pit Stop is installed again") in r.stdout, r.stdout[-800:]
+    assert fleet_files() == was
     assert "nothing run" in py(launcher).stdout
     install()
     comes_back("setup after uninstall and install")
@@ -4132,6 +4150,15 @@ def test_G12_20_the_way_back_in_is_walked(tmp_path):
     comes_back("setup after an --undo cut half way")
     r = setup("--undo")
     assert r.returncode == 0 and r.stdout.strip().splitlines()[-1].startswith("Done:"), r.stdout
+
+    # a home with no row at all (a --plugin-dir copy): the stop has made nothing of fleet mode
+    reg.write_text(json.dumps({"version": 2, "plugins": {}}))
+    r = setup("--apply", "--fleet")
+    assert r.returncode == 1 and "Fleet mode is NOT set up: nothing of it was made or changed" in r.stdout, r.stdout[-800:]
+    assert "Left as it is" not in r.stdout
+    assert not launcher.exists() and not (home / ".claude" / "pit-stop" / "restart.json").exists()
+    units = home / ".config" / "systemd" / "user"
+    assert not (units.exists() and any(units.iterdir())), sorted(units.iterdir())
 
 
 def test_G12_18_the_walk_covers_what_decides_what_runs():

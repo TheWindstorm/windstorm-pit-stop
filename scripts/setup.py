@@ -933,6 +933,23 @@ def main():
     if not shutil.which("tmux"):
         print("  tmux is not installed or not on PATH: fleet mode needs it. Nothing done.")
         return 1
+    # rule 8 and rule 11 (G12.20): the launcher's own check comes FIRST too, so a stop has made nothing
+    import launcher as ln
+    root, why = ln.find(pc.CLAUDE_DIR)
+    if not root and why != "unreadable":
+        there = already_scheduled()
+        print(f"  check: the launcher a timer runs would run nothing: {ln.SAY[why]}.")
+        print(f"  Fleet mode is NOT set up: nothing of it was made or changed. Install Pit Stop from its marketplace "
+              f"(claude plugin install windstorm-pit-stop@{own_marketplace()[0] or 'thewindstorm'}), then this setup again.")
+        for h in there:
+            try:
+                direct = h != "crontab" and "pit-stop-restart" not in open(h, errors="replace").read()
+            except OSError:
+                direct = False
+            print(f"  Left as it is, from an earlier install: {h.replace(pc.HOME, '~')}: " + (
+                "it names a version folder directly, not Pit Stop's launcher; what it runs is not checked here"
+                if direct else "it runs Pit Stop's launcher, which runs nothing until Pit Stop is installed again"))
+        return 1 if a.apply else 0
     servers = tmux_servers()
     ttys = {session_tty(s.get("pid")) for s in sessions}
     best = max(servers, key=lambda n: len(servers[n] & ttys)) if servers else None
@@ -966,8 +983,7 @@ def main():
     else:
         print("6. timer:")
         install_timer(max(2, min(a.interval, 30)), a.apply)
-    # rule 8 (G12.20): setup's last act is the check the timer's own launcher makes; "set up" and 0 only when it passes
-    import launcher as ln
+    # rule 8 (G12.20): the last act is the same check again (a row can go between the two); "set up" and 0 only then
     root, why = ln.find(pc.CLAUDE_DIR)
     if root:
         print(f"7. check: the launcher the timer runs finds Pit Stop at {root.replace(pc.HOME, '~')}"

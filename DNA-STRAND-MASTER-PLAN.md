@@ -465,7 +465,7 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.19 Setup finds tmux servers where tmux does.** `tmux_servers()` in `scripts/setup.py` lists the server names under TMUX_TMPDIR when it is set, else under /tmp, never both: the helper reaches a server by name (-L), and tmux itself looks in that one place. Seen 2026-11-24: the suite listed the account's own server through a stub. Proof: `test_G12_19_setup_finds_tmux_servers_where_tmux_does`.
 
-**G12.20 The way back in is walked.** With --fleet, setup's last act is the check the timer's own launcher makes: "fleet mode is set up" and 0 only when the launcher finds Pit Stop installed, else NOT set up, the install command, and 1. A test walks setup, --undo, setup; setup, uninstall, setup, install, setup; and an --undo cut half way. Seen 2026-11-24 in a walk. Proof: `test_G12_20_the_way_back_in_is_walked`.
+**G12.20 The way back in is walked.** With --fleet, setup's first and last act is the check the timer's launcher makes. With no Pit Stop row it makes and changes nothing of fleet mode, names a timer an earlier install left, says NOT set up with the install command, and answers 1; "fleet mode is set up" and 0 only when the check passes. A test walks --undo, uninstall and a cut --undo. Proof: `test_G12_20_the_way_back_in_is_walked`.
 
 ### G13 Self-update for everyone (open)
 

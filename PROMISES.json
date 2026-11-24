@@ -274,6 +274,20 @@
    "proven": "2026-11-23, on a stock Ubuntu 24.04.5 virtual machine with Claude Code 2.1.330 and no sign-in, from this row's code at the pull request's head 0b06cc6 (scripts/ there differs from the merged release branch only in gone_line(), which a timer's run through the launcher does not reach): fleet setup installed the timer; after Claude Code's own `claude plugin uninstall`, the timer's next passes started nothing and logged that Pit Stop is not installed, with `systemctl --user disable --now pit-stop-restart.timer`; that command, run as printed, exited 0 and the timer was gone. Installing the same version again cleared `.orphaned_at` and the helper ran again. Also on a Linux test account with Claude Code 2.1.280: the marker was cleared on the same-version reinstall, twice. Not seen on macOS (no command is printed there).",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P28",
+   "seen": "2026-11-24, walking setup, leaving and setup again in a throwaway home: with no Pit Stop row in Claude Code's plugin list (a copy run with --plugin-dir, or setup again after `claude plugin uninstall`), `/pit-stop setup --fleet --apply` wrote the launcher, restart.json and the timer, said \"enabled and started\" and answered 0, while the launcher that timer runs said on every pass \"nothing run: Pit Stop is not installed\". Released 0.6.1's setup makes no such check.",
+   "promise": "With --fleet, setup checks first and last what the timer's own launcher checks. With no Pit Stop row it makes and changes nothing of fleet mode, names a timer an earlier install left (it runs nothing until Pit Stop is installed again), says fleet mode is NOT set up with the one install command, and answers 1. It says \"fleet mode is set up\" and answers 0 only when the launcher finds Pit Stop. A plugin list that cannot be read is \"not checked\", with no advice to set up again.",
+   "codon": "G12.20",
+   "issue": null,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "test_G12_20_the_way_back_in_is_walked",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
