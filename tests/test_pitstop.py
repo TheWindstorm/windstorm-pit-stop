@@ -3079,7 +3079,7 @@ def test_G12_7_setup_undo_puts_back_what_apply_changed(tmp_path, monkeypatch, ca
                  "3. config.json: auto_tune removed (it was not set), budget removed (it was not set)",
                  "4. marketplace entry thewindstorm: put back as it was before setup", "window and idle point put back"):
         assert step in out, step
-    left = next(x for x in out.splitlines() if x.startswith("Left in place"))
+    left = next(x for x in out.splitlines() if "left in place (history" in x)
     assert "checkup" in left and "autotune.log" in left and "/bin" not in left and "setup-undo.json" not in left and not (st / "setup-undo.json").exists()
     assert glob.glob(str(sp) + ".bak-pitstop-*")                                   # backed up before each put-back
 
@@ -3711,7 +3711,7 @@ def test_G12_10_undo_names_only_what_pit_stop_wrote(tmp_path, monkeypatch, capsy
     import setup as su
     out = "\n".join(su.undo(ledger=str(st / "setup-undo.json"), run_cmd=lambda c: (0, "")))
     assert "rm -r" not in out and "rm " not in out                                  # no delete is printed
-    left = next(x for x in out.splitlines() if x.startswith("Left in place"))
+    left = next(x for x in out.splitlines() if "left in place (history" in x)
     assert "autotune.log" in left and "notes.txt" not in left and "theirs" not in left
     assert "2 other file(s) or folder(s) this version of Pit Stop did not write; they stay." in out
     assert (st / "notes.txt").exists() and (st / "theirs").is_dir()
@@ -4012,3 +4012,50 @@ def test_G12_16_a_folder_the_person_does_not_own_gets_no_command():
     r = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import setup as su; "
                         "print(su.owner_name(0))", os.path.join(ROOT, "scripts")], capture_output=True, text=True, timeout=60)
     assert r.stdout.strip() == "the administrator (root, number 0)", r.stderr
+
+
+def test_G12_17_undo_leaves_the_home_as_it_was_before_setup(tmp_path):
+    """Rule 23 (the maintainer's ruling, 2026-11-24): in a home where setup made everything, the listing
+    after --undo equals the listing before setup. What setup made goes by its record (config.json while nothing
+    of the person's is in it, released.json, backups of a file Pit Stop made, the folders it made, by rmdir);
+    what holds the person's settings stays and is named. Seen on a Mac test account: undo left ~/.claude."""
+    import hashlib
+    home, proj, stub = tmp_path / "home", tmp_path / "home" / "proj", tmp_path / "stub"
+    proj.mkdir(parents=True)
+    stub.mkdir()
+    (stub / "tmux").write_text("#!/bin/sh\nexit 0\n")
+    os.chmod(stub / "tmux", 0o755)
+
+    def listing():
+        out = {}
+        for d, dirs, files in os.walk(home):
+            for n in dirs + files:
+                p = os.path.join(d, n)
+                st = os.lstat(p)
+                out[os.path.relpath(p, home)] = (oct(st.st_mode), None if os.path.isdir(p) else
+                                                 hashlib.sha256(open(p, "rb").read()).hexdigest())
+        return out
+    env = {"HOME": str(home), "PATH": str(stub)}
+    setup = lambda *x: subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), *x], cwd=str(proj),
+                                      env=env, capture_output=True, text=True, timeout=120)
+    before = listing()
+    r = setup("--apply", "--fleet")
+    assert r.returncode == 0, r.stdout[-600:] + r.stderr[-600:]
+    made = listing()
+    for p in (".claude/pit-stop/config.json", ".claude/pit-stop/bin/pit-stop-restart", ".claude/pit-stop/restart.json",
+              ".config/systemd/user/pit-stop-restart.timer"):
+        assert p in made, (p, sorted(made))
+    r = setup("--undo")
+    assert r.returncode == 0 and r.stdout.strip().splitlines()[-1].startswith("Done:"), r.stdout
+    assert listing() == before, (r.stdout, sorted(set(listing()) - set(before)))
+    assert "removed the folder ~/.claude (setup made it; empty now)" in r.stdout and "rm -r" not in r.stdout
+
+    # the person's own setting in the config.json setup made: it stays and is named, with the folders that hold it
+    setup("--apply")
+    cfg = home / ".claude" / "pit-stop" / "config.json"
+    cfg.write_text(json.dumps(dict(json.loads(cfg.read_text()), mine="yes")))
+    r = setup("--undo")
+    assert json.loads(cfg.read_text()) == {"mine": "yes"}, r.stdout
+    assert "3. config.json: auto_tune removed (it was not set); it stays: it holds your settings" in r.stdout, r.stdout
+    assert "kept the folder ~/.claude/pit-stop (setup made it): it holds" in r.stdout and "config.json" in r.stdout
+    assert "kept the folder ~/.claude (setup made it): it holds 1 item(s): pit-stop" in r.stdout

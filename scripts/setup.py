@@ -114,6 +114,30 @@ def keep_record(path):
     wrote(UNDO, "files", sha(path), sub=path)
 
 
+def missing_chain(path):
+    """The folders that do not exist yet on the way to PATH (PATH included), deepest first."""
+    out, d = [], os.path.abspath(path)
+    while not os.path.lexists(d) and os.path.dirname(d) != d:
+        out.append(d)
+        d = os.path.dirname(d)
+    return out
+
+
+def note_made(dirs, ledger=None):
+    """Record in the ledger each folder setup is about to make (it did not exist), so --undo removes it, with
+    rmdir only, when it is empty again (rule 23: by the record only; G12.17)."""
+    ledger = ledger or UNDO
+    if not dirs:
+        return
+    d = pc.read_json(ledger, {}) if os.path.exists(ledger) else {}
+    d = d if isinstance(d, dict) else {}
+    made = d.get("made_dirs") if isinstance(d.get("made_dirs"), list) else []
+    made += [x for x in dirs if x not in made]
+    d["made_dirs"] = made
+    os.makedirs(os.path.dirname(ledger), exist_ok=True)
+    pc.write_json_atomic(ledger, d, 0o600)
+
+
 def note(ledger, key, value, sub=None):
     """Keep in LEDGER what was there before setup's first change of KEY (or of KEY's SUB): a later
     --apply never overwrites it, so --undo goes back to before the first setup. No LEDGER: no record."""
@@ -241,6 +265,7 @@ def install_timer(interval, apply):
             print(f"    {PLIST} exists and is not Pit Stop's: left as it is, no timer written")
             return
         if apply:
+            note_made(missing_chain(os.path.dirname(PLIST)))
             os.makedirs(os.path.dirname(PLIST), exist_ok=True)
             with open(PLIST, "w") as f:
                 f.write(body)
@@ -256,6 +281,7 @@ def install_timer(interval, apply):
         return
     if not apply:
         return
+    note_made(missing_chain(UNIT_DIR))
     os.makedirs(UNIT_DIR, exist_ok=True)
     with open(svc, "w") as f:
         f.write(f"[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
@@ -625,11 +651,21 @@ def undo(ledger=None, run_cmd=None):
             else:
                 d.pop(k, None)
     said = [f"{k} left as you set it since ({json_word(now_cfg.get(k, MISSING))})" for k in theirs]
-    if cfg_changes and os.path.exists(pc.CONFIG):
+    cf = rec.get("config_file") if isinstance(rec.get("config_file"), dict) else {}
+    made_cfg = cf.get("existed") is False and os.path.exists(pc.CONFIG)
+    rest = None
+    if made_cfg and not theirs:
+        rest, err = pc.read_json_strict(pc.CONFIG)
+        if not err and isinstance(rest, dict):
+            put_cfg(rest)
+    if made_cfg and (sha(pc.CONFIG) == cf.get("set") or rest == {}):
+        os.remove(pc.CONFIG)                               # setup made it and nothing of yours is in it (G12.17)
+        out.append(f"3. config.json: removed {home(pc.CONFIG)} (setup made it; nothing of yours was in it)")
+    elif cfg_changes and os.path.exists(pc.CONFIG):
         why = _put_back(pc.CONFIG, put_cfg)
         out.append("3. config.json: " + (why or ", ".join(
             [f"{k} {'back to ' + json_word(v.get('value')) if v.get('had') else 'removed (it was not set)'}"
-             for k, v in cfg_changes.items()] + said)))
+             for k, v in cfg_changes.items()] + said)) + ("; it stays: it holds your settings" if made_cfg else ""))
     else:
         out.append("3. config.json: " + (", ".join(said) if said else "nothing setup changed"))
     # 4. the marketplace entry
@@ -708,18 +744,49 @@ def undo(ledger=None, run_cmd=None):
     tuned = sorted(x for x in os.listdir(pc.FOLDERS) if x.endswith(".json")) if os.path.isdir(pc.FOLDERS) else []
     if tuned:
         out.append(f"   daily tuning's own moves stay where they are; its record of each folder: {home(pc.FOLDERS)}")
-    # what stays, by name
+    # 6. what Pit Stop made that holds nothing of yours goes; history stays, by name (G12.17)
     if os.path.exists(ledger):
         os.remove(ledger)
+    gone = []
+    for x in ("released.json", "machine-behind.json"):          # Pit Stop's own reading of the newest release
+        p = os.path.join(pc.STATE_DIR, x)
+        if os.path.isfile(p) and not os.path.islink(p):
+            os.remove(p)
+            gone.append(x)
+    if cf.get("existed") is False:                               # a backup of the config.json setup made: only
+        for b in sorted(glob.glob(glob.escape(pc.CONFIG) + ".bak-pitstop-*")):   # Pit Stop's keys in it
+            data = pc.read_json(b, None)
+            if (os.path.isfile(b) and not os.path.islink(b) and isinstance(data, dict)
+                    and set(data) <= {"auto_tune", "budget"} and pc.state_name_is_ours(os.path.basename(b))):
+                os.remove(b)
+                gone.append(os.path.basename(b))
+    if gone:
+        out.append(f"6. removed what Pit Stop made that held nothing of yours: {', '.join(gone)}")
     names = sorted(x for x in os.listdir(pc.STATE_DIR) if x not in ("config.json", "restart.json")) if os.path.isdir(
         pc.STATE_DIR) else []
     left = [x for x in names if pc.state_name_is_ours(x)]
     others = len(names) - len(left)
-    out.append("Left in place (history, not settings): " + (", ".join(home(os.path.join(pc.STATE_DIR, x)) for x in left)
-                                                          if left else "nothing"))
+    out.append(f"{'7' if gone else '6'}. left in place (history, not settings): "
+               + (", ".join(home(os.path.join(pc.STATE_DIR, x)) for x in left) if left else "nothing"))
     if others:   # G12.10: not ours, so never named as Pit Stop's and never offered for deletion
         out.append(f"   Also in {home(pc.STATE_DIR)}: {others} other file(s) or folder(s) this version of Pit Stop "
                    f"did not write; they stay.")
+    # the folders this setup made, by the record only, with rmdir only: never a recursive remove (rule 23)
+    n = 8 if gone else 7
+    for d in sorted((x for x in (rec.get("made_dirs") or []) if isinstance(x, str)), key=len, reverse=True):
+        if not os.path.isdir(d) or os.path.islink(d):
+            continue
+        try:
+            os.rmdir(d)
+            out.append(f"{n}. removed the folder {home(d)} (setup made it; empty now)")
+        except OSError:
+            try:
+                inside = sorted(os.listdir(d))
+            except OSError:
+                inside = []
+            out.append(f"{n}. kept the folder {home(d)} (setup made it): it holds {len(inside)} item(s): "
+                       f"{', '.join(inside[:8])}{', ...' if len(inside) > 8 else ''}")
+        n += 1
     # rule 8: a foreign file does not stop a leave; the last line says it is done and where what stayed is named
     out.append(f"Done: what Pit Stop's setup changed is put back; anything that stayed is named above. "
                f"To remove Pit Stop itself: claude plugin uninstall windstorm-pit-stop@{name or 'thewindstorm'}")
@@ -750,6 +817,11 @@ def main():
         for line in undo():
             print(line)
         return 0
+    if a.apply:   # before anything is written: what this setup will make that was not here (G12.17)
+        made = missing_chain(pc.STATE_DIR)
+        cfg_was = os.path.lexists(pc.CONFIG)
+        note_made(made)
+        note(UNDO, "config_file", {"existed": cfg_was})
     word = "DOING" if a.apply else "PLAN (nothing is changed; add --apply)"
     sessions, source = pc.live_sessions()
     newest = pc.newest_local_version()
@@ -786,6 +858,7 @@ def main():
                 wrote(UNDO, "budget", a.budget)
                 cfg["budget"] = a.budget
             pc.write_json_atomic(pc.CONFIG, cfg)
+            wrote(UNDO, "config_file", sha(pc.CONFIG))
 
     folders = sorted({s.get("cwd") for s in sessions if s.get("cwd")} | {os.getcwd()})
     if a.no_tune_now:
@@ -845,6 +918,7 @@ def main():
     if os.path.exists(BIN) and not ours(BIN):
         print(f"   {BIN} exists and is not Pit Stop's: left as it is")
     elif a.apply:
+        note_made(missing_chain(os.path.dirname(BIN)))
         os.makedirs(os.path.dirname(BIN), exist_ok=True)
         shutil.copyfile(os.path.join(os.path.dirname(os.path.abspath(__file__)), "launcher.py"), BIN)
         os.chmod(BIN, 0o755)

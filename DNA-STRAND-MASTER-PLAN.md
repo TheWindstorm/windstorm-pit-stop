@@ -459,6 +459,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.16 A folder the person does not own gets no command.** A named folder whose owner number is not the one Pit Stop runs as says who owns it (the administrator, or the account by number) and that only an administrator can close it, with no chmod. Each named line says what runs under it: the launch agent, the systemd timer, the launcher, the installed code. Seen 2026-11-24 in two other walks. Proof: `test_G12_16_a_folder_the_person_does_not_own_gets_no_command`.
 
+**G12.17 Undo leaves the home as it was before setup.** Setup records each folder and the config.json it makes; `--undo` removes, by that record, config.json while nothing of the person's is in it, released.json, backups of a file Pit Stop made, and the folders with rmdir only; what holds the person's settings stays, named on a numbered line. In a home where setup made everything, the listing after undo equals the one before. Seen 2026-11-24 on a Mac. Proof: `test_G12_17_undo_leaves_the_home_as_it_was_before_setup`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.
