@@ -288,9 +288,12 @@ def test_G1_13_hook_command_falls_back_to_python_when_python3_is_a_stub(tmp_path
     os.symlink(sys.executable, stub / "python")
     hold = transcript(tmp_path, "hold", [a("tool_use")])
     done = transcript(tmp_path, "done", [a("text")])
-    for path_first in (str(stub), os.path.dirname(sys.executable)):   # a stub python3 first, then a real one
+    real = tmp_path / "realbin"   # a real python3 alone: its own folder (/usr/bin) would also bring tmux, claude (rule 17)
+    real.mkdir()
+    os.symlink(sys.executable, real / "python3")
+    for path_first in (str(stub), str(real)):   # a stub python3 first, then a real one
         env = dict(os.environ, CLAUDE_CONFIG_DIR=str(tmp_path / "cfg"), CLAUDE_PLUGIN_ROOT=ROOT,
-                   PATH=path_first + os.pathsep + "/usr/bin:/bin")
+                   PATH=path_first + os.pathsep + os.environ["PATH"])   # the run's stubs before /usr/bin (rule 17)
         env.pop("PIT_STOP_CEILING", None)
         for tr, want in ((hold, 2), (done, 0)):
             r = subprocess.run(["sh", "-c", command], input=json.dumps({"trigger": "auto", "transcript_path": tr, "session_id": "t"}),
@@ -3024,7 +3027,7 @@ def test_G12_7_setup_undo_puts_back_what_apply_changed(tmp_path, monkeypatch, ca
     cd, st = tmp_path / "claude", tmp_path / "state"
     (cd / "plugins").mkdir(parents=True)
     (cd / "plugins" / "installed_plugins.json").write_text(json.dumps(
-        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user"}]}}))
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
     src = {"source": "github", "repo": "TheWindstorm/windstorm-pit-stop"}
     (cd / "plugins" / "known_marketplaces.json").write_text(json.dumps({"thewindstorm": {"source": src}}))
     sp = cd / "settings.json"
@@ -4040,8 +4043,8 @@ def test_G12_17_undo_leaves_the_home_as_it_was_before_setup(tmp_path):
     setup = lambda *x: subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), *x], cwd=str(proj),
                                       env=env, capture_output=True, text=True, timeout=120)
     before = listing()
-    r = setup("--apply", "--fleet")
-    assert r.returncode == 0, r.stdout[-600:] + r.stderr[-600:]
+    r = setup("--apply", "--fleet")   # nothing installed in this home: setup never says "set up" (rule 8, G12.20)
+    assert r.returncode == 1 and "Fleet mode is NOT set up" in r.stdout, r.stdout[-600:] + r.stderr[-600:]
     made = listing()
     for p in (".claude/pit-stop/config.json", ".claude/pit-stop/bin/pit-stop-restart", ".claude/pit-stop/restart.json",
               ".config/systemd/user/pit-stop-restart.timer"):
@@ -4062,6 +4065,73 @@ def test_G12_17_undo_leaves_the_home_as_it_was_before_setup(tmp_path):
     assert "3. config.json: auto_tune removed (it was not set); it stays: it holds your settings" in r.stdout, r.stdout
     assert "kept the folder ~/.claude/pit-stop (setup made it): it holds" in r.stdout and "config.json" in r.stdout
     assert "kept the folder ~/.claude (setup made it): it holds 1 item(s): pit-stop" in r.stdout
+
+
+def test_G12_20_the_way_back_in_is_walked(tmp_path):
+    """Rule 8, THE WAY BACK IN IS WALKED TOO (the maintainer, 2026-11-24): setup decides by what is there
+    now, and its last act is the check the timer's own launcher makes: "fleet mode is set up" and 0 only when the
+    launcher finds Pit Stop. The circle, for each way of leaving: setup, --undo, setup again; setup, uninstall
+    (the registry row emptied and the folder marked .orphaned_at, as Claude Code 2.1.280 was seen to do), setup
+    again says NOT set up and answers 1, install, setup again; setup, an --undo cut half way, setup again. Each
+    circle ends with the launcher finding Pit Stop and status answering."""
+    import shutil
+    home, stub = tmp_path / "home", tmp_path / "stub"
+    proj = home / "proj"
+    proj.mkdir(parents=True)
+    stub.mkdir()
+    for n, body in (("tmux", "exit 0"), ("systemctl", "exit 0"), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
+        (stub / n).write_text(f"#!/bin/sh\n{body}\n")
+        os.chmod(stub / n, 0o755)
+    cache = home / ".claude" / "plugins" / "cache" / "thewindstorm" / "windstorm-pit-stop" / "0.6.2"
+    reg = home / ".claude" / "plugins" / "installed_plugins.json"
+
+    def install():
+        if cache.exists():
+            shutil.rmtree(cache)
+        shutil.copytree(ROOT, cache, ignore=shutil.ignore_patterns(".git", "tests", "__pycache__", ".pytest_cache"))
+        reg.write_text(json.dumps({"version": 2, "plugins": {"windstorm-pit-stop@thewindstorm": [
+            {"scope": "user", "installPath": str(cache), "version": "0.6.2"}]}}))
+
+    def uninstall():
+        reg.write_text(json.dumps({"version": 2, "plugins": {}}))
+        (cache / ".orphaned_at").write_text("1")
+    env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "PATH": str(stub),
+           "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    py = lambda *x: subprocess.run([sys.executable, "-I", *map(str, x)], cwd=str(proj), env=env,   # noqa: E731
+                                   capture_output=True, text=True, timeout=120)
+    setup = lambda *x: py(cache / "scripts" / "setup.py", *x)   # noqa: E731
+    launcher = home / ".claude" / "pit-stop" / "bin" / "pit-stop-restart"
+
+    def comes_back(why):
+        r = setup("--apply", "--fleet")
+        assert r.returncode == 0 and "fleet mode is set up" in r.stdout, (why, r.stdout[-800:], r.stderr[-400:])
+        r = py(launcher)
+        assert r.returncode == 0 and "nothing run" not in r.stdout, (why, r.stdout[-400:])
+        r = py(cache / "scripts" / "needs_you.py")
+        assert r.returncode == 0, (why, r.stdout[-400:], r.stderr[-400:])
+
+    reg.parent.mkdir(parents=True)
+    install()
+    comes_back("first setup")
+    assert setup("--undo").returncode == 0
+    comes_back("setup after --undo")
+
+    uninstall()
+    r = setup("--apply", "--fleet")
+    assert r.returncode == 1 and "fleet mode is set up" not in r.stdout, r.stdout[-800:]
+    assert "Fleet mode is NOT set up" in r.stdout and "claude plugin install windstorm-pit-stop@" in r.stdout, r.stdout[-800:]
+    assert "nothing run" in py(launcher).stdout
+    install()
+    comes_back("setup after uninstall and install")
+
+    cut = py("-c", "import sys, os; sys.path.insert(0, os.path.join(sys.argv[1], 'scripts')); import setup as su\n"
+             "def cut(*a, **k):\n    raise KeyboardInterrupt('cut')\nsu.pc.config = cut\n"
+             "try:\n    su.undo()\nexcept KeyboardInterrupt:\n    sys.exit(130)", cache)
+    assert cut.returncode == 130, cut.stderr[-400:]
+    assert (home / ".claude" / "pit-stop" / "setup-undo.json").exists()   # the record outlived the cut
+    comes_back("setup after an --undo cut half way")
+    r = setup("--undo")
+    assert r.returncode == 0 and r.stdout.strip().splitlines()[-1].startswith("Done:"), r.stdout
 
 
 def test_G12_18_the_walk_covers_what_decides_what_runs():

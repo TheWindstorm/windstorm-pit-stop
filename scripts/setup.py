@@ -966,8 +966,21 @@ def main():
     else:
         print("6. timer:")
         install_timer(max(2, min(a.interval, 30)), a.apply)
-    print(f"   First look at what it would do: {sys.executable} -I {os.path.join(os.path.dirname(os.path.abspath(__file__)), 'restart_at_break.py')}")
-    return 0
+    # rule 8 (G12.20): setup's last act is the check the timer's own launcher makes; "set up" and 0 only when it passes
+    import launcher as ln
+    root, why = ln.find(pc.CLAUDE_DIR)
+    if root:
+        print(f"7. check: the launcher the timer runs finds Pit Stop at {root.replace(pc.HOME, '~')}"
+              + ("; fleet mode is set up" if a.apply else ""))
+        print(f"   First look at what it would do: {sys.executable} -I {BIN}")
+        return 0
+    print(f"7. check: the launcher the timer runs would run nothing: {ln.SAY[why]}.")
+    if why == "unreadable":
+        print("   Not checked, so fleet mode is not said to be set up; the timer's next pass reads the list again.")
+    else:
+        print(f"   Fleet mode is NOT set up: the timer needs Pit Stop installed from its marketplace "
+              f"(claude plugin install windstorm-pit-stop@{own_marketplace()[0] or 'thewindstorm'}), then this setup again.")
+    return 1 if a.apply else 0
 
 
 if __name__ == "__main__":

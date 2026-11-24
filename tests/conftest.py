@@ -89,10 +89,15 @@ def _audit(event, args):
         if not tdir or any(os.path.join(os.path.realpath(tdir), f"tmux-{os.getuid()}") == r for r in REAL_TMUX):
             _seen["hits"].append(f"a child that would look in the real tmux folder (TMUX_TMPDIR "
                                  f"{'not set' if not tdir else tdir}): {' '.join(argv)[:100]}")
+        temp = [os.path.realpath(tempfile.gettempdir()), "/tmp", _SESSION_TMP]
         if argv and os.path.basename(argv[0]) in _SYSTEM:
             found = shutil.which(argv[0], path=env.get("PATH"))
-            if found and not _under(found, [os.path.realpath(tempfile.gettempdir()), "/tmp", _SESSION_TMP]):
+            if found and not _under(found, temp):
                 _seen["hits"].append(f"this machine's own {os.path.basename(argv[0])}: {' '.join(argv)[:100]}")
+        for n in _SYSTEM:      # what the child itself may start: its PATH must not reach this machine's own copy
+            found = shutil.which(n, path=env.get("PATH") or os.defpath)
+            if found and not _under(found, temp):
+                _seen["hits"].append(f"a child whose PATH reaches this machine's own {n} ({found}): {' '.join(argv)[:80]}")
 
 
 sys.addaudithook(_audit)

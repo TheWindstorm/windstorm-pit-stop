@@ -232,6 +232,9 @@ def test_python_libraries_and_the_checkout_are_left_out():
 def test_starts_a_child_with_no_home():
     subprocess.run([sys.executable, "-I", "-c", "pass"], env={"PATH": os.environ["PATH"]})
 
+def test_a_childs_path_reaches_this_machines_own_programs():
+    subprocess.run([sys.executable, "-I", "-c", "pass"], env=dict(os.environ, PATH="/usr/bin:/bin"))
+
 def test_runs_this_machines_own_program():
     real = shutil.which("systemctl", path="/usr/bin:/bin") or shutil.which("launchctl", path="/usr/bin:/bin")
     assert real, "neither systemctl nor launchctl here"
@@ -250,23 +253,24 @@ def test_stays_in_its_own_home(tmp_path):
 def test_G19_5_the_suite_never_uses_the_home_of_the_account_running_it(tmp_path):
     """Rule 17: conftest gives the run its own home, Claude Code folder and tmux folder, puts failing stubs for
     tmux, claude, crontab, systemctl, loginctl and launchctl first on PATH, and its guard fails a test that
-    reaches the real home (its .claude, its .local, a rename into it), starts a child with no HOME, or runs this
-    machine's own systemctl or launchctl, and leaves out Python's own libraries and the checkout. Control: the same planted tests with the guard taken out all pass."""
+    reaches the real home (its .claude, its .local, a rename into it), starts a child with no HOME or one whose PATH
+    reaches this machine's own programs, or runs this machine's own systemctl or launchctl, and leaves out Python's own libraries and the checkout. Control: the same planted tests with the guard taken out all pass."""
     root = _world(tmp_path, GUARDED, {"1": "good"})
     code, out = _pytest(root, "-v")
     verdict = {n: ("PASSED" if f"::{n} PASSED" in out else "FAILED" if f"::{n} " in out and "PASSED" not in
                    [ln for ln in out.splitlines() if f"::{n} " in ln][0] else "?")
                for n in ("test_reads_the_real_claude_folder", "test_reads_elsewhere_in_the_home",
                          "test_renames_into_the_home", "test_python_libraries_and_the_checkout_are_left_out",
-                         "test_starts_a_child_with_no_home",
+                         "test_starts_a_child_with_no_home", "test_a_childs_path_reaches_this_machines_own_programs",
                          "test_runs_this_machines_own_program", "test_the_stub_answers_first", "test_stays_in_its_own_home")}
     assert verdict == {"test_reads_the_real_claude_folder": "FAILED", "test_reads_elsewhere_in_the_home": "FAILED",
                        "test_renames_into_the_home": "FAILED",
                        "test_python_libraries_and_the_checkout_are_left_out": "PASSED",
                        "test_starts_a_child_with_no_home": "FAILED",
+                       "test_a_childs_path_reaches_this_machines_own_programs": "FAILED",
                        "test_runs_this_machines_own_program": "FAILED", "test_the_stub_answers_first": "PASSED",
                        "test_stays_in_its_own_home": "PASSED"}, out[-4000:]
-    assert "5 failed, 3 passed" in out and "rule 17: this test reached the home or the tools" in out, out[-4000:]
+    assert "6 failed, 3 passed" in out and "rule 17: this test reached the home or the tools" in out, out[-4000:]
     conf = root / "tests" / "conftest.py"                                # the control: no guard, nothing caught
     conf.write_text(conf.read_text().replace("sys.addaudithook(_audit)", "pass"))
     code, out = _pytest(root, "-v")
