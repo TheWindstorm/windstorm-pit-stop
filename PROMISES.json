@@ -288,6 +288,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P29",
+   "seen": "2026-11-24, reading setup's code after a test showed that its schedule check skips a timer file it cannot open: with Pit Stop installed, a unit file that could not be read, or a `crontab -l` that was refused or gave no answer, was taken for \"nothing schedules the helper here\", so `/pit-stop setup --fleet --apply` could add a second schedule beside one it had not read. Released 0.6.1 decides the same way.",
+   "promise": "Setup --fleet makes a timer only when it has read that nothing else schedules the restart helper. A place it could not read (a unit or launch agent file, or a `crontab -l` refused, killed or silent) is named as not checked; no timer is made, fleet mode is NOT set up, and setup answers 1. \"no crontab for <user>\" and no crontab program count as none there.",
+   "codon": "G12.21",
+   "issue": null,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "test_G12_21_a_schedule_that_could_not_be_read_is_not_none",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

@@ -248,21 +248,34 @@ def session_tty(pid):
         return f"/dev/{t}" if t and t != "??" else None
 
 
-def already_scheduled():
-    """Paths of timers or cron lines that already run restart_at_break.py or the launcher."""
-    hits = []
+def schedule_read(run_cmd=None):
+    """(hits, unread): the timers or cron lines that already run restart_at_break.py or the launcher, and the
+    places that could not be read, so what they run is not known (rule 6: never taken for "none there").
+    `crontab -l`: exit 0 is read; "no crontab for <user>" is none (cron 3.0pl1-184ubuntu2's own text); no crontab
+    program is none; anything else (not allowed, no answer) is unread."""
+    hits, unread = [], []
     for f in glob.glob(os.path.join(UNIT_DIR, "*.service")) + glob.glob(os.path.join(pc.HOME, "Library", "LaunchAgents", "*.plist")):
         try:
             with open(f, errors="replace") as fh:
                 t = fh.read()
         except OSError:
+            unread.append(f)
             continue
         if "restart_at_break.py" in t or "pit-stop-restart" in t:
             hits.append(f)
-    r = run(["crontab", "-l"], 10)
-    if r and r.returncode == 0 and ("restart_at_break.py" in r.stdout or "pit-stop-restart" in r.stdout):
-        hits.append("crontab")
-    return hits
+    if shutil.which("crontab"):
+        r = (run_cmd or run)(["crontab", "-l"], 10)
+        if r and r.returncode == 0:
+            if "restart_at_break.py" in r.stdout or "pit-stop-restart" in r.stdout:
+                hits.append("crontab")
+        elif not (r and "no crontab for" in (r.stderr or "")):
+            unread.append("crontab")
+    return hits, unread
+
+
+def already_scheduled():
+    """Paths of timers or cron lines that already run restart_at_break.py or the launcher."""
+    return schedule_read()[0]
 
 
 def timer_path():
@@ -288,9 +301,12 @@ def install_timer(interval, apply):
 </dict></plist>
 """
         print(f"  timer: {PLIST} (launchd, every {interval} min)")
+        if os.path.exists(PLIST) and sha(PLIST) is None:
+            print(f"    {PLIST} could not be read here; what it is is not known: left as it is, no timer written")
+            return False
         if os.path.exists(PLIST) and not ours(PLIST):
             print(f"    {PLIST} exists and is not Pit Stop's: left as it is, no timer written")
-            return
+            return False
         if apply:
             note_made(missing_chain(os.path.dirname(PLIST)))
             os.makedirs(os.path.dirname(PLIST), exist_ok=True)
@@ -299,15 +315,19 @@ def install_timer(interval, apply):
             keep_record(PLIST)
             r = run(["launchctl", "bootstrap", f"gui/{os.getuid()}", PLIST])
             print("    loaded" if r and r.returncode == 0 else f"    written; load it with: launchctl bootstrap gui/{os.getuid()} {PLIST}")
-        return
+        return True
     svc, tmr = os.path.join(UNIT_DIR, "pit-stop-restart.service"), os.path.join(UNIT_DIR, "pit-stop-restart.timer")
     print(f"  timer: {tmr} (systemd user timer, every {interval} min)")
+    unread = [f for f in (svc, tmr) if os.path.exists(f) and sha(f) is None]
+    if unread:
+        print(f"    {', '.join(unread)} could not be read here; what it is is not known: left as it is, no timer written")
+        return False
     theirs = [f for f in (svc, tmr) if os.path.exists(f) and not ours(f)]
     if theirs:
         print(f"    {', '.join(theirs)} exist(s) and are not Pit Stop's: left as they are, no timer written")
-        return
+        return False
     if not apply:
-        return
+        return True                       # a plan: this timer would be written
     note_made(missing_chain(UNIT_DIR))
     os.makedirs(UNIT_DIR, exist_ok=True)
     with open(svc, "w") as f:
@@ -321,6 +341,7 @@ def install_timer(interval, apply):
                                                            ["systemctl", "--user", "enable", "--now", "pit-stop-restart.timer"]))
     print("    enabled and started" if ok else "    written; start it with: systemctl --user daemon-reload && "
                                                "systemctl --user enable --now pit-stop-restart.timer")
+    return True
 
 
 def accounts_in_group(gid, passwd, listed, me):
@@ -998,15 +1019,25 @@ def main():
             pc.write_json_atomic(rj, {"tmux_socket": best, "allow_names": [], "deny_names": [],
                                       "deny_name_globs": [], "deny_paths": [], "plugin_updates": a.plugin_updates})
             note(UNDO, "restart_json", {"path": rj, "sha256": sha(rj)})
-    hits = already_scheduled()
+    hits, unread = schedule_read()
+    placed = True
     if hits:
         print("6. timer: something already schedules the restart helper; nothing changed:")
         for h in hits:
             print(f"     {h}")
         print(f"   To follow plugin updates by itself, make its command: {sys.executable} -I {BIN} --live")
+    elif unread:      # rule 6: what could not be read is not "none there"; never a second schedule
+        placed = False
+        print("6. timer: not checked: " + ", ".join("your crontab (crontab -l did not list it)" if u == "crontab"
+                                                   else u.replace(pc.HOME, "~") for u in unread)
+              + " could not be read here; what it runs is not known, so no timer is made (never a second schedule).")
     else:
         print("6. timer:")
-        install_timer(max(2, min(a.interval, 30)), a.apply)
+        placed = install_timer(max(2, min(a.interval, 30)), a.apply)
+    if not placed:
+        print("   Fleet mode is NOT set up: no timer was made. Once what step 6 names can be read (or is not Pit "
+              "Stop's to keep), run this setup again.")
+        return 1 if a.apply else 0
     # rule 8 (G12.20): the last act is the same check again (a row can go between the two); "set up" and 0 only then
     root, why = ln.find(pc.CLAUDE_DIR)
     if root:

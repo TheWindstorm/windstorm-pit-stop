@@ -3045,7 +3045,8 @@ def test_G12_7_setup_undo_puts_back_what_apply_changed(tmp_path, monkeypatch, ca
                       (su, "UNIT_DIR", str(units)), (su, "PLIST", str(tmp_path / "none.plist"))):
         monkeypatch.setattr(mod, k, v)
     ran = []
-    monkeypatch.setattr(su, "run", lambda cmd, timeout=30: ran.append(cmd) or None)
+    no_cron = subprocess.CompletedProcess(["crontab", "-l"], 1, "", "no crontab for x\n")   # cron 3.0pl1's words
+    monkeypatch.setattr(su, "run", lambda cmd, timeout=30: ran.append(cmd) or (no_cron if cmd[:2] == ["crontab", "-l"] else None))
     monkeypatch.setattr(su, "tmux_servers", lambda: {})
     monkeypatch.setattr(su.platform, "system", lambda: "Linux")
     monkeypatch.setattr(su.shutil, "which", lambda n: "/usr/bin/" + n)
@@ -4191,6 +4192,49 @@ def test_G12_20_the_way_back_in_is_walked(tmp_path):
             assert "it runs Pit Stop's launcher" not in r.stdout.split("pit-stop-restart.service:")[1].splitlines()[0]
     finally:
         os.chmod(svc, 0o644)
+
+
+def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
+    """Rule 6 on a decision (the maintainer, 2026-11-24): with Pit Stop installed, setup --fleet makes a timer only
+    when it has READ that nothing else schedules the helper. A unit file it cannot open, or a `crontab -l` that is
+    refused, killed or silent, is "not checked": no timer is made (never a second schedule), fleet mode is NOT set
+    up, exit 1. "no crontab for <user>" (cron 3.0pl1's own words) and no crontab program at all are none there."""
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    hits, unread = su.schedule_read(run_cmd=lambda cmd, t: None)        # crontab gave no answer at all
+    assert "crontab" in unread and "crontab" not in hits
+    # rule 6 on the decision (the row IS there): what could not be read is not "none there"; no second schedule
+    for case, cron in (("a unit that cannot be read", 'echo "no crontab for x" >&2; exit 1'),
+                       ("crontab not allowed", 'echo "You (x) are not allowed to use this program (crontab)" >&2; exit 1'),
+                       ("crontab killed", "kill -9 $$"),
+                       ("no crontab program", None)):
+        h2 = tmp_path / case.replace(" ", "-")
+        (h2 / "proj").mkdir(parents=True)
+        s2 = tmp_path / (case.replace(" ", "-") + "-stub")
+        s2.mkdir()
+        for n, body in (("tmux", "exit 0"), ("systemctl", "exit 0"), ("crontab", cron)):
+            if body:
+                (s2 / n).write_text(f"#!/bin/sh\n{body}\n")
+                os.chmod(s2 / n, 0o755)
+        r2 = h2 / ".claude" / "plugins" / "installed_plugins.json"
+        r2.parent.mkdir(parents=True)
+        r2.write_text(json.dumps({"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
+        u2 = h2 / ".config" / "systemd" / "user"
+        u2.mkdir(parents=True)
+        if case == "a unit that cannot be read":
+            (u2 / "my-fleet.service").mkdir()          # opening it fails for any account, root too
+        e2 = dict(env, HOME=str(h2), PATH=str(s2))
+        r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--fleet"],
+                           cwd=str(h2 / "proj"), env=e2, capture_output=True, text=True, timeout=120)
+        made = (u2 / "pit-stop-restart.timer").exists()
+        if case == "no crontab program":              # nothing to read: a timer is made
+            assert r.returncode == 0 and made and "fleet mode is set up" in r.stdout, (case, r.stdout[-600:])
+            continue
+        assert r.returncode == 1 and not made, (case, r.stdout[-800:])
+        assert "6. timer: not checked: " in r.stdout and "what it runs is not known, so no timer is made" in r.stdout, (case, r.stdout[-800:])
+        assert "Fleet mode is NOT set up: no timer was made" in r.stdout and "fleet mode is set up" not in r.stdout, case
+        assert ("~/.config/systemd/user/my-fleet.service" if case.startswith("a unit") else "your crontab") in r.stdout, case
 
 
 def test_G12_18_the_walk_covers_what_decides_what_runs():
