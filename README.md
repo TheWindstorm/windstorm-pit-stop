@@ -238,6 +238,8 @@ The new version loads the next time you start Claude Code, or at once in an open
 
 **In fleet mode** the helper can also update plugins before it restarts sessions (`"plugin_updates"`, under Fleet mode below), so a machine that runs many sessions moves to a new Pit Stop at a break without anyone typing.
 
+**The fleet launcher after an update.** Fleet mode's timer runs a small launcher that setup copied to `~/.claude/pit-stop/bin/pit-stop-restart`, and a plugin update does not replace that copy. The launcher's changes take effect after `/pit-stop setup --fleet --apply` once; a plugin update alone keeps the old launcher, which runs the new helper.
+
 ## Fleet mode: what it types, and what it costs
 
 Claude Code accepts `/restart` only when it is typed at the prompt, so fleet mode types into tmux panes. It types three things (and `/reload-plugins`, if you switch that on; see below), each only into an idle session with an empty input box and no dialog:
