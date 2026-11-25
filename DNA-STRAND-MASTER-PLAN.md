@@ -180,6 +180,8 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 
 **G2.29 A folder can be left out of daily tuning, and the day's line names it (open).** config.json takes a list of folders never tuned, beside tune_folders; a held folder is put on it at the switch-on, and the 24 h line names each folder left out. Seen 2026-11-23: two folders held on their own users' word were tuned 8 minutes after daily tuning was switched on for a whole machine (family rule 8). Proof: `test_G2_29_a_folder_can_be_left_out_of_daily_tuning`.
 
+**G2.30 A 200K-context folder with no points starts at 150K and 100K (open).** Proof: `test_G2_30_a_200k_folder_with_no_points_starts_at_150k_and_100k`.
+
 ### G3 Shared readers
 One shared module, `scripts/pitstop_common.py`, plus the hook generation file, reads Claude Code's transcripts, session listings, plugin records and Pit Stop's own state the same way for every part of the plugin.
 

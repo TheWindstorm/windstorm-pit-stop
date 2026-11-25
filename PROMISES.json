@@ -652,6 +652,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P56",
+   "codon": "G2.30",
+   "issue": 114,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "seen": "2026-11-25, reading the 0.6.2 README against its tests: a folder with no points of its own starts at a window of 150K and an idle point of 100K on a model with a 200K context (scripts/optimize.py, the window and idle starts), and the README says so; no test starts a 200K-context folder from no points (the nearest holds 150K and 100K only from a window already at 150K). Seen on a real machine on 2026-11-22: the tuner wrote 150K and 100K on a folder it took for 200K (row P4).",
+   "promise": "A test starts a folder whose model has a 200K context and which has no points of its own, and its first tune's recommendation is a window of 150K and an idle point of 100K, as the README says.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
