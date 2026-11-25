@@ -268,6 +268,34 @@ Claude Code accepts `/restart` only when it is typed at the prompt, so fleet mod
 
 Settings live in `~/.claude/pit-stop/restart.json` (see the top of `scripts/restart_at_break.py`): `allow_names`, `deny_names`, `deny_name_globs` (for example `"* Boss"`), `deny_paths`, and the timings. `/pit-stop setup --fleet` never changes an existing file.
 
+## What Pit Stop changes on your computer
+
+Pit Stop writes in these places only.
+
+- **Your Claude Code settings, `~/.claude/settings.json`.** `/pit-stop setup` sets `"autoUpdate": true` on the entry of the marketplace Pit Stop came from, under `extraKnownMarketplaces` (`--no-self-update` leaves it alone). Setup and undo each make a backup of this file first, beside it, named `settings.json.bak-pitstop-` and the UTC time. Undo leaves those backups in place. The file and its backups end without group or other write.
+- **A folder's own settings, `<folder>/.claude/settings.local.json`.** Tuning writes two numbers there under `env`: `CLAUDE_CODE_AUTO_COMPACT_WINDOW` (the window) and `CLAUDE_CODE_IDLE_COMPACT_MIN_TOKENS` (the idle point). It makes a backup first, named the same way, and keeps the newest three.
+- **`MEMORY.md`**, only when you run `/pit-stop reading` with `--trim --write`. It makes a backup first.
+- **Fleet mode**, only with `--fleet`: a systemd user timer (`~/.config/systemd/user/pit-stop-restart.service` and `.timer`) on Linux, or a launch agent (`~/Library/LaunchAgents/ai.thewindstorm.pit-stop-restart.plist`) on a Mac, plus the launcher `~/.claude/pit-stop/bin/pit-stop-restart` and its settings `~/.claude/pit-stop/restart.json`. On Linux, enabling the timer also makes systemd's own link, `~/.config/systemd/user/timers.target.wants/pit-stop-restart.timer`. The helper also types into tmux panes, as described under Fleet mode.
+- **Pit Stop's own folder, `~/.claude/pit-stop/`.** Everything else Pit Stop writes goes here: its switches (`config.json`), its logs, the checkup's pages and baseline (`checkup/`), setup's own record, and small stamps per session and per folder.
+
+**Which hook writes what.** Pit Stop has three hooks:
+- **SessionStart.** When a session starts or resumes, it may start the daily tune for that session's folder in the background. On a resume it writes `started/<session>`. Right after a compaction it adds one note to the session instead.
+- **Stop** (at the end of every turn). It writes `seen/<session>` and may start the daily tune. It removes or renames the fleet helper's ask file once it has handed it over. It may also give the session one message: the fleet helper's ask to stop its background jobs for a restart, the note a week after the first checkup, or the note that a newer Claude Code is installed. For the last two it writes a small stamp, so it does not give them again.
+- **PreCompact** (automatic compactions only). It writes `precompact.log` and `holds/<session>`.
+
+**Installing Pit Stop does not tune a folder.** A folder gets its two points in one of three ways:
+- from `/pit-stop setup`, which tunes the folder of every session running at that moment and the folder setup is run in (`--no-tune-now` skips this);
+- from `/pit-stop optimize --apply`, run in that folder;
+- from daily tuning when it is on, at a session's start and at its turn ends, unless a `tune_folders` list in `config.json` leaves the folder out.
+
+Without daily tuning, a folder first used after setup has no points of its own, and its sessions compact at Claude Code's own default.
+
+**Where a folder starts.** A folder with no points of its own starts at a window of 150K and an idle point of 100K on a model with a 200K context, and at 500K and 200K on a 1M model. Claude Code's documentation gives 200K as its own default idle point, so the 200K-context start is below it. A folder's first daily tune with any session history from the last 14 days writes its points, starting from these. With none, it writes nothing and tries again at the next daily tune. Each daily tune moves each point at most one step.
+
+**Never in a headless run.** Tuning never starts in a session started with `claude -p` or an SDK, and the fleet helper never tunes such a run's folder.
+
+**What Claude Code's own commands touch.** In fleet mode the helper runs `claude plugin marketplace update` and `claude plugin update` for the plugins it keeps up to date, and `claude update` only when `"claude_updates": "auto"` is set. To find running sessions, Pit Stop reads Claude Code's session list. When that gives nothing usable, it runs `claude agents --json`, which was seen once to create `~/.claude.json` and a backups folder in a home where Claude Code had never run.
+
 ## Safety
 
 - **Fails safe.** Every hook allows on any error. The restart helper skips anything it cannot read.
@@ -279,7 +307,7 @@ Settings live in `~/.claude/pit-stop/restart.json` (see the top of `scripts/rest
 - **Your folder, not the project's.** Profiles, switches and extra summary notes are read from `~/.claude/pit-stop/` only, so a cloned repo cannot steer the summary. A ceiling from a 0.1.x project file is still read, and clamped.
 - **Capped ceilings.** A ceiling from a profile or the environment is clamped to 1.5x the first hold and 95% of the model's context size, so a cloned repo cannot hold compaction until the context overflows.
 - **Backups first.** Every file is backed up before it is written. Only the keys Pit Stop owns are changed.
-- **Undone by one command, before the uninstall.** `python3 -I scripts/setup.py --undo` (in the plugin's folder) puts back what `/pit-stop setup` changed: the timer and launcher, `auto_tune` and `budget`, the marketplace's auto-update entry, and the two points of each folder setup tuned. A value you changed after setup is yours and stays. It lists each step; what stays is named there, and the history files it leaves are in `~/.claude/pit-stop/`. It also leaves the backups of `~/.claude/settings.json` that setup and undo made, beside it, named `settings.json.bak-pitstop-` and the UTC time; that file and its backups end without group or other write.
+- **Undone by one command, before the uninstall.** `python3 -I scripts/setup.py --undo` (in the plugin's folder) puts back what `/pit-stop setup` changed: the timer and launcher, `auto_tune` and `budget`, the marketplace's auto-update entry, and the two points of each folder setup tuned. A value you changed after setup is yours and stays. It lists each step; what stays is named there, and the history files it leaves are in `~/.claude/pit-stop/`. It leaves the backups of `~/.claude/settings.json` in place (see What Pit Stop changes on your computer).
   - **To leave Pit Stop**, run the undo first, then `claude plugin uninstall windstorm-pit-stop@thewindstorm`. The plugin uninstall alone does not take fleet mode's timer off. If you already uninstalled first, this takes it off on Linux:
 
     ```
