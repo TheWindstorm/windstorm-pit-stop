@@ -507,6 +507,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.34 Setup's steps do not contradict each other on restart.json (open).** Where the open-folder step closes restart.json's mode, step 5 says the file's settings were kept, never that it was left exactly as it was. Proof: `test_G12_34_setup_does_not_say_left_as_it_is_after_closing_a_mode`.
 
+**G12.35 Setup's step 3 says where its update claim comes from (open).** Where setup switches a catalog's auto-update on, its line names the key it wrote and says that Claude Code's documentation says it checks for an update at each start; it says seen only after such an update was seen. Proof: `test_G12_35_setup_says_where_its_update_claim_comes_from`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

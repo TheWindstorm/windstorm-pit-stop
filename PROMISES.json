@@ -540,6 +540,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P48",
+   "codon": "G12.35",
+   "issue": 106,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "seen": "2026-11-25, reading the 0.6.2 build's texts against what has been seen: setup's step 3 prints 'switched ON for marketplace <name> (Claude Code checks it at start and updates the plugin)'. That Claude Code writes the catalog's autoUpdate key where setup puts it is seen; that Claude Code acts on it at a session's start is in its documentation and has not been seen by us. The README already says it rests on the documentation; setup's own line does not.",
+   "promise": "Setup's step 3 says what was done and where its claim comes from: the autoUpdate key written, and that Claude Code's documentation says it checks for an update at each start. The line says 'seen' only after an update made by that key has been seen on a real machine.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
