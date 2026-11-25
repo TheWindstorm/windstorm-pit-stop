@@ -387,6 +387,8 @@ Pit Stop switches on Claude Code's own updates for the marketplace it came from,
 
 **G7.10 One version, and new code gets a new one .** A test holds that the first release heading in `CHANGELOG.md` equals `version` in `.claude-plugin/plugin.json`; that once the tag `v<version>` exists, Pit Stop's own entry has `ref` `v<version>`; that every catalog entry's `ref` is a tag and its `sha` that tag's commit (`git ls-remote`); and that `scripts/release_check.py` fails when `hooks/`, `scripts/` or `skills/` differ from the newest tag still named in `plugin.json`. Seen 2026-11-22: main moved 28 commits past v0.6.1, still labelled 0.6.1. Needs: G7.7. Proof: `test_G7_10_one_version_in_every_place_and_new_code_gets_a_new_one`.
 
+**G7.11 The cache check works on a shallow marketplace clone (open).** After an update the helper checks the cache folder against the registry commit even when the marketplace clone holds only its newest commit, or says once a day that it cannot and why. Proof: `test_G7_11_the_cache_check_works_on_a_shallow_marketplace_clone`.
+
 ### G8 Needs-you list
 
 Pit Stop keeps a short list, `~/.claude/pit-stop/needs-you.md`, of what only a person can fix (sessions waiting on a prompt, sessions it cannot update and why, sessions without its hooks, this machine's Claude Code held behind), and tells the person when a new name appears.
@@ -534,6 +536,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 **G12.40 One word brings the launcher current and does only that (open).** It replaces the launcher copy with the plugin's own when they differ and writes nothing else: no settings.json, restart.json, config.json, unit or mode. Proof: `test_G12_40_one_word_brings_the_launcher_current_only`.
 
 **G12.41 The setup plan stays readable when many paths are open (open).** Where many paths are open it prints a count per top folder and names a file with the full list; it closes nothing it did not list. Proof: `test_G12_41_the_setup_plan_stays_readable_when_many_paths_are_open`.
+
+**G12.42 Undo puts the catalog entry back only by its own record (open).** With a ledger that holds no catalog record, undo leaves the entry and says so; the settings backups are read only where there is no ledger at all. Proof: `test_G12_42_undo_puts_the_catalog_entry_back_only_by_its_own_record`.
 
 ### G13 Self-update for everyone (open)
 
