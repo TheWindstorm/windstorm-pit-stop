@@ -503,6 +503,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.32 Setup's two steps agree on whether a unit is ours (open).** On Pit Stop's own unit, step 6 says the timer is there and gives no command to change it; another program's unit that runs the helper is named with the one line to change, as the open-folder step reads ownership. Proof: `test_G12_32_setups_steps_agree_on_whether_a_unit_is_ours`.
 
+**G12.33 Undo names by path everything it leaves (open).** Every file undo leaves and every file it made on the way, each settings.json backup among them, is named by its full path, and a file it rewrote keeps the mode it had. Nothing more is deleted to make a listing equal. Proof: `test_G12_33_undo_names_by_path_everything_it_leaves`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

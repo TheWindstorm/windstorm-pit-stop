@@ -512,6 +512,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P46",
+   "codon": "G12.33",
+   "issue": 104,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "seen": "2026-11-25, a stock Linux virtual machine, run by hand: a whole-home listing before setup --fleet --apply and after setup --undo differed by 7 entries. Left: Pit Stop's run history (its restart folder, events.log and restart.log, made by the timer's first pass; undo names that folder), and two backups of settings.json, one made by setup and one by undo, which undo's output does not name by path (it says only 'backed up first'). settings.json itself kept its bytes but not its mode: setup's rewrite made it 644 where the person had 664 (tighter, never more open). The claim that the listing after undo equals the one before holds only in a home where setup made everything; this home's settings.json was Claude Code's and the timer had run. An undo cut half way was not seen (it ended inside its first second).",
+   "promise": "Undo names by its full path every file it leaves and every file it made on the way (each backup of settings.json among them), and a file it rewrote keeps the mode it had. After leaving, a person can find by name everything Pit Stop left; nothing more is deleted to make a listing equal, and history stays history.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
