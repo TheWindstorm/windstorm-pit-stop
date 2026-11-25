@@ -4410,6 +4410,7 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
     assert su.schedule_read(run_cmd=lambda cmd, t: secret)[:2] == ([], [])       # read: none of it is said
     # rule 6 on the decision (the row IS there): what could not be read is not "none there"; no second schedule
     for case, cron in (("a unit that cannot be read", 'echo "no crontab for x" >&2; exit 1'),
+                       ("a unit with a space in its name", 'echo "no crontab for x" >&2; exit 1'),
                        ("crontab not allowed", 'echo "You (x) are not allowed to use this program (crontab)" >&2; exit 1'),
                        ("crontab killed", "kill -9 $$"),
                        ("no crontab program", None)):
@@ -4428,6 +4429,8 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
         u2.mkdir(parents=True)
         if case == "a unit that cannot be read":
             (u2 / "my-fleet.service").mkdir()          # opening it fails for any account, root too
+        if case == "a unit with a space in its name":
+            (u2 / "my fleet.service").mkdir()          # a name not ours: shown shell-quoted (rule 31 (iv))
         e2 = dict(env, HOME=str(h2), PATH=str(s2))
         r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--fleet"],
                            cwd=str(h2 / "proj"), env=e2, capture_output=True, text=True, timeout=120)
@@ -4439,6 +4442,9 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
         assert "6. timer: not checked, so no timer is made (never a second schedule):" in r.stdout, (case, r.stdout[-800:])
         assert "Fleet mode is NOT set up: no timer was made; step 6 says why and the next step." in r.stdout, case
         assert "fleet mode is set up" not in r.stdout, case
+        if case == "a unit with a space in its name":
+            assert "   ls -l ~/'.config/systemd/user/my fleet.service'" in r.stdout.splitlines(), r.stdout[-800:]
+            continue
         if case.startswith("a unit"):
             assert "   ls -l ~/.config/systemd/user/my-fleet.service" in r.stdout.splitlines(), r.stdout[-800:]
             assert ("   ~/.config/systemd/user/my-fleet.service could not be read here; what it runs is not known. It is "

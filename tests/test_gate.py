@@ -306,9 +306,13 @@ def test_G19_6_undo_in_the_suite_reaches_only_its_made_home(tmp_path, monkeypatc
     assert made != os.path.realpath(real_home), ("the run's home is the real one", made)
     places = {"pitstop_common.CONFIG": pc.CONFIG, "pitstop_common.STATE_DIR": pc.STATE_DIR,
               "setup.SETTINGS": su.SETTINGS, "setup.UNDO": su.UNDO, "setup.BIN": su.BIN,
-              "setup.UNIT_DIR": su.UNIT_DIR, "setup.PLIST": su.PLIST}
+              "setup.UNIT_DIR": su.UNIT_DIR, "setup.PLIST": su.PLIST,
+              # and what it reads by: a world that moved STATE_DIR and not these would read the real profiles
+              "pitstop_common.FOLDERS": pc.FOLDERS, "pitstop_common.CLAUDE_DIR": pc.CLAUDE_DIR}
     outside = {k: v for k, v in places.items() if not os.path.realpath(v).startswith(made + os.sep)}
-    assert not outside, ("undo would write outside the run's made home; undo NOT called", outside)
+    if os.path.realpath(pc.HOME) != made:                     # HOME is the made home itself, not inside it
+        outside["pitstop_common.HOME"] = pc.HOME
+    assert not outside, ("undo would write or read outside the run's made home; undo NOT called", outside)
 
     def mark(p):
         try:
