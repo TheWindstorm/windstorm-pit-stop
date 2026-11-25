@@ -125,6 +125,8 @@ import re
 import shutil
 import subprocess
 import sys
+sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
+os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make has group or other write (G12.12)
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -211,12 +213,19 @@ PLANNED = set()  # panes the restart path wants this run (a restart, a compactio
 
 
 def tmux(*args):
-    base = ["tmux"] + (["-L", CFG["tmux_socket"]] if CFG["tmux_socket"] else [])
+    """Every call carries -u (rule 30, A NAME IS READ WHOLE): a tmux client with no UTF-8 language setting prints
+    "_" for each non-ASCII letter of a NAME and for a TAB (tmux 3.4, seen), as the helper's own tmux child does
+    when the helper was started under LC_ALL=C or POSIX (with no language variable at all, Python hands tmux UTF-8);
+    the screen from capture-pane came out whole from such a client on 3.4 (seen); -u is carried on every call all
+    the same. It is on the helper's own calls only; nothing in tmux's server changes."""
+    base = ["tmux", "-u"] + (["-L", CFG["tmux_socket"]] if CFG["tmux_socket"] else [])
     return subprocess.run(base + list(args), capture_output=True, text=True, timeout=15)
 
 
 def panes():
-    r = tmux("list-panes", "-a", "-F", "#{pane_tty}\t#{session_name}:#{window_index}.#{pane_index}")
+    """{terminal: pane id}. A pane is addressed by its id ("%N": the same text in every environment, one pane only),
+    never by a session's name, which can come out changed and also matches by prefix (rule 30)."""
+    r = tmux("list-panes", "-a", "-F", "#{pane_tty}\t#{pane_id}")
     return dict(l.split("\t") for l in r.stdout.splitlines() if "\t" in l)
 
 
@@ -460,7 +469,7 @@ def ctx_and_idle(s):
         return None, -1
     # Idle is counted from the newest entry that carries a time, not from the
     # file's modification time: on a quiet lane the file's time was seen moving
-    # about once an hour with nothing appended (Veron, 2026-11-11), which reset
+    # about once an hour with nothing appended (a fleet machine, 2026-11-11), which reset
     # the idle clock and kept the hour-idle rule from ever applying.
     ctx, newest, last_call = None, None, None
     for e in pc.iter_entries(p, tail_bytes=3_000_000):
@@ -1139,6 +1148,7 @@ def handle(s, newest, target, now, counts):
 
 PIT_STOP = "windstorm-pit-stop"
 UPDATE_BUDGET = 300   # seconds one run may spend on plugin updates in all
+CLAUDE_UPDATE_LIMIT = 600   # seconds Claude Code's own update may take (setup.py's unit limit and RUN_BOUND add these)
 
 
 def plugin_update_targets(scope, installed=None):
@@ -1324,7 +1334,7 @@ def update_claude_code(now, run=None, machine=None):
         return None
     pc.write_json_atomic(stampf, {"released": m.get("released"), "at": now, "cmd": plan}, mode=0o644)  # first
     try:
-        r = run(plan, 600)
+        r = run(plan, CLAUDE_UPDATE_LIMIT)
         ok = r.returncode == 0
         tail = ((r.stdout or "") + (r.stderr or "")).strip().splitlines()
         first = (tail[-1] if tail else "")[:200]
@@ -1348,17 +1358,17 @@ def timer_off_command():
 
 def gone_line(here=None):
     """None while Pit Stop is installed and HERE (this helper's plugin folder) is not one Claude Code left
-    behind; else the one line a pass logs before it does nothing (G12.8). Seen 2026-11-23 (Claude Code
-    2.1.280): `claude plugin uninstall` empties the registry row and leaves the cache folder, marked
-    .orphaned_at. A registry that cannot be read is not "gone": that pass changes no session, and the line
+    behind; else the one line a pass logs before it does nothing (G12.8). Seen (Claude Code 2.1.280 and
+    2.1.331, Linux): `claude plugin uninstall` takes the plugin's entry off the list at once and leaves the
+    cache folder, marked .orphaned_at. A registry that cannot be read is not "gone": that pass changes no session, and the line
     neither says Pit Stop is not installed nor advises taking the timer off."""
     import launcher
     here = here or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    rows = launcher.registry_rows(pc.CLAUDE_DIR)     # read ONCE: two reads can disagree while Claude Code writes it
+    said, rows = launcher.list_answer(pc.CLAUDE_DIR)   # read ONCE: two reads can disagree while Claude Code writes it
     marked = launcher.orphaned(here)
-    if rows is None:
+    if rows is None:                                 # not there or not read: never "not installed" (G12.25)
         marked = f"plugin folder {here} carries .orphaned_at, and " if marked else ""
-        return f"plugin registry: {marked}{launcher.SAY['unreadable']}"
+        return f"plugin registry: {marked}{launcher.SAY[said]}"
     if rows and not marked:
         return None
     if rows:
@@ -1393,6 +1403,8 @@ def tune_due(sessions, now, cfg, tuned_dir=None, week=None):
         cwd = s.get("cwd")
         if not cwd or not s.get("name") or not allowed(s["name"], cwd, cfg) or not os.path.isdir(cwd):
             continue
+        if str(s.get("entrypoint") or "").startswith("sdk-"):   # a running `claude -p` or SDK run (G2.27)
+            continue
         folder = os.path.abspath(cwd)
         if not pc.tune_wanted(folder):          # config.json "tune_folders": a test group only
             continue
@@ -1413,6 +1425,23 @@ def machine_busy():
         return False
 
 
+OWN_UNIT = "pit-stop-restart.service"      # the one unit /pit-stop setup --fleet installs (setup.py install_timer)
+
+
+def under_service(cgroup="/proc/self/cgroup"):
+    """OWN_UNIT when systemd runs THIS helper as that unit's own run: a line of the process's own cgroup file (one
+    "0::/path" line, or the older layout's several "N:name:/path" lines) whose path ends in /OWN_UNIT. Any other unit
+    (cron.service, a tmux server's own service, a unit of the person's) or a file that could not be read: None, and
+    the tune starts as 0.6.1 does. Seen 2026-11-24 (systemd 255): a Type=oneshot unit ends what its main process
+    started, even in a new session, when that process exits (G2.28); not known of other units."""
+    try:
+        with open(cgroup) as f:
+            lines = f.read().strip().splitlines()
+    except OSError:
+        return None
+    return OWN_UNIT if any(l.rsplit(":", 1)[-1].rstrip("/").endswith("/" + OWN_UNIT) for l in lines) else None
+
+
 def start_tune(sessions, now):
     """Fleet-wide tune (daily by default). A session's folder used to be tuned only when a
     session started there, so a session that runs for weeks was never looked at
@@ -1430,6 +1459,24 @@ def start_tune(sessions, now):
         pass
     folder = tune_due(sessions, now, CFG)
     if not folder or machine_busy():
+        return None
+    svc = under_service()
+    if svc:     # G2.28: the service's end would cut the tune off at any point of its own run; say so once a day
+        said = os.path.join(BASE, "state", "tune-not-started")
+        try:
+            if now - os.path.getmtime(said) < 86400:
+                return None
+        except OSError:
+            pass
+        log(f"daily tune not started: this run is inside systemd's {svc}, which ends what a run starts when the run "
+            f"ends; folders are tuned when a session there starts or ends a turn (Pit Stop's hooks)")
+        try:
+            os.makedirs(os.path.dirname(said), exist_ok=True)
+            with open(said, "w"):
+                pass
+            os.utime(said, (now, now))
+        except OSError:
+            pass
         return None
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "autotune.py")
     p = subprocess.Popen([sys.executable, "-I", script, "--project", folder], stdin=subprocess.DEVNULL,

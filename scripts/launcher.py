@@ -13,10 +13,15 @@ the plugin cache. It never runs code from a folder Claude Code marked
 orphaned (an .orphaned_at file).
 
 Once the plugin is gone it runs nothing and says so in the helper's log:
-seen 2026-11-23 (Claude Code 2.1.280), `claude plugin uninstall` empties the
-plugin's row in installed_plugins.json but leaves its cache folder, marked
-.orphaned_at. A registry that cannot be read is not "gone": that pass runs
-nothing, and the next one reads it again.
+seen (Claude Code 2.1.280 and 2.1.331, Linux), `claude plugin uninstall` takes
+the plugin's entry off installed_plugins.json at once and leaves its cache
+folder, marked .orphaned_at. A registry that cannot be read is not "gone": that pass runs
+nothing, and the next one reads it again. "Gone" is said only when Claude
+Code's own list was read and names Pit Stop nowhere; a list that is not there
+is its own answer, never "not installed" (family rule 29 (e), G12.25).
+The copy at <Claude folder>/pit-stop/bin/pit-stop-restart reads the list of
+the Claude folder it sits in when CLAUDE_CONFIG_DIR is not set, and hands that
+folder to the helper: a timer has no CLAUDE_CONFIG_DIR of the person's shell.
 A timer that names a version folder directly is not affected by this file:
 it stays pinned until someone changes it. Standard library only.
 """
@@ -25,9 +30,26 @@ import json
 import os
 import re
 import sys
+sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
+os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make has group or other write (G12.12)
 import time
 
-CLAUDE_DIR = os.environ.get("CLAUDE_CONFIG_DIR", os.path.join(os.path.expanduser("~"), ".claude"))
+DEFAULT_DIR = os.path.join(os.path.expanduser("~"), ".claude")
+
+
+def claude_dir_of(me, env):
+    """The Claude folder whose list this run reads: CLAUDE_CONFIG_DIR when set; else, for the copy setup puts at
+    <Claude folder>/pit-stop/bin/pit-stop-restart, that folder (kept by setup's placement, G12.25); else ~/.claude."""
+    if env.get("CLAUDE_CONFIG_DIR"):
+        return env["CLAUDE_CONFIG_DIR"]
+    b = os.path.dirname(os.path.abspath(me))
+    if (os.path.basename(me) == "pit-stop-restart" and os.path.basename(b) == "bin"
+            and os.path.basename(os.path.dirname(b)) == "pit-stop"):
+        return os.path.dirname(os.path.dirname(b))
+    return DEFAULT_DIR
+
+
+CLAUDE_DIR = claude_dir_of(__file__, os.environ)
 PLUGIN = "windstorm-pit-stop"
 SCRIPT = os.path.join("scripts", "restart_at_break.py")
 ORPHANED = ".orphaned_at"   # the file Claude Code leaves in a plugin folder it no longer uses
@@ -35,6 +57,8 @@ SAY = {
     "gone": "Pit Stop is not installed (Claude Code's plugin registry has no windstorm-pit-stop row)",
     "orphaned": "this Pit Stop folder was left by Claude Code after an uninstall or update (it carries .orphaned_at)",
     "unreadable": "Claude Code's plugin registry could not be read; no session changed this pass, the next pass reads it again",
+    "nolist": ("Claude Code's plugin list could not be read: plugins/installed_plugins.json is not there in the Claude "
+               "folder this run reads; no session changed this pass, the next pass reads it again"),
     "missing": "no folder Claude Code recorded for Pit Stop holds its helper",
 }
 
@@ -44,21 +68,35 @@ def vkey(path):
     return tuple(int(x) for x in m.groups()) if m else (-1,)
 
 
-def registry_rows(claude_dir=None):
-    """Pit Stop's rows in plugins/installed_plugins.json: a list, empty when the file reads fine and has none
-    (or there is no file: no plugin is installed), or None when it could not be read."""
+def list_answer(claude_dir=None):
+    """("read", Pit Stop's rows in plugins/installed_plugins.json, empty when it names none), ("nolist", None)
+    when the file is not there, or ("unreadable", None) when it could not be read (rule 6: three answers)."""
     try:
         with open(os.path.join(claude_dir or CLAUDE_DIR, "plugins", "installed_plugins.json")) as f:
             data = json.load(f)
     except FileNotFoundError:
-        return []
+        return "nolist", None
     except (OSError, ValueError):
-        return None
+        return "unreadable", None
     plugins = data.get("plugins") if isinstance(data, dict) else None
     if not isinstance(plugins, dict):
-        return None
-    return [r for k, v in plugins.items() if k.split("@")[0] == PLUGIN and isinstance(v, list)
-            for r in v if isinstance(r, dict)]
+        return "unreadable", None
+    rows = []
+    for k, v in plugins.items():
+        if k.split("@")[0] != PLUGIN:
+            continue
+        # seen (2.1.331): a key holds rows, each with an installPath; uninstall takes the KEY away. A key with an
+        # empty list, a row with no installPath, or a key that is not a list was not seen: "could not be read".
+        if not isinstance(v, list) or not v or not all(
+                isinstance(r, dict) and isinstance(r.get("installPath"), str) and r["installPath"] for r in v):
+            return "unreadable", None
+        rows += v
+    return "read", rows
+
+
+def registry_rows(claude_dir=None):
+    """Pit Stop's rows as read, or None when the list is not there or could not be read (list_answer says which)."""
+    return list_answer(claude_dir)[1]
 
 
 def orphaned(path):
@@ -67,21 +105,21 @@ def orphaned(path):
 
 def state(root=None, claude_dir=None):
     """May code in ROOT act on sessions now? "installed"; or "orphaned" (Claude Code marked ROOT), "gone" (the
-    registry reads fine and has no Pit Stop row), "unreadable" (it could not be read)."""
+    registry reads fine and has no Pit Stop row), "nolist" (it is not there), "unreadable" (it could not be read)."""
     if orphaned(root):
         return "orphaned"
-    rows = registry_rows(claude_dir)
+    said, rows = list_answer(claude_dir)
     if rows is None:
-        return "unreadable"
+        return said
     return "installed" if rows else "gone"
 
 
 def find(claude_dir=None):
     """(folder to run, None) or (None, why): why is a key of SAY."""
     claude_dir = claude_dir or CLAUDE_DIR
-    rows = registry_rows(claude_dir)
+    said, rows = list_answer(claude_dir)
     if rows is None:
-        return None, "unreadable"
+        return None, said
     if not rows:
         return None, "gone"
     rows.sort(key=lambda r: (r.get("scope") != "user", [-x for x in vkey(r.get("installPath") or "")]))
@@ -135,9 +173,14 @@ def note(line, claude_dir=None):
 def main():
     root, why = find()
     if not root:
-        note(f"pit-stop launcher: nothing run: {SAY[why]}" + (" " + gone_advice() if why == "gone" else ""))
+        off = timer_off() or "see \"Leaving Pit Stop\" in Pit Stop's README"
+        note(f"pit-stop launcher: nothing run: {SAY[why]}" + (" " + gone_advice() if why == "gone" else "")
+             + (f" (folder read: {CLAUDE_DIR}). If Claude Code was removed from this machine, or this folder was, "
+                f"the way off is: {off}" if why == "nolist" else ""))
         return 0
     env = dict(os.environ, PIT_STOP_LAUNCHER="1")   # the helper then knows it follows plugin updates
+    if CLAUDE_DIR != DEFAULT_DIR and not env.get("CLAUDE_CONFIG_DIR"):
+        env["CLAUDE_CONFIG_DIR"] = CLAUDE_DIR       # the folder whose list was read is the helper's too (G12.25)
     os.execve(sys.executable, [sys.executable, "-I", os.path.join(root, SCRIPT)] + sys.argv[1:], env)
 
 

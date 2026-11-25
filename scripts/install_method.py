@@ -33,6 +33,8 @@ import re
 import shutil
 import subprocess
 import sys
+sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
+os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make has group or other write (G12.12)
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -417,7 +419,7 @@ def describe(m, now=None, paths=True):
               else " (no claude found on PATH)")]
     if m["released"]:
         out.append(f"Newest on the {m['channel']} channel: {m['released']}"
-                   + (" (this machine has it)" if not m["behind"] else ""))
+                   + (" (this machine has it)" if not m["behind"] and m.get("installed") else ""))   # G6.20
     else:
         out.append("Newest release: not checked (switched off, or the download server could not be reached)")
     if m["behind"]:

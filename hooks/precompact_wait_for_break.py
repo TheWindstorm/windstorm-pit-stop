@@ -47,15 +47,14 @@ import json
 import os
 import re
 import sys
+sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
+os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make has group or other write (G12.12)
 
 TAIL_BYTES = 4_000_000
 CLAUDE_DIR = os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude"))
 STATE = os.path.join(CLAUDE_DIR, "pit-stop")
 LOG = os.path.join(STATE, "precompact.log")
-try:
-    DEFAULT_FLEX = float(os.environ.get("PIT_STOP_DEFAULT_FLEX", "1.10"))
-except ValueError:
-    DEFAULT_FLEX = 1.10
+DEFAULT_FLEX = 1.10     # with no configured ceiling: 1.10x the first hold; no setting changes it (G1.3)
 MAX_FLEX = 1.5          # a configured ceiling is at most 1.5x the first hold
 MAX_SHARE = 0.95        # ... and at most 95% of the model's context size
 LOG_MAX_BYTES = 5_000_000
@@ -107,18 +106,25 @@ def log(session, trigger, tokens, decision, why):
         pass
 
 
+UNREADABLE = 0  # tail lines json could not load, in the last tail read; the log line counts them (no text)
+
+
 def tail_messages(path):
+    global UNREADABLE
     size = os.path.getsize(path)
     with open(path, "rb") as f:
         f.seek(max(0, size - TAIL_BYTES))
-        lines = f.read().decode("utf-8", "replace").splitlines()
+        lines = f.read().split(b"\n")  # a record ends at a line feed only: not at U+2028, U+2029, NEL or CR
     if size > TAIL_BYTES:
         lines = lines[1:]
-    out = []
+    out, UNREADABLE = [], 0
     for line in lines:
+        if not line:
+            continue
         try:
-            o = json.loads(line)
+            o = json.loads(line.decode("utf-8", "replace"))
         except Exception:
+            UNREADABLE += 1
             continue
         if isinstance(o, dict) and o.get("type") in ("user", "assistant") and not o.get("isSidechain"):
             out.append(o)
@@ -333,7 +339,8 @@ def main():
         return 0
     if code == 0:
         clear_hold(payload.get("session_id"))
-    log(payload.get("session_id"), trigger, tokens, "HOLD" if code == 2 else "ALLOW", why)
+    log(payload.get("session_id"), trigger, tokens, "HOLD" if code == 2 else "ALLOW",
+        why + (f" unreadable-lines={UNREADABLE}" if UNREADABLE else ""))
     if code == 2:
         sys.stderr.write(f"pit-stop: holding auto-compact until a break (context ~{tokens} tokens)\n")
     elif trigger == "auto" and why.startswith(("break:", "ceiling", "checkpoint:")):

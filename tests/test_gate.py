@@ -139,8 +139,13 @@ def test_G19_1_a_built_proof_that_did_not_pass_fails_the_whole_run(tmp_path):
     good = _world(tmp_path / "good", "def test_G1_1_good():\n    assert True\n", {"1": "good"}, rows=["test_G1_1_good"])
     code, out = _pytest(good, "-v")
     assert code == 0 and _gate_lines(out) == [] and "partial run" not in out, out
+    # a pass is said by the gate itself, in its own line (a count alone is not a verdict)
+    assert "G19 gate PASSED: whole run; 1 of 1 named proofs passed; 0 problems" in out, out
     code, out = _pytest(root, "-v", "-k", "good")
     assert code == 0 and "partial run: rows and codons not checked" in out and _gate_lines(out) == [], out
+    assert "G19 gate PASSED" not in out, out
+    code, out = _pytest(root, "-v")
+    assert code == 1 and "G19 gate PASSED" not in out, out
 
 
 def test_G19_1_a_rows_test_counts_the_same_way(tmp_path):
@@ -197,3 +202,177 @@ def test_G19_3_the_ci_log_names_every_test_and_every_skip_reason():
         assert "console_output_style=classic" in ln, ln
     cols = re.findall(r"COLUMNS:\s*\"?(\d+)", ci)
     assert cols and min(int(c) for c in cols) >= 1000, "CI needs a wide COLUMNS for its pytest step"
+
+
+GUARDED = '''import glob, os, pwd, shutil, subprocess, sys
+REAL = os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+
+def test_reads_the_real_claude_folder():
+    try:                                    # a name that is never there: the guard sees the try, nothing real is read
+        open(os.path.join(REAL, ".claude", "no-such-file-pit-stop-guard-probe"))
+    except OSError:
+        pass
+
+def test_reads_elsewhere_in_the_home():       # the tool also reads ~/.local/bin and ~/.local/share/claude
+    try:
+        open(os.path.join(REAL, ".local", "bin", "no-such-file-pit-stop-guard-probe"))
+    except OSError:
+        pass
+
+def test_renames_into_the_home(tmp_path):
+    (tmp_path / "x").write_text("x")
+    try:                                    # a folder that is never there: the rename fails, the guard saw it
+        os.rename(tmp_path / "x", os.path.join(REAL, "no-such-dir-pit-stop-guard-probe", "x"))
+    except OSError:
+        pass
+
+def test_python_libraries_and_the_checkout_are_left_out():
+    import site
+    for d in (site.getusersitepackages(), os.path.dirname(os.path.abspath(__file__))):
+        try:
+            open(os.path.join(d, "no-such-file-pit-stop-guard-probe"))
+        except OSError:
+            pass
+
+def test_starts_a_child_with_no_home():
+    subprocess.run([sys.executable, "-I", "-c", "pass"], env={"PATH": os.environ["PATH"]})
+
+def test_a_childs_path_reaches_this_machines_own_programs():
+    subprocess.run([sys.executable, "-I", "-c", "pass"], env=dict(os.environ, PATH="/usr/bin:/bin"))
+
+def test_runs_this_machines_own_program():
+    real = shutil.which("systemctl", path="/usr/bin:/bin") or shutil.which("launchctl", path="/usr/bin:/bin")
+    assert real, "neither systemctl nor launchctl here"
+    subprocess.run([real, "--version" if real.endswith("systemctl") else "version"], capture_output=True)
+
+def test_the_stub_answers_first():
+    r = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
+    assert r.returncode == 97 and "rule 17 stub" in r.stderr
+
+def test_stays_in_its_own_home(tmp_path):
+    assert os.path.realpath(os.path.expanduser("~")) != REAL
+    (tmp_path / "x").write_text("x")
+'''
+
+
+def test_G19_5_the_suite_never_uses_the_home_of_the_account_running_it(tmp_path):
+    """Rule 17: conftest gives the run its own home, Claude Code folder and tmux folder, puts failing stubs for
+    tmux, claude, crontab, systemctl, loginctl and launchctl first on PATH, and its guard fails a test that
+    reaches the real home (its .claude, its .local, a rename into it), starts a child with no HOME or one whose PATH
+    reaches this machine's own programs, or runs this machine's own systemctl or launchctl, and leaves out Python's own libraries and the checkout. Control: the same planted tests with the guard taken out all pass."""
+    root = _world(tmp_path, GUARDED, {"1": "good"})
+    code, out = _pytest(root, "-v")
+    verdict = {n: ("PASSED" if f"::{n} PASSED" in out else "FAILED" if f"::{n} " in out and "PASSED" not in
+                   [ln for ln in out.splitlines() if f"::{n} " in ln][0] else "?")
+               for n in ("test_reads_the_real_claude_folder", "test_reads_elsewhere_in_the_home",
+                         "test_renames_into_the_home", "test_python_libraries_and_the_checkout_are_left_out",
+                         "test_starts_a_child_with_no_home", "test_a_childs_path_reaches_this_machines_own_programs",
+                         "test_runs_this_machines_own_program", "test_the_stub_answers_first", "test_stays_in_its_own_home")}
+    assert verdict == {"test_reads_the_real_claude_folder": "FAILED", "test_reads_elsewhere_in_the_home": "FAILED",
+                       "test_renames_into_the_home": "FAILED",
+                       "test_python_libraries_and_the_checkout_are_left_out": "PASSED",
+                       "test_starts_a_child_with_no_home": "FAILED",
+                       "test_a_childs_path_reaches_this_machines_own_programs": "FAILED",
+                       "test_runs_this_machines_own_program": "FAILED", "test_the_stub_answers_first": "PASSED",
+                       "test_stays_in_its_own_home": "PASSED"}, out[-4000:]
+    assert "6 failed, 3 passed" in out and "rule 17: this test reached the home or the tools" in out, out[-4000:]
+    conf = root / "tests" / "conftest.py"                                # the control: no guard, nothing caught
+    conf.write_text(conf.read_text().replace("sys.addaudithook(_audit)", "pass"))
+    code, out = _pytest(root, "-v")
+    assert "rule 17:" not in out and "test_reads_the_real_claude_folder PASSED" in out, out[-4000:]
+
+
+def test_G19_6_undo_in_the_suite_reaches_only_its_made_home(tmp_path, monkeypatch):
+    """Seen 2026-11-24 03:32:14Z, before G19.5's guard: a test that moved only STATE_DIR called setup's undo, which
+    with no record turns daily tuning off in pc.CONFIG, and that was this account's real config.json (and the real
+    settings.json's marketplace entry). Now: before undo is called, every place it writes, by the module's own name,
+    resolves inside the run's made home, or the test stops having called nothing; undo then changes the made home's
+    config.json, and the real config.json's and settings.json's time and size do not move (stat only, never opened).
+    The check is shown to see a move: pointed at a stand-in outside the made home, the same undo moves that file.
+    G19.5's hook REPORTS a reach into the real home AFTER it happens (the test fails); it does not refuse it.
+    Not seen red on the code of 03:32Z: not run again, that run would be the fault itself; the control stands for red.
+    The place check was seen red with setup.SETTINGS alone moved outside the made home, before undo, nothing written."""
+    import json
+    import pwd
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import pitstop_common as pc
+    import setup as su
+    real_home = pwd.getpwuid(os.getuid()).pw_dir
+    real = os.path.join(real_home, ".claude", "pit-stop", "config.json")
+    real_settings = os.path.join(real_home, ".claude", "settings.json")
+    # Before undo is called, EVERY place it writes, each by the module's own name for it, lies INSIDE the run's made
+    # home: a world that moved only some of them (the fault of 03:32:14Z) stops here, having written nothing.
+    made = os.path.realpath(os.environ["HOME"])
+    assert made != os.path.realpath(real_home), ("the run's home is the real one", made)
+    places = {"pitstop_common.CONFIG": pc.CONFIG, "pitstop_common.STATE_DIR": pc.STATE_DIR,
+              "setup.SETTINGS": su.SETTINGS, "setup.UNDO": su.UNDO, "setup.BIN": su.BIN,
+              "setup.UNIT_DIR": su.UNIT_DIR, "setup.PLIST": su.PLIST,
+              # and what it reads by: a world that moved STATE_DIR and not these would read the real profiles
+              "pitstop_common.FOLDERS": pc.FOLDERS, "pitstop_common.CLAUDE_DIR": pc.CLAUDE_DIR}
+    outside = {k: v for k, v in places.items() if not os.path.realpath(v).startswith(made + os.sep)}
+    if os.path.realpath(pc.HOME) != made:                     # HOME is the made home itself, not inside it
+        outside["pitstop_common.HOME"] = pc.HOME
+    assert not outside, ("undo would write or read outside the run's made home; undo NOT called", outside)
+
+    def mark(p):
+        try:
+            st = os.stat(p)
+            return st.st_mtime_ns, st.st_size
+        except OSError:
+            return None
+    before = mark(real), mark(real_settings)
+    os.makedirs(os.path.dirname(pc.CONFIG), exist_ok=True)
+    with open(pc.CONFIG, "w") as f:
+        json.dump({"budget": "economy", "auto_tune": True}, f)
+    out = "\n".join(su.undo(ledger=str(tmp_path / "no-record.json"), run_cmd=lambda *c: (0, "")))
+    assert json.load(open(pc.CONFIG)).get("auto_tune") is None, out       # the made home's file was put back
+    assert (mark(real), mark(real_settings)) == before, ("the real config.json or settings.json moved", before)
+    # the control: the same undo pointed at a stand-in outside the made home moves that file, and the check sees it
+    stand_in = tmp_path / "elsewhere" / "config.json"
+    stand_in.parent.mkdir()
+    stand_in.write_text(json.dumps({"auto_tune": True}))
+    os.utime(stand_in, ns=(1, 1))
+    was = mark(str(stand_in))
+    monkeypatch.setattr(pc, "CONFIG", str(stand_in))
+    su.undo(ledger=str(tmp_path / "no-record-2.json"), run_cmd=lambda *c: (0, ""))
+    assert mark(str(stand_in)) != was and json.loads(stand_in.read_text()).get("auto_tune") is None
+
+
+
+def test_G19_7_the_suites_lists_do_not_lean_on_the_machines_python(tmp_path, monkeypatch):
+    """Seen 2026-11-24 on a CI runner (row P40): its Python sat in a folder of mode 777, and setup's open-folder
+    check, which walks the folders of the Python program Pit Stop runs, rightly named it; five tests that count
+    those lines failed there, and no machine of ours could show it, as each keeps its Python in a closed folder.
+    Here the six tests that count those lines run in a child suite whose Python is in a folder any account can
+    reach (made directly in /tmp) and open: the child opens its own folder once it has started, so nothing is
+    started from an open folder (rule 28). The test holds its own premise: after the child has ended, the check
+    run here with that Python names that folder, so the test fails, never passes, where it cannot show its point."""
+    import tempfile
+    sys.path.insert(0, HERE)
+    from test_pitstop import made_python
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    opened = tempfile.mkdtemp(prefix="pitstop-open-python-", dir="/tmp")
+    try:
+        made_python(opened)
+        stubs = tmp_path / "no-programs"
+        stubs.mkdir()
+        env = {k: v for k, v in os.environ.items() if k not in ("PYTEST_ADDOPTS", "PYTEST_CURRENT_TEST")}
+        env["PATH"] = str(stubs)
+        import pytest as _pt                           # the child finds pytest where this run found it
+        env["PYTHONPATH"] = os.pathsep.join(x for x in (os.path.dirname(os.path.dirname(_pt.__file__)),
+                                                        env.get("PYTHONPATH")) if x)
+        code = ("import os, sys; os.chmod(os.path.dirname(sys.executable), 0o777); import pytest; "
+                "sys.exit(pytest.main(sys.argv[1:]))")
+        r = subprocess.run([os.path.join(opened, "python3"), "-c", code, "-q", "-p", "no:cacheprovider",
+                            os.path.join(HERE, "test_pitstop.py"), "-k",
+                            "G8_5 or G8_6 or G12_13 or G12_14 or G12_15 or G12_18"],
+                           cwd=ROOT, env=env, capture_output=True, text=True, timeout=600)
+        assert r.returncode == 0 and "6 passed" in r.stdout, r.stdout[-1500:]
+        assert os.stat(opened).st_mode & 0o777 == 0o777, oct(os.stat(opened).st_mode)   # the child opened it
+        monkeypatch.setattr(su, "group_members", lambda gid: set())
+        monkeypatch.setattr(sys, "executable", os.path.join(opened, "python3"))      # started nothing more from it
+        named = [w for w in su.open_scan()["ways"] if w[0] == opened]
+        assert named and named[0][2] == "the Python program Pit Stop runs as you", (opened, su.open_scan()["ways"])
+    finally:
+        shutil.rmtree(opened, ignore_errors=True)
