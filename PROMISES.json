@@ -694,6 +694,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P60",
+   "codon": "G2.32",
+   "issue": 118,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "seen": "2026-11-25, a stock Ubuntu 24.04 virtual machine, Pit Stop 0.6.1, the fleet helper run every 2 minutes by a systemd user unit the person wrote (`Type=oneshot`, its own name, running Pit Stop's launcher copy), four passes, each with a folder that had no history: each logged `tune started for ~/work-listed`, and none of the four tunes left its stamp or a line in `autotune.log`; the same tune run by hand stamped the folder and logged its line. So systemd ended each tune when the helper's run ended, as was seen on 2026-11-24 for Pit Stop's own unit (G2.28). 0.6.2 knows only its own unit by name (`scripts/restart_at_break.py`, under_service), so under a unit of the person's it still starts the tune and logs that it started. On another machine with such a unit, tunes started by the helper were seen to finish, read from that machine's log; why (a reading, not seen: its runs may last long enough for a tune with history to end first) waits for a tune with history to be cut or not cut on a guest. Nothing is written badly either way: a tune that is cut off writes nothing.",
+   "promise": "The helper says a tune started only when it was not started inside a systemd run that ends what it starts: under any systemd unit of `Type=oneshot` (read from the process's own cgroup and the unit's type), it starts no tune and says once a day why, as it does under its own unit. A test holds it with a cgroup naming another unit of that type.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

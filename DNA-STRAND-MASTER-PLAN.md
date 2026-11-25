@@ -184,6 +184,8 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 
 **G2.31 Setup's tune now leaves out what tune_folders leaves out (open).** A folder a `tune_folders` list leaves out is named, and nothing is written there. Proof: `test_G2_31_setups_tune_now_leaves_out_what_tune_folders_leaves_out`.
 
+**G2.32 No fleet tune starts inside a systemd run that ends what it starts (open).** Under any `Type=oneshot` unit, not only Pit Stop's own, the helper starts no tune and says why once a day. Proof: `test_G2_32_no_fleet_tune_inside_a_oneshot_run`.
+
 ### G3 Shared readers
 One shared module, `scripts/pitstop_common.py`, plus the hook generation file, reads Claude Code's transcripts, session listings, plugin records and Pit Stop's own state the same way for every part of the plugin.
 
