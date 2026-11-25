@@ -577,6 +577,8 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 
 **G19.6 Undo in the suite reaches only its made home.** A test calls setup's undo with nothing moved, so its config.json step (with no record it turns daily tuning off) acts on the made home's file, and fails if the real config.json's or settings.json's time or size moves; pointed at a stand-in, the same undo is seen to move it. Seen 2026-11-24 03:32:14Z, before G19.5: a test's undo turned tuning and self-update off in an account's real files. Proof: `test_G19_6_undo_in_the_suite_reaches_only_its_made_home`.
 
+**G19.7 The suite's lists do not lean on where the machine keeps its programs.** The tests that count the open-folder lines run with the Python program where the test put it; one test runs them from a Python in a folder left open and sees them pass. Seen 2026-11-24 on a CI runner: its Python's folder was open, and the check rightly named it. Proof: `test_G19_7_the_suites_lists_do_not_lean_on_the_machines_python`.
+
 ## Part 5. Milestones
 
 - M0 (released 0.1 to 0.5): G1, G2, G3, G4, G5, G7 (fleet), G8, G9, G10, G11, G12.

@@ -428,6 +428,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P40",
+   "seen": "2026-11-24 on a CI runner, the 3.13 leg of the release build's first head: the runner's Python sat in a folder of mode 777, and setup's open-folder check, which walks the folders of the Python program Pit Stop runs, rightly named it as one more line; five tests that count those lines (G8.5, G8.6, G12.13, G12.14, G12.15) failed there, the 3.10 leg's Python folder was closed and green. No machine of ours could show it: each keeps its Python in a closed folder. Reproduced here with a Python reached through a folder of mode 777 directly in the temporary folder: the same five failed.",
+   "promise": "The tests that count the open-folder lines run with the Python program where the test put it (a stand-in that runs the interpreter under its own name, in a folder only the account can reach), so their lists do not lean on where the machine keeps its programs; nothing is filtered out of what the check prints. One test runs them from a Python in a folder left open and sees them pass (seen red with the stand-in taken out: 5 failed), and G12.18 holds the Python line itself with a planted open folder (seen red with Python taken out of the walk). The tool's code is unchanged.",
+   "codon": "G19.7",
+   "issue": null,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.2",
+   "ship_in": "0.6.2",
+   "test": "test_G19_7_the_suites_lists_do_not_lean_on_the_machines_python",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

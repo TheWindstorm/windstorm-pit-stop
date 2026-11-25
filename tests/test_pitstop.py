@@ -1766,6 +1766,7 @@ def test_G2_5_usage_per_day_needs_a_day_of_history_and_counts_a_model_call_once(
 
 # ---------------------------------------------------------------- 0.3.0: the short list of what needs a person
 def _needs(tmp_path, monkeypatch, cfg=None):
+    monkeypatch.setattr(sys, "executable", made_python())   # the Python where the test put it (P40)
     import pitstop_common as pc
     rab = _rab(tmp_path, monkeypatch)
     import needs_you as ny
@@ -4050,7 +4051,7 @@ def _g12_13(tmp_path, stat):
         os.chmod(d, 0o755)
     mode = lambda p: stat.S_IMODE(os.lstat(p).st_mode)
     env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
-    run = lambda *x: subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), *x, "--no-tune-now"],
+    run = lambda *x: subprocess.run([made_python(), "-I", os.path.join(ROOT, "scripts", "setup.py"), *x, "--no-tune-now"],
                                     cwd=str(proj), env=env, capture_output=True, text=True, timeout=120)
     r = run()                                                          # the plan names them and changes nothing
     assert r.returncode == 0, r.stderr[-400:]
@@ -4093,7 +4094,7 @@ def test_G12_14_status_repeats_an_open_folder_until_it_is_closed():
         env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
         code = ("import sys, time; sys.path.insert(0, sys.argv[1]); import needs_you as ny; now = time.time(); "
                 "d = ny.collect([], None, now, open_=ny.open_now()); print(ny.render(d, now)); print('HEAD', ny.headline(d))")
-        status = lambda: subprocess.run([sys.executable, "-I", "-c", code, os.path.join(ROOT, "scripts")], env=env,
+        status = lambda: subprocess.run([made_python(), "-I", "-c", code, os.path.join(ROOT, "scripts")], env=env,
                                         capture_output=True, text=True, timeout=60)
         r = status()
         assert r.returncode == 0, r.stderr[-400:]
@@ -4101,7 +4102,7 @@ def test_G12_14_status_repeats_an_open_folder_until_it_is_closed():
         assert "1. 1 of Pit Stop's own files or folders (such as ~/.claude/pit-stop, 777)" in r.stdout, r.stdout
         assert f"2. ~/.config/systemd (777)" in r.stdout and f"3. ~/.config/systemd/user (777)" in r.stdout
         assert f"To close it: chmod go-w {units}" in r.stdout and "3 thing(s) another account can write" in r.stdout
-        subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--no-tune-now"],
+        subprocess.run([made_python(), "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--no-tune-now"],
                        cwd=str(home), env=env, capture_output=True, timeout=120)
         r = status()                                                   # setup closed its own; the folders stay named
         assert "of Pit Stop's own" not in r.stdout and "1. ~/.config/systemd (777)" in r.stdout, r.stdout
@@ -4143,7 +4144,7 @@ def test_G12_15_a_private_group_of_one_is_not_another_account():
                 "su.group_members = lambda gid: None if m is None else set(m); "
                 "print(json.dumps([l for l in su.open_lines(su.open_scan()) if 'Pit Stop cannot tell' in l]))")
         lines = lambda members: _json.loads(subprocess.run(
-            [sys.executable, "-I", "-c", code, os.path.join(ROOT, "scripts"), _json.dumps(members)], env=env,
+            [made_python(), "-I", "-c", code, os.path.join(ROOT, "scripts"), _json.dumps(members)], env=env,
             capture_output=True, text=True, timeout=60).stdout)
         assert lines([]) == []                                          # a group of one: nothing named
         two = lines(["someone-else"])
@@ -4155,14 +4156,14 @@ def test_G12_15_a_private_group_of_one_is_not_another_account():
                  "__import__('os').getuid(); su.group_members = lambda gid: su.accounts_in_group(gid, pw, [], me); "
                  "print(json.dumps([l for l in su.open_lines(su.open_scan()) if 'Pit Stop cannot tell' in l]))")
         def by_passwd(pw):
-            r = subprocess.run([sys.executable, "-I", "-c", code2, os.path.join(ROOT, "scripts"), _json.dumps(pw)], env=env,
+            r = subprocess.run([made_python(), "-I", "-c", code2, os.path.join(ROOT, "scripts"), _json.dumps(pw)], env=env,
                                capture_output=True, text=True, timeout=60)
             assert r.returncode == 0, r.stderr[-600:]
             return _json.loads(r.stdout)
         uid, gid = os.getuid(), os.getgid()
         assert by_passwd([["me", uid, gid], ["me-by-another-name", uid, gid]]) == []   # one number, two names: the person
         assert len(by_passwd([["me", uid, gid], ["someone-else", uid + 4242, gid]])) == 3
-        pure = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import setup as su; "
+        pure = subprocess.run([made_python(), "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import setup as su; "
                                "print(sorted(map(str, su.accounts_in_group(7, [('a', 5, 7), ('a2', 5, 7), ('root', 0, 7), "
                                "('b', 6, 1)], ['b', 'ghost'], 5))))", os.path.join(ROOT, "scripts")],
                               env=env, capture_output=True, text=True, timeout=60)
@@ -4170,7 +4171,7 @@ def test_G12_15_a_private_group_of_one_is_not_another_account():
         bare = tmp_path / "bare"                                       # no ~/.claude yet (a Mac read): missing is not unreadable
         bare.mkdir()
         os.chmod(bare, 0o755)
-        r = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import needs_you as ny; "
+        r = subprocess.run([made_python(), "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import needs_you as ny; "
                             "print(ny.open_now())", os.path.join(ROOT, "scripts")],
                            env=dict(env, HOME=str(bare), CLAUDE_CONFIG_DIR=str(bare / ".claude")), capture_output=True, text=True, timeout=60)
         assert r.stdout.strip() == "[]", r.stdout + r.stderr[-400:]
@@ -4276,6 +4277,24 @@ def test_G12_17_undo_leaves_the_home_as_it_was_before_setup(tmp_path):
 
 
 # systemctl as systemd 255 was seen to answer (2026-11-24) for a timer that runs: "active", "enabled"
+def made_python(folder=None):
+    """The Python program Pit Stop runs, put where the test put it: a stand-in that runs this interpreter under its
+    own name (bash's exec -a), so Python reports the stand-in as sys.executable and its real path is itself. Seen on
+    a CI runner, 2026-11-24 (row P40): its Python sat in a folder of mode 777, and the open-folder check, which walks
+    the Python program's folders, rightly named it, so every test that counts those lines leaned on where the
+    machine keeps its Python. Default place: beside the run's made home, in a folder only this account can reach."""
+    import shlex
+    folder = folder or os.path.join(os.path.dirname(os.environ["HOME"]), "made-python")
+    p = os.path.join(str(folder), "python3")
+    if not os.path.exists(p):
+        os.makedirs(str(folder), mode=0o700, exist_ok=True)
+        with open(p, "w") as f:
+            real = os.path.realpath("/proc/self/exe" if os.path.exists("/proc/self/exe") else sys.executable)
+            f.write("#!/bin/bash\nexec -a \"$0\" " + shlex.quote(real) + ' "$@"\n')   # the binary, never a stand-in
+        os.chmod(p, 0o755)
+    return p
+
+
 SYSTEMCTL_RUNNING = ('if [ "$2" = is-active ]; then echo active; fi; '
                      'if [ "$2" = is-enabled ]; then echo enabled; fi; exit 0')
 
@@ -5001,7 +5020,7 @@ def test_G12_18_the_walk_covers_what_decides_what_runs():
     """Rule 28, WHAT RUNS INCLUDES WHAT DECIDES WHAT RUNS: besides Pit Stop's own settings, launcher, timer and
     code, status names, when another account can write them, installed_plugins.json (it tells the launcher
     which code to run), Claude Code's session list (it tells the helper where to type), every other installed
-    copy of Pit Stop the launcher may pick, and the folder of the claude program the helper runs."""
+    copy of Pit Stop the launcher may pick, and the folders of the claude and Python programs it runs."""
     import shutil
     tmp_path = _open_home()
     try:
@@ -5023,7 +5042,10 @@ def test_G12_18_the_walk_covers_what_decides_what_runs():
         for d in (sessions, bindir):
             os.chmod(d, 0o777)
         env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": str(bindir)}
-        r = subprocess.run([sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import setup as su; "
+        pybin = home / "pybin"                         # P40: the Python program Pit Stop runs, in a folder left open
+        made_python(pybin)
+        os.chmod(pybin, 0o777)
+        r = subprocess.run([str(pybin / "python3"), "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import setup as su; "
                             "su.group_members = lambda gid: set(); print('\\n'.join(su.open_lines(su.open_scan())))",
                             os.path.join(ROOT, "scripts")], env=env, capture_output=True, text=True, timeout=60)
         out = r.stdout
@@ -5033,6 +5055,8 @@ def test_G12_18_the_walk_covers_what_decides_what_runs():
                 f"To close it: chmod go-w {plist}") in out, out
         assert "~/.claude/sessions (777)" in out and "Claude Code's list of sessions, which tells Pit Stop's helper where to type" in out
         assert "~/.local/bin (777)" in out and "below it is the claude program Pit Stop runs as you" in out
+        assert ("~/pybin (777) can be written by another account, by its permission bits: it could delete and replace "
+                "what is in it, and below it is the Python program Pit Stop runs as you.") in out, out
         assert (f"1 file(s) or folder(s) in another installed copy of Pit Stop "
                 f"(~/.claude/plugins/cache/m/windstorm-pit-stop/0.1.0) can be written by another account") in out, out
     finally:
