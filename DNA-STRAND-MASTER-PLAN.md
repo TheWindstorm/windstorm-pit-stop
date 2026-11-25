@@ -527,6 +527,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.38 The timer names no version folder of Python or Node (open).** Proof: `test_G12_38_the_timer_names_no_version_folder`.
 
+**G12.39 Setup's tuning line says what config.json holds (open).** With `--no-auto-tune` it says the setting was left as it is, and its value. Proof: `test_G12_39_setups_tuning_line_says_what_config_json_holds`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

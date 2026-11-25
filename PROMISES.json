@@ -680,6 +680,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P58",
+   "codon": "G12.39",
+   "issue": 117,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "seen": "2026-11-25, read from the code of the 0.6.2 release, not seen on a machine: with `--no-auto-tune`, setup's step 1 prints `1. Tuning: left off (--no-auto-tune)` and writes nothing to `~/.claude/pit-stop/config.json` (scripts/setup.py, step 1). Where `config.json` already holds `\"auto_tune\": true`, daily tuning stays on after that run, so the line says the opposite of what is in place.",
+   "promise": "Setup's step 1 says what `config.json` holds after the run: with `--no-auto-tune`, that it left the setting as it is, and its value (on or off). A test holds it with a `config.json` that has `\"auto_tune\": true` and a run with `--no-auto-tune`.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
