@@ -1,6 +1,6 @@
 # Windstorm Pit Stop · DNA Strand Master Plan
 
-**Plan version 1.15 · 2026-11-23 · The Windstorm**
+**Plan version 1.18 · 2026-11-23 · The Windstorm**
 
 Pit Stop takes three chores off you and your agent: when a Claude Code session refreshes its context, keeping Claude Code current, and keeping Pit Stop itself current, each done at a break in the work.
 
@@ -87,7 +87,7 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 
 **G1.2 Manual and bad input go ahead.** The hook returns `(0, "")` (exit code, stdout) for `"trigger": "manual"`, for an automatic trigger whose `transcript_path` does not exist, and for stdin `not json`. Proof: `test_G1_2_hook_always_allows_manual_bad_and_missing`.
 
-**G1.3 Default ceiling.** With no configured ceiling, the context at a session's first hold is written to the hold file `~/.claude/pit-stop/holds/<session_id>` (`session_id` kept to letters, digits and `-`), read by later hook runs and removed at the next allow, and the ceiling is `PIT_STOP_DEFAULT_FLEX` (default 1.10) times it: first hold at 160K gives 176K, so 170K exits 2 and 180K exits 0. Proof: `test_G1_3_hook_default_flex_ceiling`.
+**G1.3 Default ceiling.** With no configured ceiling, the context at a session's first hold is written to the hold file `~/.claude/pit-stop/holds/<session_id>` (`session_id` kept to letters, digits and `-`), read by later hook runs and removed at the next allow, and the ceiling is 1.10 times it (a constant: no setting changes it; `PIT_STOP_DEFAULT_FLEX`, read until 0.6.1, is not read): first hold at 160K gives 176K, so 170K exits 2 and 180K exits 0. Proof: `test_G1_3_hook_default_flex_ceiling`.
 
 **G1.4 Ceiling from the old project file.** A ceiling in `<cwd>/.claude/pit-stop.json` (`{"ceiling": 300000}`, `cwd` from the hook JSON) is used: a mid-action 310K context exits 0. Proof: `test_G1_4_hook_profile_ceiling`.
 
@@ -116,6 +116,8 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 **G1.16 The README says Claude Code asks before the window.** The Window row of the table in `README.md` says Claude Code asks to compact a little before the context reaches the window, gives the one measurement seen (2026-11-22, Claude Code 2.1.330: 108K with a 23K result pending, at a 150K window) as seen once, not promised, and does not say `at once`. Seen 2026-11-22: it said "Above it, Claude Code wants to compact at once". Proof: `test_G1_16_readme_says_claude_code_asks_before_the_window`.
 
 **G1.17 A tool call cut off by a restart is a break (guard).** `hooks/session_start.py` with `"source": "resume"` writes the time to `pit-stop/started/<session_id>`. `hooks/precompact_wait_for_break.py` treats a newest `tool_use` with no `tool_result`, dated before that time, as a break and exits 0; one dated after it still exits 2. A guard: 0.6.1, run by hand on such a transcript, answers hold; Claude Code 2.1.330 never asked to compact in three hours idle after the resume (2026-11-22). Proof: `test_G1_17_a_tool_call_cut_off_by_a_restart_is_a_break`.
+
+**G1.18 A record is read whole, to its line feed.** `hooks/precompact_wait_for_break.py` splits the transcript's tail on line-feed bytes only, then decodes each line, so a record holding U+2028, U+2029 or NEL gets its control's decision; the log line counts lines json cannot load (`unreadable-lines=N`). Seen 2026-11-24 in 0.6.1 and the 0.6.2 build: U+2028 in the last record let a tool call in flight through and held a break. Proof: `test_G1_18_a_record_is_read_whole_to_its_line_feed`.
 
 ### G2 Refresh point tuned per folder
 `/pit-stop optimize` and a daily background tune read a folder's own session history and set its idle point, window and hook ceiling, moving one step at a time and checking each move before the next.
@@ -168,12 +170,26 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 
 **G2.24 Cache age follows the last model call.** `restart_at_break.ctx_and_idle(s)` also records the age of the last model call (an assistant row with usage, or a compaction); `call_age_of(s, idle)` returns `max(call_age, idle)`, or `idle` if none was seen. A `/reload-plugins` row 2500 s ago after a call 5 h ago: idle about 2500 s, call age 5 h. `cache_warm(age, cfg)` is `0 <= age <= cache_ttl * 0.8` (`cache_ttl` `3600`). `plan()` on a behind 300K session gives `restart` with `cache cold` (with call age set to idle, warm: `compact`); `reload_due` True, at idle 30 False. Needs: G2.18. Proof: `test_G2_24_cache_age_follows_the_last_model_call_not_the_last_dated_row`.
 
-**G2.25 The context limit from the model (open).** With no `--context-limit`, `recommend()` in `scripts/optimize.py` takes the limit from the folder's newest model: a `[1m]` id, or an id on a list of models and their limits in that file, which goes stale as models change. Claude Code gives the real size only to the status line, which Pit Stop does not own. Off the list: `could not tell this model's context; assumed 200K; pass --context-limit`. Seen 2026-11-22: a 1M Haiku folder was told "the right one for a 200K context". Proof: `test_G2_25_the_context_limit_comes_from_the_model`.
+**G2.25 The context limit from the model.** With no `--context-limit`, `recommend()` in `scripts/optimize.py` takes the limit from the folder's newest model: a `[1m]` id, or an id on a list in that file of sizes seen on a machine, which goes stale as models change. Claude Code gives the real size only to the status line, which Pit Stop does not own. Off the list: `could not tell this model's context; assumed 200K; pass --context-limit`. Seen 2026-11-22: a 1M Haiku folder was told "the right one for a 200K context". Proof: `test_G2_25_the_context_limit_comes_from_the_model`.
+
+**G2.26 No tuning in a session nobody sits at.** `pitstop_common.start_tune()` returns at once when `headless()` reads the session's `CLAUDE_CODE_ENTRYPOINT` as `sdk-*` (`claude -p`, an SDK); absent or anything else is a person's session and tunes as before. Seen 2026-11-23: with daily tuning on, a folder where only a headless run had worked got a settings file once it had history, a compaction point nobody chose in a tree nobody was watching. Proof: `test_G2_26_a_headless_session_never_starts_tuning`.
+
+**G2.27 The helper tunes no headless run's folder.** `restart_at_break.tune_due()` passes over a running session whose registry row says `entrypoint` `sdk-*`. A headless run gets a name made from its folder, so the name and allow-list gates alone let it through on a machine with no lists. Proof: `test_G2_27_the_helper_never_tunes_a_headless_runs_folder`.
+
+**G2.28 No fleet tune is started inside Pit Stop's own timer run.** A Type=oneshot unit ends what its run started when the run ends. `under_service()` in `scripts/restart_at_break.py` reads the process's own cgroup: only a path ending in /pit-stop-restart.service (the unit setup installs) stops the tune, said once a day; cron.service, a scope, any other unit or an unreadable file: started as before (G2.22). Proof: `test_G2_28_no_fleet_tune_is_started_inside_a_systemd_service`.
+
+**G2.29 A folder can be left out of daily tuning, and the day's line names it (open).** config.json takes a list of folders never tuned, beside tune_folders; a held folder is put on it at the switch-on, and the 24 h line names each folder left out. Seen 2026-11-23: two folders held on their own users' word were tuned 8 minutes after daily tuning was switched on for a whole machine (family rule 8). Proof: `test_G2_29_a_folder_can_be_left_out_of_daily_tuning`.
+
+**G2.30 A 200K-context folder with no points starts at 150K and 100K (open).** Proof: `test_G2_30_a_200k_folder_with_no_points_starts_at_150k_and_100k`.
+
+**G2.31 Setup's tune now leaves out what tune_folders leaves out (open).** A folder a `tune_folders` list leaves out is named, and nothing is written there. Proof: `test_G2_31_setups_tune_now_leaves_out_what_tune_folders_leaves_out`.
+
+**G2.32 No fleet tune starts inside a systemd run that ends what it starts (open).** Under any `Type=oneshot` unit, not only Pit Stop's own, the helper starts no tune and says why once a day. Proof: `test_G2_32_no_fleet_tune_inside_a_oneshot_run`.
 
 ### G3 Shared readers
 One shared module, `scripts/pitstop_common.py`, plus the hook generation file, reads Claude Code's transcripts, session listings, plugin records and Pit Stop's own state the same way for every part of the plugin.
 
-**G3.1 Odd transcript lines do not break the readers.** `pitstop_common.iter_entries(path)` yields only lines that parse as JSON objects (skipping `[1, 2]`, `"text"`, `7`, `null`, non-JSON); `message`, `usage`, `num`, `content_kinds`, `tool_uses` accept a string message, a string `input` and `"input_tokens": "many"`. `analyze` then counts 2 compactions with `median_hours_per_cycle` (median hours between compactions) None, `recommend` gives `window > 0`, and the PreCompact hook exits 0 on the file. Hook stdin `[]`, `null`, `"x"`, `7`, or `PIT_STOP_DEFAULT_FLEX=lots` (a non-number means 1.10) with no transcript, gives `(0, "")`. Needs: G1.2, G2.2. Proof: `test_G3_1_odd_transcript_lines_do_not_break_the_readers`.
+**G3.1 Odd transcript lines do not break the readers.** `pitstop_common.iter_entries(path)` yields only lines that parse as JSON objects (skipping `[1, 2]`, `"text"`, `7`, `null`, non-JSON); `message`, `usage`, `num`, `content_kinds`, `tool_uses` accept a string message, a string `input` and `"input_tokens": "many"`. `analyze` then counts 2 compactions with `median_hours_per_cycle` (median hours between compactions) None, `recommend` gives `window > 0`, and the PreCompact hook exits 0 on the file. Hook stdin `[]`, `null`, `"x"`, `7`, or an auto trigger with no transcript, gives `(0, "")`. Needs: G1.2, G2.2. Proof: `test_G3_1_odd_transcript_lines_do_not_break_the_readers`.
 
 **G3.2 Idle from the newest dated entry.** `scripts/restart_at_break.py` `ctx_and_idle({"cwd", "sessionId"})` reads `pitstop_common.project_dir(cwd)/<sessionId>.jsonl` (`~/.claude/projects/<project_key(cwd)>`, key as in G1.5) and returns the newest assistant usage total and the seconds since the newest row carrying a `timestamp`, not the file's modification time: a 300000-token reply 5 hours ago, then an undated row, file touched now, gives `ctx == 300000` and idle from 5 h minus 5 s to 5 h plus 60 s. Proof: `test_G3_2_idle_is_counted_from_the_newest_dated_entry_not_the_file_time`.
 
@@ -190,6 +206,8 @@ One shared module, `scripts/pitstop_common.py`, plus the hook generation file, r
 **G3.8 A number in restart.json must be a number.** `restart_at_break._check_numbers(cfg, defaults, warnings)` resets each key with a numeric default, plus `idle_compact_after` (default None), whose value is not a non-negative non-boolean number, adding one warning naming it: `idle_compact_after: true` becomes None, `cold_idle: "3600"` 3600, `min_idle: -5` 300; `ctx_max: 90000` stays; 3 warnings. `plan()` on an up-to-date 300K session idle 2 s returns `none`. `idle_compact_after: 2400` stays, no warning. Proof: `test_G3_8_a_number_in_restart_json_must_be_a_number`.
 
 **G3.9 Every apply keeps three backups.** `main()` in `scripts/optimize.py` with `--apply` calls `prune_backups(s)` after `apply()`, as `scripts/autotune.py` and `scripts/setup.py` already do, so each settings file keeps its newest three `.bak-pitstop-*` copies (G2.11). Seen 2026-11-22: 55 hand-run `--apply` writes left 56 copies; daily tuning prunes. Proof: `test_G3_9_optimize_apply_keeps_three_backups`.
+
+**G3.10 Only our own backups are pruned.** `pitstop_common.prune_backups(path)` counts and removes only files named exactly as `backup()` writes them, `<file>.bak-pitstop-YYYYMMDDTHHMMSSZ`; any other name that starts the same way is the person's and stays. Seen 2026-11-24 in a scratch home: a stand-in `settings.local.json.bak-pitstop-0-person` was deleted by the glob. Proof: `test_G3_10_prune_removes_only_backups_pit_stop_wrote`.
 
 ### G4 Restart helper at a break
 
@@ -271,6 +289,18 @@ The helper `scripts/restart_at_break.py` types `/compact`, `/restart` or a short
 
 **G4.38 Live through Herdr, end to end.** Live `handle()` for a behind `idle` session whose only target is `herdr://p9`, at context `300000` and idle `600`, types `/compact` through the fake `herdr`; once compacted `200` s ago (context `20000`, idle `90`), it types `/restart`, as in G4.18, and `restart.log` names the target `herdr://p9`. No `tmux` command runs. Needs: G4.37, G4.18. Proof: `test_G4_38_live_compact_then_restart_through_herdr`.
 
+**G4.39 A pane is addressed by its id, and tmux is read whole.** The helper types into a pane by its id (`#{pane_id}`, the same text in every environment, one pane only), never by a session's name, which a tmux client with no UTF-8 language setting prints with "_" for non-ASCII letters, and which matches by prefix; every tmux call of the helper carries -u (family rule 30). Proof: `test_G4_39_a_pane_is_addressed_by_its_id_and_tmux_is_read_whole`.
+
+**G4.40 Panes that could not be parsed are "could not be read", not "no pane" (open).** When tmux answers list-panes with lines and none splits into its fields, the helper logs that the panes could not be read, with tmux's first line, types nothing that run, and never passes a session over as having no pane; lines that split and hold no such terminal still mean no pane (family rule 6). Proof: `test_G4_40_panes_that_could_not_be_parsed_are_could_not_be_read`.
+
+**G4.41 A session folder that is not UTF-8 is named, never dropped (open).** The helper and setup meet a session whose folder name is not UTF-8 with no traceback, and the session is named (its folder shown changed) or counted. Proof: `test_G4_41_a_session_folder_that_is_not_utf8_is_named`.
+
+**G4.42 The input box is found by its frame (open).** A status line under the input box that starts with the prompt mark is never read as the box. Proof: `test_G4_42_a_status_line_with_the_prompt_mark_is_not_the_box`.
+
+**G4.43 tmux that cannot be asked is said, never read as no panes (open).** Proof: `test_G4_43_tmux_that_cannot_be_asked_is_said`.
+
+**G4.44 The helper's own programs get an environment it builds (open).** Proof: `test_G4_44_the_helpers_programs_get_a_built_environment`.
+
 ### G5 Hook reload
 
 With `reload_plugins: true` in `restart.json`, the helper types `/reload-plugins` (no turn starts) into a session whose Pit Stop hooks are missing or of the wrong hook generation, at a break, and confirms it from the screen.
@@ -331,6 +361,8 @@ Pit Stop tells which way Claude Code was installed on a machine, which version a
 
 **G6.19 The Claude Code named is the one sessions run (open).** `find_claude()` in `scripts/install_method.py` takes the program running sessions execute (`/proc/<pid>/exe`) first, the login shell's PATH second, never a short PATH alone. Every other install found is named, and when they disagree Pit Stop says so to the person instead of choosing. Seen 2026-11-23: a probe with the short-PATH rule named a stale root npm copy on a box whose sessions run the native install. Proof: `test_G6_19_the_claude_named_is_the_one_sessions_run`.
 
+**G6.20 "This machine has it" only when a Claude Code was found.** `describe()` in `scripts/install_method.py` adds "(this machine has it)" to the newest-release line only when the machine's own version was read; with no claude on PATH it says only the newest. Seen 2026-11-24 on a Mac test account with no Claude Code (the words came from 0.6.1). Proof: `test_G6_20_this_machine_has_it_only_when_a_claude_is_found`.
+
 ### G7 Pit Stop keeps itself current
 
 Pit Stop switches on Claude Code's own updates for the marketplace it came from, brings plugins up to date with Claude Code's plugin commands before the helper restarts anyone, and tells a session once per version that a newer Claude Code is installed.
@@ -345,15 +377,17 @@ Pit Stop switches on Claude Code's own updates for the marketplace it came from,
 
 **G7.5 The update line, once per version.** `hooks/stop_pit_stop.py`, when the newest folder in `~/.local/share/claude/versions` is newer than the session's version (`pitstop_common.session_version`: the `~/.claude/sessions/*.json` row whose `sessionId` is the hook's `session_id`, with a live `pid`), prints JSON whose `systemMessage` names both versions and `/restart`, and exits 0; once per version per session (stamp `pit-stop/nudged/<session>`). It prints nothing for a session on the newest version, with `"nudge": false` in `pit-stop/config.json`, or when `pit-stop/restart/restart.log` changed in the last hour. Proof: `test_G7_5_stop_hook_update_line_once_per_version`.
 
-**G7.6 Every catalog entry installs with no key (open).** Each plugin in `.claude-plugin/marketplace.json` has source `url` with an `https://` git URL, a `ref` and a 40-hex `sha`; no `github` or `git@` source. The README names the oldest Claude Code version its install lines were seen to work on with no GitHub key. Seen 2026-11-22: Claude Code 2.1.280 cloned a `github` entry over SSH and failed. Proof: `test_G7_6_every_catalog_entry_installs_over_https_with_no_key`.
+**G7.6 Every catalog entry installs with no key.** Each plugin in `.claude-plugin/marketplace.json` but Pit Stop's own (G7.7 governs it) has source `url` with an `https://` git URL, a tag `ref` and a 40-hex `sha`; no `github` or `git@` source. The README names the oldest Claude Code version its install lines were seen to work on with no GitHub key. Seen 2026-11-22: Claude Code 2.1.280 cloned a `github` entry over SSH and failed. Proof: `test_G7_6_every_catalog_entry_installs_over_https_with_no_key`.
 
-**G7.7 The catalog installs a release, not main (open).** Pit Stop's own entry pins `ref` to a tag `v<x.y.z>` and `sha` to that tag's commit, not `./`. Once the tag `v<version in .claude-plugin/plugin.json>` exists, the entry must pin it: each release is the tag first, then the pin on main, and the test fails while a tag waits for its pin. Seen 2026-11-22: a fresh install took main's code labelled 0.6.1. Proof: `test_G7_7_pit_stops_catalog_entry_pins_a_release_tag`.
+**G7.7 The catalog installs a release, not main.** Once the tag `v<version in .claude-plugin/plugin.json>` exists (`git ls-remote`), Pit Stop's own entry pins `ref` to it and `sha` to its commit; before, the old state passes. Each release is the tag first, then the pin on main, with nothing else merged between; the test fails while a tag waits for its pin. Seen 2026-11-22: a fresh install took main's code labelled 0.6.1. Proof: `test_G7_7_pit_stops_catalog_entry_pins_a_release_tag`.
 
-**G7.8 An install from `./` moves to the pinned release (open).** On a test machine, installs of 0.1.4 and 0.6.1 made from the `./` entry reach the pinned release with the README's own update lines, with no reinstall, keep `pit-stop/config.json` and the settings Pit Stop wrote, and the cache folder's files match the commit the registry names. Needs: G7.7, G16.1. Proof: `test_G7_8_conformance_kit_sees_a_dot_install_move_to_the_pinned_release`.
+**G7.8 An install from `./` moves to the pinned release (open).** Due 0.6.3 (row P11, moved once). On a test machine, installs of 0.1.4 and 0.6.1 made from the `./` entry reach the pinned release with the README's own update lines, with no reinstall, keep `pit-stop/config.json` and the settings Pit Stop wrote, and the cache folder's files match the commit the registry names. Needs: G7.7, G16.1. Proof: `test_G7_8_conformance_kit_sees_a_dot_install_move_to_the_pinned_release`.
 
-**G7.9 After an update, the files match the registry (open).** After every plugin update Pit Stop runs (`update_plugins()` in `scripts/restart_at_break.py`), it compares the files in the cache folder that `plugins/installed_plugins.json` names with the commit that row names, read from the marketplace clone, and when they differ logs and notifies `cache folder <path> does not hold <sha>`. Seen 2026-11-22: Claude Code 2.1.280 updated into a stale folder of the same version from another commit. Proof: `test_G7_9_update_checks_the_cache_folder_against_the_registry_commit`.
+**G7.9 After an update, the files match the registry.** After each plugin update `update_plugins()` in `scripts/restart_at_break.py` runs, `cache_problems()` compares the cache folder a user-scope row of `plugins/installed_plugins.json` names with that row's commit, read from the marketplace clone. When they differ it logs each run, notifies once per state `cache folder <path> does not hold <sha>`, counts the update as not done, repairs nothing and prints the uninstall and install lines. Seen 2026-11-22: 2.1.280 reused a stale same-version folder. Proof: `test_G7_9_update_checks_the_cache_folder_against_the_registry_commit`.
 
-**G7.10 One version, and new code gets a new one (open).** A test holds that the first release heading in `CHANGELOG.md` equals `version` in `.claude-plugin/plugin.json`; that Pit Stop's pinned catalog entry has `ref` `v<version>`; that every catalog entry's `ref` is a tag and its `sha` that tag's commit (`git ls-remote`); and that `scripts/release_check.py` fails when `hooks/`, `scripts/` or `skills/` differ from the newest tag still named in `plugin.json`. Seen 2026-11-22: main moved 28 commits past v0.6.1, still labelled 0.6.1. Needs: G7.7. Proof: `test_G7_10_one_version_in_every_place_and_new_code_gets_a_new_one`.
+**G7.10 One version, and new code gets a new one .** A test holds that the first release heading in `CHANGELOG.md` equals `version` in `.claude-plugin/plugin.json`; that once the tag `v<version>` exists, Pit Stop's own entry has `ref` `v<version>`; that every catalog entry's `ref` is a tag and its `sha` that tag's commit (`git ls-remote`); and that `scripts/release_check.py` fails when `hooks/`, `scripts/` or `skills/` differ from the newest tag still named in `plugin.json`. Seen 2026-11-22: main moved 28 commits past v0.6.1, still labelled 0.6.1. Needs: G7.7. Proof: `test_G7_10_one_version_in_every_place_and_new_code_gets_a_new_one`.
+
+**G7.11 The cache check works on a shallow marketplace clone (open).** After an update the helper checks the cache folder against the registry commit even when the marketplace clone holds only its newest commit, or says once a day that it cannot and why. Proof: `test_G7_11_the_cache_check_works_on_a_shallow_marketplace_clone`.
 
 ### G8 Needs-you list
 
@@ -393,7 +427,9 @@ Pit Stop keeps a short list, `~/.claude/pit-stop/needs-you.md`, of what only a p
 
 **G9.6 One line per session (open).** `python3 -I scripts/report.py` prints one line per running session: its name, the version it runs against the newest installed, its state, the idle point and window in force, its memory index line count, the date of its folder's last tune, and its folder; `--project DIR` prints that folder only. It changes nothing. Proof: `test_G9_6_report_prints_one_line_per_session`.
 
-**G9.7 An older install that wins is named (open).** When `plugins/installed_plugins.json` holds `windstorm-pit-stop@*` in two scopes and the version a folder's sessions load is lower than the newest installed, `/pit-stop checkup` shows `In <folder>, sessions load Pit Stop <old> (<scope>), not <new> (<scope>).` and the one command that removes or updates the older. Seen 2026-11-22: a user-scope 0.1.4 beat a project-scope 0.6.1. Proof: `test_G9_7_checkup_names_an_older_install_that_wins`.
+**G9.7 An older install that wins is named.** When `plugins/installed_plugins.json` holds `windstorm-pit-stop@*` in two scopes and the version a folder's sessions load is lower than the newest installed, `/pit-stop checkup` shows `In <folder>, sessions load Pit Stop <old> (<scope>), not <new> (<scope>).` and the one command that removes or updates the older. Seen 2026-11-22: a user-scope 0.1.4 beat a project-scope 0.6.1. Proof: `test_G9_7_checkup_names_an_older_install_that_wins`.
+
+**G9.8 Checkup and status read the command a timer runs (open).** Proof: `test_G9_8_checkup_and_status_read_a_timers_command`.
 
 ### G10 Reading check
 
@@ -419,7 +455,7 @@ Two hooks speak at the edges of a turn: SessionStart gives a short checklist aft
 
 The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.2, G12.3; CI also loads it with PyYAML), and a fixed launcher path lets a timer run whichever plugin version is installed now.
 
-**G12.1 The launcher finds the installed plugin.** `plugin_root(claude_dir)` in `scripts/launcher.py` returns the `installPath` recorded for `windstorm-pit-stop@*` in `plugins/installed_plugins.json` (user scope first) whose `scripts/restart_at_break.py` exists; with no record, the version folder under `plugins/cache/*/windstorm-pit-stop/` with the highest x.y.z (`0.10.0` over `0.2.0`) holding that script; `None` when there is neither. Proof: `test_G12_1_launcher_finds_the_installed_plugin`.
+**G12.1 The launcher finds the installed plugin.** `plugin_root(claude_dir)` in `scripts/launcher.py` returns the `installPath` recorded for `windstorm-pit-stop@*` in `plugins/installed_plugins.json` (user scope first) whose `scripts/restart_at_break.py` exists and whose folder carries no `.orphaned_at`; when no recorded path holds it, the version folder under `plugins/cache/*/windstorm-pit-stop/` with the highest x.y.z (`0.10.0` over `0.2.0`) holding that script and no `.orphaned_at`; `None` when there is neither, and when the registry has no Pit Stop row or cannot be read (G12.8). Proof: `test_G12_1_launcher_finds_the_installed_plugin`.
 
 **G12.2 The checker for strict YAML.** `plain_scalar_problems(value)` in `tests/test_skill_spec.py` returns a non-empty list for an unquoted value that contains `: `, ends with `:`, contains ` #`, or starts with one of `!&*{}[],%@?-` or a backtick; and an empty list for a quoted value or one with none of these. Proof: `test_G12_2_the_checker_catches_what_strict_parsers_reject`.
 
@@ -431,7 +467,83 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.6 Trials change nothing.** In `evals/tools/trigger_trials.py`, `command(query, model)` returns an argv holding `--settings` with `windstorm-pit-stop@thewindstorm` set to false, `--disallowedTools Bash Edit Write NotebookEdit` and `--permission-mode default`; `trial_paths(scratch, q, r)` gives each trial its own folder, with its transcript outside it. Trials run one at a time. In every results file `installed_visible` and `timed_out` are 0 and `ours_visible` equals `trials`. Proof: `test_G12_6_trigger_trials_run_isolated_and_read_only`.
 
-**G12.7 Setup can be undone (open).** `python3 -I scripts/setup.py --undo` puts back what `--apply` and `--fleet` changed: the backed-up settings and marketplace entry, `"auto_tune"` in `pit-stop/config.json`, and the timer and launcher it installed. It lists each step, and leaves the history files in place, named. Seen 2026-11-22: after `claude plugin uninstall`, `autoUpdate: true`, `config.json` and `checkup/` stayed. Proof: `test_G12_7_setup_undo_puts_back_what_apply_changed`.
+**G12.7 Setup can be undone.** `python3 -I scripts/setup.py --undo` puts back what `--apply` and `--fleet` changed: the backed-up settings and marketplace entry, `"auto_tune"` in `pit-stop/config.json`, and the timer and launcher it installed. It lists each step, and leaves the history files in place, named. Seen 2026-11-22: after `claude plugin uninstall`, `autoUpdate: true`, `config.json` and `checkup/` stayed. Proof: `test_G12_7_setup_undo_puts_back_what_apply_changed`.
+
+**G12.8 Nothing runs once the plugin is gone.** `state()` in `scripts/launcher.py` answers `installed`, `orphaned` (the folder carries Claude Code's `.orphaned_at`), `gone` (the registry reads fine and has no Pit Stop row), `nolist` (it is not there: G12.25) or `unreadable`. Unless `installed`, the launcher starts nothing and the helper changes no session; each logs one line saying which, `gone` with the command that takes the timer off. Checkup names `unreadable`. After a `plugin update` the new folder runs. Proof: `test_G12_8_nothing_runs_once_the_plugin_is_gone`.
+
+**G12.9 No bytecode beside the plugin's code.** Every file a hook, a command or a timer starts (`hooks/*.py` and each `scripts/*.py` with a `__main__`) sets `sys.dont_write_bytecode = True` right after `import sys`, before it imports any module of its own, so Python leaves no `__pycache__` in Claude Code's plugin folder. Seen 2026-11-23: `scripts/__pycache__` in every installed version folder back to 0.1.2. Files already there are Claude Code's folder and are left alone. Proof: `test_G12_9_no_bytecode_is_written_beside_the_code`.
+
+**G12.10 Undo names only what Pit Stop wrote, and prints no delete.** `setup.py --undo` names as left in place only names in `pitstop_common.STATE_NAMES` (with their `.1` and `.bak-pitstop-<UTC time>` copies), counts the rest as not written by this version, and prints no `rm -r`. A test holds the list against the code. Seen 2026-11-24, scratch home: a person's `pit-stop/notes.txt` was named as history under an `rm -r`. Proof: `test_G12_10_undo_names_only_what_pit_stop_wrote`.
+
+**G12.11 Undo removes only the timer files setup wrote.** Setup records each unit, timer, plist and launcher it writes with its sha256 and never overwrites one that is not Pit Stop's; `--undo` stops and removes a file only while it matches that record or, with no record, carries Pit Stop's mark, and names any other with the command that switches it off; it still exits 0 and ends `Done: ... named above.` Proof: `test_G12_11_undo_removes_only_timer_files_setup_wrote`.
+
+**G12.12 Nothing we make has group or other write.** Every entry file adds 022 to the umask it was started with, right after the G12.9 line; `write_json_atomic` and `backup` create each file with its final mode, a backup keeping the original's mode without group or other write. Seen 2026-11-24: a load gate on a shared machine started jobs with umask 000. Proof: `test_G12_12_nothing_made_is_writable_by_another_account`.
+
+**G12.13 Setup closes what an earlier run left open.** Every setup run removes group and other write from what Pit Stop wrote (the state folder and its own names, the launcher, and the unit, timer or plist when ours) and names, numbered and not changed, each folder from the home down to what it runs that another account can reach and write, with what that means and the chmod. Seen 2026-11-24: 0.6.1 under umask 000. Proof: `test_G12_13_setup_closes_what_an_earlier_run_left_open`.
+
+**G12.14 Status repeats an open folder until it is closed.** `/pit-stop status` (needs_you) names, numbered, what another account can reach and write: Pit Stop's own (with the setup that closes it) and each folder on the way (with the chmod), every time, and counts it as needing the person; behind a home only its owner enters, nothing. Seen 2026-11-24, rule 28's folders paragraph. Proof: `test_G12_14_status_repeats_an_open_folder_until_it_is_closed`.
+
+**G12.15 A private group of one is not another account.** A folder's group bits count only for an account in that group, by user number, not the owner's or 0 (its members, and every account whose primary group it is); a stock home at 755 with `~/.config` at 775 in the person's own group of one is named nowhere; with a second member it is; unreadable membership is said on the line. Seen 2026-11-24, rule 28's naming paragraph. Proof: `test_G12_15_a_private_group_of_one_is_not_another_account`.
+
+**G12.16 A folder the person does not own gets no command.** A named folder whose owner number is not the one Pit Stop runs as says who owns it (the administrator, or the account by number) and that only an administrator can close it, with no chmod. Each named line says what runs under it: the launch agent, the systemd timer, the launcher, the installed code. Seen 2026-11-24 in two other walks. Proof: `test_G12_16_a_folder_the_person_does_not_own_gets_no_command`.
+
+**G12.17 Undo leaves a home setup made as it was before setup.** By setup's record, `--undo` removes config.json while nothing of the person's is in it, released.json, backups of a file Pit Stop made, and folders with rmdir only; what holds the person's settings stays, named. Where setup made every file and no timer pass ran, the listing after undo equals the one before (not otherwise: row P46). Seen 2026-11-24 on a Mac. Proof: `test_G12_17_undo_leaves_the_home_as_it_was_before_setup`.
+
+**G12.18 The walk covers what decides what runs.** Besides Pit Stop's settings, launcher, timer files and code, the rule-28 walk names, when another account can reach and write them, installed_plugins.json, Claude Code's session list, every other installed copy of Pit Stop, and the claude, tmux and Python programs the helper runs, with their folders. Seen 2026-11-24 in another lane's stock machine sitting. Proof: `test_G12_18_the_walk_covers_what_decides_what_runs`.
+
+**G12.19 Setup finds tmux servers where tmux does.** `tmux_servers()` in `scripts/setup.py` lists the server names under TMUX_TMPDIR when it is set, else under /tmp, never both: the helper reaches a server by name (-L), and tmux itself looks in that one place. Seen 2026-11-24: the suite listed the account's own server through a stub. Proof: `test_G12_19_setup_finds_tmux_servers_where_tmux_does`.
+
+**G12.20 The way back in is walked.** With --fleet, setup's first and last act is the check the timer's launcher makes. With no Pit Stop row it makes and changes nothing of fleet mode, names a timer an earlier install left, says NOT set up with the install command, and answers 1; "fleet mode is set up" and 0 only when the check passes. A test walks --undo, uninstall and a cut --undo. Proof: `test_G12_20_the_way_back_in_is_walked`.
+
+**G12.21 A schedule that could not be read is not none there.** Setup --fleet makes a timer only when it has read that nothing else schedules the helper. An unreadable unit, or a `crontab -l` (C locale) refused, killed or silent, is "not checked": no timer, NOT set up, exit 1, with what crontab answered and the next step; --crontab-has-no-pit-stop-line is the person's way through. Proof: `test_G12_21_a_schedule_that_could_not_be_read_is_not_none`.
+
+**G12.22 Fleet mode is set up only when the timer is read running.** Step 7 reads the timer itself: `systemctl --user is-active` "active" and `is-enabled` "enabled", `launchctl print` exit 0, or a read crontab line. Stopped (launchctl: 113 "Bad request."), disabled, unknown or unreadable: said so, naming the unit, with its one command, exit 1; launchctl 125 (no screen login): not checked, log in at the screen. Proof: `test_G12_22_fleet_mode_is_set_up_only_when_the_timer_is_read_running`, `test_G12_22_launchd_answers_as_seen`.
+
+**G12.23 Nothing setup writes names a plugin cache version folder.** Run from a copy in a made-up plugins/cache/<catalog>/<plugin>/<version>/ folder, setup --fleet --apply writes that folder's path into no file or record (launcher copy, restart.json, undo ledger, config.json, settings.json, unit, timer, macOS job file); the timer runs the launcher copy (family rule 29 (a)). Seen red by hand (ExecStart, then an undo ledger value, pointed there); not red on released code: setup writes the launcher's path since 0.2.0. Proof: `test_G12_23_nothing_setup_writes_names_a_plugin_cache_folder`, `test_G12_23_setup_run_from_a_cache_version_folder_writes_that_path_nowhere`.
+
+**G12.24 A group number the system refuses is said, and the walk goes on.** `group_members()` in `scripts/setup.py` gives "could not be read" for a group whose number the system refuses (OverflowError, ValueError, TypeError), as for a group with no entry; the folder walk names that group as not read and goes on, never a traceback (family rule 28, A REAL MAC BEFORE THE TAG; the Mac's "nobody" group 4294967294 written as -2). Proof: `test_G12_24_a_group_number_the_system_refuses_is_said_and_the_walk_goes_on`.
+
+**G12.25 "Removed" is said only from Claude Code's own list, read.** `list_answer()` in `scripts/launcher.py` answers read, not there, or could not be read; `gone` and the advice to take the timer off come only from a read list naming Pit Stop nowhere. Without CLAUDE_CONFIG_DIR, the copy at <Claude folder>/pit-stop/bin/pit-stop-restart reads that folder's list and hands the folder to the helper (family rule 29 (e)). Proof: `test_G12_25_removed_is_said_only_from_claude_codes_own_list_read`.
+
+**G12.26 Setup loads its job file over a loaded job, and never cuts a run.** On a Mac, while launchd reads Pit Stop's loaded job as in a run, setup waits (a line a minute, up to 960 s); still in a run, or unread: nothing taken off, and setup's own command named, whole. Then bootout, a wait until launchd lets go, and bootstrap of its file; if refused, it prints bootout then bootstrap (family rule 30). Proof: `test_G12_26_setup_loads_the_job_file_it_wrote_over_a_job_already_loaded`.
+
+**G12.27 Undo stops only the timer, waits out a run, says off only when read off (open).** `setup --undo` stops the timer, never the service; while a run is in flight it waits (a line a minute, up to the run's bound), then reads timer and service off (words and exit codes; no user bus: could not be read) before removing anything; otherwise it removes nothing and names one whole command line (family rule 30). Proof: `test_G12_27_undo_stops_only_the_timer_and_says_off_only_when_it_read_both_off`.
+
+**G12.28 The service's time limit is above the helper's own limits.** The unit setup writes carries TimeoutStartSec=1200, above RUN_BOUND 960 s: CLAUDE_UPDATE_LIMIT 600 s plus UPDATE_BUDGET 300 s by the helper's limits, plus an allowance of 60 s for the reads before them (an allowance, not a sum: a pane read may take 15 s; seen: longest of 228 runs 7.6 s with about a hundred panes) (family rule 30). Proof: `test_G12_28_the_services_time_limit_is_above_the_runs_longest_road`.
+
+**G12.29 The helper never starts an update its unit's limit would cut (open).** It reads the limit of the unit it runs under, from its own cgroup, any name (could not be read: it says nothing), says once a day when that limit is below its road, and never starts an update when the time left before the limit is less than that update's own limit: it writes "next run" and goes on (family rule 30). Proof: `test_G12_29_the_helper_never_starts_an_update_its_units_limit_would_cut`.
+
+**G12.30 A printed line carries no shell form, and a command stands alone (open).** No line Pit Stop prints or logs holds a backtick or a dollar-parenthesis; every command for the person is alone on its line, its last character the line's last; one helper shows each value the tool did not write; a test runs each road and reads what it printed (family rule 31). Proof: `test_G12_30_a_printed_line_carries_no_shell_form`.
+
+**G12.31 A launcher older than the plugin is noticed and said (open).** After an update the helper or status notices a launcher copy older than the plugin and names the one step that replaces it; the launcher says its version; after an uninstall the tool says a timer is still on. It says so only: it replaces, stops and changes nothing by itself. Proof: `test_G12_31_a_launcher_older_than_the_plugin_is_said`.
+
+**G12.32 Setup's two steps agree on whether a unit is ours (open).** On Pit Stop's own unit, step 6 says the timer is there and gives no command to change it; another program's unit that runs the helper is named with the one line to change, as the open-folder step reads ownership. Proof: `test_G12_32_setups_steps_agree_on_whether_a_unit_is_ours`.
+
+**G12.33 Undo names by path everything it leaves (open).** Every file undo leaves and every file it made on the way, each settings.json backup among them, is named by its full path, and a file it rewrote keeps the mode it had. Nothing more is deleted to make a listing equal. Proof: `test_G12_33_undo_names_by_path_everything_it_leaves`.
+
+**G12.34 Setup's steps do not contradict each other on restart.json (open).** Where the open-folder step closes restart.json's mode, step 5 says the file's settings were kept, never that it was left exactly as it was. Proof: `test_G12_34_setup_does_not_say_left_as_it_is_after_closing_a_mode`.
+
+**G12.35 Setup's step 3 says where its update claim comes from (open).** Where setup switches a catalog's auto-update on, its line names the key it wrote and says that Claude Code's documentation says it checks for an update at each start; it says seen only after such an update was seen. Proof: `test_G12_35_setup_says_where_its_update_claim_comes_from`.
+
+**G12.36 Setup prints no command the same refusal refuses (open).** On a Mac account not logged in at the screen, setup names only the step that works and what it left. Proof: `test_G12_36_setup_prints_no_command_the_same_refusal_refuses`.
+
+**G12.37 A new restart.json names a tmux server only when it was read (open).** Proof: `test_G12_37_a_new_restart_json_names_a_tmux_server_only_when_read`.
+
+**G12.38 The timer names no version folder of Python or Node (open).** Proof: `test_G12_38_the_timer_names_no_version_folder`.
+
+**G12.39 Setup's tuning line says what config.json holds (open).** With `--no-auto-tune` it says the setting was left as it is, and its value. Proof: `test_G12_39_setups_tuning_line_says_what_config_json_holds`.
+
+**G12.40 One word brings the launcher current and does only that (open).** It replaces the launcher copy with the plugin's own when they differ and writes nothing else: no settings.json, restart.json, config.json, unit or mode. Proof: `test_G12_40_one_word_brings_the_launcher_current_only`.
+
+**G12.41 The setup plan stays readable when many paths are open (open).** Where many paths are open it prints a count per top folder and names a file with the full list; it closes nothing it did not list. Proof: `test_G12_41_the_setup_plan_stays_readable_when_many_paths_are_open`.
+
+**G12.42 Undo puts the catalog entry back only by its own record (open).** With a ledger that holds no catalog record, undo leaves the entry and says so; the settings backups are read only where there is no ledger at all. Proof: `test_G12_42_undo_puts_the_catalog_entry_back_only_by_its_own_record`.
+
+**G12.43 Auto-update is named as the catalog's setting (open).** Setup's step 3, undo's step 4 and the README say that the setting belongs to the marketplace entry and covers every plugin installed from it; what they do does not change. Proof: `test_G12_43_auto_update_is_named_as_the_catalogs_setting`.
+
+**G12.44 Step 6 names a command to make only where it differs (open).** When something already schedules the restart helper, setup's step 6 names it and changes nothing, as now, and prints the command to make only when the found schedule's command is another; a command it could not read is said so. Proof: `test_G12_44_step_6_names_a_command_only_where_it_differs`.
+
+**G12.45 Undo's lines say what its record holds (open).** A file undo keeps because setup's record does not hold it is named as not in setup's record, never as one setup did not write; what undo keeps and removes does not change. Proof: `test_G12_45_undos_lines_say_what_its_record_holds`.
 
 ### G13 Self-update for everyone (open)
 
@@ -471,9 +583,11 @@ Sessions on Windows, WSL and non-native installs also move to a new Claude Code 
 
 One script proves Pit Stop in any Claude Code surface in about ten minutes.
 
-**G16.1 The kit (open).** `scripts/conformance.py` installs the previous Pit Stop release (the `v*` tag before the newest; open question 7) with auto-update on, starts one interactive session with `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set low and fills it past that window, and then prints, for each check, `PASS` only when its file shows it and `FAIL` otherwise, reading files only: a `HOLD` and an `ALLOW` line in `precompact.log`; the Stop hook's `seen/<session_id>` stamp; a Pit Stop version in `installed_plugins.json` newer than the one installed. Proof: `test_G16_1_conformance_checks_read_files_only`.
+**G16.1 The kit (open).** `kit/conformance.py`, a test tool outside `scripts/` (INV6), installs the previous Pit Stop release (the `v*` tag before the newest; open question 7) with auto-update on, starts one interactive session with `CLAUDE_CODE_AUTO_COMPACT_WINDOW` set low and fills it past that window, and then prints, for each check, `PASS` only when its file shows it and `FAIL` otherwise, reading files only: a `HOLD` and an `ALLOW` line in `precompact.log`; the Stop hook's `seen/<session_id>` stamp; a Pit Stop version in `installed_plugins.json` newer than the one installed. Proof: `test_G16_1_conformance_checks_read_files_only`.
 
 **G16.2 Same kit everywhere (open).** The kit runs unchanged on macOS, Linux and Windows (Git Bash), and its output is one line per check in the form `<check>: PASS|FAIL <evidence file>`. Needs: G16.1. Proof: `test_G16_2_conformance_output_format`.
+
+**G16.3 The kit shows its own fill.** Its first check, `fill`, reads the run's own transcripts: PASS only when a model call's context reached the window. The session takes turns of new filler until `precompact.log` shows a HOLD and an ALLOW or the context stops growing. Each turn's peak goes to an evidence file, numbers only. A fill FAIL exits 3. Seen 2026-11-22: a run reached 25K of 100K, unsaid. Proof: `test_G16_3_the_kit_shows_its_own_fill`.
 
 ### G17 Harness verdicts and adapter study (open)
 
@@ -497,24 +611,38 @@ When a prompt takes a big session in a new direction, Pit Stop offers a refresh 
 
 **G18.2 Acting needs the person's yes (open).** Only when the folder profile has `"topic_switch_compact": true`, which only `/pit-stop setup` writes after the person says yes, the helper (`scripts/restart_at_break.py`) types `/compact` at the next break in a session the hook flagged. A hook cannot compact by itself. Needs: G18.1. Proof: `test_G18_2_topic_switch_acts_only_when_switched_on`.
 
-### G19 A proof is a test that ran (open)
+### G19 A proof is a test that ran
 
 A codon or a PROMISES row counts as proven only by a test the runner collected and passed in this run, never by a name found in a file.
 
-**G19.1 Counted from the run (open).** `tests/conftest.py` records every test that PASSED in the session. On a whole-suite run, it fails the run when a built codon's Proof or a PROMISES row's `test` is missing from that set, at any version. A whole-suite run is one that collected every top-level `test_*` function in `tests/test_*.py` and deselected none; any other run prints `partial run: rows and codons not checked` and checks nothing. There is no switch. Proof: `test_G19_1_a_built_proof_that_did_not_pass_fails_the_whole_run`.
+**G19.1 Counted from the run.** `tests/conftest.py` records every test that PASSED in the session. On a whole-suite run, it fails the run when a built codon's Proof or a PROMISES row's `test` failed or was not collected, at any version; one skipped on a condition of the machine fails it only in CI (G19.3). A whole-suite run is one that collected every top-level `test_*` function in `tests/test_*.py` and deselected none; any other run prints `partial run: rows and codons not checked` and checks nothing. There is no switch. Proof: `test_G19_1_a_built_proof_that_did_not_pass_fails_the_whole_run`.
 
-**G19.2 One name, one test (open).** No `tests/test_*.py` file defines the same top-level name twice, because a later definition hides the earlier test, which then never runs. Seen 2026-11-22: a test hidden this way still satisfied every name check. Proof: `test_G19_2_no_test_file_defines_a_name_twice`.
+**G19.2 One name, one test.** No `tests/test_*.py` file defines the same top-level name twice, because a later definition hides the earlier test, which then never runs. Seen 2026-11-22: a test hidden this way still satisfied every name check. Proof: `test_G19_2_no_test_file_defines_a_name_twice`.
 
-**G19.3 A skip says why and is not a pass (open).** A skipped test never counts as passed. The session summary lists it as `not run here: <test> (<reason>)`, and a skip with no reason fails the run. A built row's test that can run only on another system needs a CI job on that system. Proof: `test_G19_3_a_skip_is_listed_and_never_counts_as_passed`.
+**G19.3 A skip says why and is not a pass.** A skipped test never counts as passed. The summary lists it as `not run here: <test> (<reason>)`. Outside CI, a skip on a condition of the machine, with its reason, does not fail the run; in CI (the environment variable `CI` is `true`), a built proof that did not pass fails it. A skip with no reason, or on no condition of the machine, fails every run. Proof: `test_G19_3_a_skip_is_listed_and_never_counts_as_passed`.
 
-**G19.4 The plan check runs in CI (open).** `.github/workflows/tests.yml` runs `codon_check.py --strict --proofs tests` on the plan, and it finds tests the way G19.1 counts them, at the top level only. Proof: `test_G19_4_ci_runs_the_plan_check`.
+**G19.4 The plan check runs in CI.** CI runs `tests/test_strand.py` on every push and pull request. Its checks, written in this repository: version line; genes under Genes; codon form, heading, numbering; invariant Proofs; named ids exist; no loop in what codons need; genes in Milestones; ASSUMES: on open questions; the changelog's newest Plan entry; the 80-word cap. A built codon's test must pass (G19.1); an open one only names it. Vague words are the lane's hand check, not CI's. Proof: `test_G19_4_ci_runs_the_plan_check`.
+
+**G19.5 The suite never uses the home of the account running it.** `tests/conftest.py` gives the run its own home, Claude Code folder and tmux folder, puts failing stubs for tmux, claude, crontab, systemctl, loginctl and launchctl first on PATH, and fails a test that reaches the real home (less the checkout and Python's libraries) or tmux folder, starts a child with the real HOME, none, or a PATH reaching those programs, or runs one. Seen 2026-11-24. Proof: `test_G19_5_the_suite_never_uses_the_home_of_the_account_running_it`.
+
+**G19.6 Undo in the suite reaches only its made home.** A test calls setup's undo with nothing moved, so its config.json step (with no record it turns daily tuning off) acts on the made home's file, and fails if the real config.json's or settings.json's time or size moves; pointed at a stand-in, the same undo is seen to move it. Seen 2026-11-24 03:32:14Z, before G19.5: a test's undo turned tuning and self-update off in an account's real files. Proof: `test_G19_6_undo_in_the_suite_reaches_only_its_made_home`.
+
+**G19.7 The suite's lists do not lean on where the machine keeps its programs.** The tests that count the open-folder lines run with the Python program where the test put it; one test runs them from a Python in a folder left open and sees them pass. Seen 2026-11-24 on a CI runner: its Python's folder was open, and the check rightly named it. Proof: `test_G19_7_the_suites_lists_do_not_lean_on_the_machines_python`.
+
+**G19.8 A row that still owes part is not proven (open).** A row may carry proof_owed, what is still to be seen on a real machine. The gate after a release counts a shipped row proven only when its proven line is not empty and proof_owed holds nothing, and names what is owed; words in the line decide nothing. One function decides, called by the gate and its test. Seen 2026-11-24: family rule 32. Proof: `test_G19_8_a_row_that_still_owes_part_is_not_proven`.
+
+**G19.9 CI runs the suite on a Mac (open).** Every release head is tested on GitHub's macOS runner with the python3 of Apple's developer tools; a proof of one platform is named with its reason in one list the gate reads, never skipped in bulk. Proof: `test_G19_9_ci_runs_the_suite_on_a_mac`.
+
+**G19.10 The Python floor is the one CI runs, checked first (open).** The README, the plan and CI's lowest leg name one floor; each program checks it as its first act and below it says so and changes nothing. Proof: `test_G19_10_the_python_floor_is_the_one_ci_runs_checked_first`.
+
+**G19.11 A test changes a mode only on the folder it made (open).** A child a test starts changes a mode only after reading that the folder is under the test's made folder; otherwise it changes nothing and the test is reported not run here, with the reason. Proof: `test_G19_11_a_test_changes_a_mode_only_on_the_folder_it_made`.
 
 ## Part 5. Milestones
 
 - M0 (released 0.1 to 0.5): G1, G2, G3, G4, G5, G7 (fleet), G8, G9, G10, G11, G12.
 - M1 (0.6.0): G6. Claude Code updates are off by default, and are tried on one machine before any other.
 - M2 (0.6.1): G13, G14, G15.
-- M2.1 (0.6.2): G19, with the open G7 codons (G7.6 to G7.10).
+- M2.1 (0.6.2): G19, with the open G7 codons (G7.6 to G7.10), and G12.8.
 - M2.2 (0.6.3): G6.19.
 - M3 (0.7): G16, then G17 from the kit's results.
 - M4 (0.8): G18.
@@ -532,6 +660,7 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 8. For G18.1, which point is the session's refresh point, and under which key is the threshold kept? ASSUMES: no code reads either today; the point is the idle point in force (`pitstop_common.points`), and the key is named together with the number of question 3.
 9. About 40 behaviours inside built files have no codon yet. ASSUMES: plan 1.1 adds each one as an open codon, then a test; until then the plan cannot regrow them.
 10. Does Herdr 0.9.5 `pane send-keys` take `enter` and `ctrl+u` as written in G4.37? ASSUMES: yes, from the names in its own help. CHECKED 2026-11-20, yes: on a scratch Herdr 0.9.5 session on a test machine, `send-text` typed without sending, `enter` ran the typed line, `ctrl+u` cleared it, and an unknown key name was refused with exit 1.
+11. Can a person find Pit Stop with `gh skill search`? ASSUMES: not until GitHub's code search has indexed this repository. Nothing in the repository can ask for that, so a listing is never promised and no install line depends on search. SEEN 2026-11-23: `gh search code` limited to this repository returned no results, both for `SKILL.md` files containing `pit-stop` and for the word `compaction`, which most of its files contain; `gh skill search pit-stop` listed three skills of that name by other authors, not this one. At the time the repository was public, carried the `agent-skills` topic and had three releases, and `gh skill publish --dry-run` passed.
 
 ## Part 7. Decisions log
 
@@ -551,10 +680,13 @@ The evolution so far, oldest first. Each line gives the date and release, what w
 - 2026-11-15: fix failures in the plugin, never by hand on the machine, so the plugin repairs every machine with the same fault.
 - 2026-11-17 (0.5.3): skill files must load in strict YAML parsers. CI also loads them with PyYAML's `safe_load`, and runs the Agent Skills validator (`gh skill publish --dry-run`) where the runner's `gh` has it.
 - 2026-11-17 (0.6.0): Pit Stop may update Claude Code itself. This is off by default, never uses sudo, never acts against the owner's no, and is tried on one machine first.
+- 2026-11-17 (takes effect at 1.0): the skill keeps the name `pit-stop` until 1.0 and is then renamed `windstorm-pit-stop`, because `gh skill search` finds other skills named `pit-stop`. The 1.0 update line says so, and that release's README shows both names.
 - 2026-11-20 (plan 1.0): this plan is written in arrears from the code and tests as they are. From now on the plan leads: new work is a plan change first, then built.
 - 2026-11-20 (plan 1.0): Pit Stop is for Claude Code only. Other agents are studied (G17), not promised.
 - 2026-11-20 (plan 1.1): the skill's description is gated by trigger evals on Sonnet (G12.4 to G12.6), 10 queries that must load it and 10 near misses that must not. A description that loads at the wrong time costs every session that carries it; one that fails to load leaves the person without Pit Stop.
 - 2026-11-20 (plan 1.1): the restart helper can also reach sessions in a Herdr pane (G4.35 to G4.38, G8.9), opt-in: `"herdr": true` in `restart.json`. Typing into a Herdr pane reaches lanes whose owner has not agreed, and stability and the person's control of their agent come first (principle 10). It found sessions only through tmux, so 6 of 98 sessions on the build machine, 5 of them in Herdr, were never moved to a new Claude Code at a break. tmux stays first; Herdr is used only for a session Herdr names by its session id.
+- 2026-11-23 (plan 1.17): Pit Stop does nothing once Claude Code has uninstalled it (G12.8), and "the registry could not be read" is not "gone": that pass changes no session either, and the next one reads it again. A person who leaves by Claude Code's own uninstall must not be driven by code they removed (principle 10: the person's control of their agent).
+- 2026-11-23 (plan 1.18): the release gate for the Agent Skills format stays `gh skill publish --dry-run`. Being found by `gh skill search` is written as "not yet indexed by GitHub's code search, seen on <date>", never as a failure and never as a promise (open question 11). That search reads GitHub's code index, which a repository cannot ask to join.
 
 ## Appendix A. Changing this plan
 

@@ -26,6 +26,8 @@ optimize.check_last_move).
 import argparse
 import os
 import sys
+sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
+os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make has group or other write (G12.12)
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -120,7 +122,7 @@ def main():
     pc.prune_backups(s)
     pc.write_json_atomic(history_path(project), record(hist, was_w, rec, now), 0o600)
     pc.append_log(LOG, line + ("; " + rec["why"][1] if len(rec["why"]) > 1 and rec["why"][1].startswith(("waiting", "undo"))
-                               else ""))
+                               else "") + ("; " + op.UNKNOWN_CONTEXT if rec.get("context_limit_assumed") else ""))
     print(line)
     return 0
 

@@ -125,6 +125,8 @@ import re
 import shutil
 import subprocess
 import sys
+sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
+os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make has group or other write (G12.12)
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -211,12 +213,19 @@ PLANNED = set()  # panes the restart path wants this run (a restart, a compactio
 
 
 def tmux(*args):
-    base = ["tmux"] + (["-L", CFG["tmux_socket"]] if CFG["tmux_socket"] else [])
+    """Every call carries -u (rule 30, A NAME IS READ WHOLE): a tmux client with no UTF-8 language setting prints
+    "_" for each non-ASCII letter of a NAME and for a TAB (tmux 3.4, seen), as the helper's own tmux child does
+    when the helper was started under LC_ALL=C or POSIX (with no language variable at all, Python hands tmux UTF-8);
+    the screen from capture-pane came out whole from such a client on 3.4 (seen); -u is carried on every call all
+    the same. It is on the helper's own calls only; nothing in tmux's server changes."""
+    base = ["tmux", "-u"] + (["-L", CFG["tmux_socket"]] if CFG["tmux_socket"] else [])
     return subprocess.run(base + list(args), capture_output=True, text=True, timeout=15)
 
 
 def panes():
-    r = tmux("list-panes", "-a", "-F", "#{pane_tty}\t#{session_name}:#{window_index}.#{pane_index}")
+    """{terminal: pane id}. A pane is addressed by its id ("%N": the same text in every environment, one pane only),
+    never by a session's name, which can come out changed and also matches by prefix (rule 30)."""
+    r = tmux("list-panes", "-a", "-F", "#{pane_tty}\t#{pane_id}")
     return dict(l.split("\t") for l in r.stdout.splitlines() if "\t" in l)
 
 
@@ -460,7 +469,7 @@ def ctx_and_idle(s):
         return None, -1
     # Idle is counted from the newest entry that carries a time, not from the
     # file's modification time: on a quiet lane the file's time was seen moving
-    # about once an hour with nothing appended (Veron, 2026-11-11), which reset
+    # about once an hour with nothing appended (a fleet machine, 2026-11-11), which reset
     # the idle clock and kept the hour-idle rule from ever applying.
     ctx, newest, last_call = None, None, None
     for e in pc.iter_entries(p, tail_bytes=3_000_000):
@@ -1139,6 +1148,7 @@ def handle(s, newest, target, now, counts):
 
 PIT_STOP = "windstorm-pit-stop"
 UPDATE_BUDGET = 300   # seconds one run may spend on plugin updates in all
+CLAUDE_UPDATE_LIMIT = 600   # seconds Claude Code's own update may take (setup.py's unit limit and RUN_BOUND add these)
 
 
 def plugin_update_targets(scope, installed=None):
@@ -1206,14 +1216,83 @@ def update_plugins(now, behind_sessions, run=None):
             ok, first = False, f"{type(e).__name__}: {str(e)[:120]}"
         log(f"plugin update: {' '.join(cmd[2:])}: {'ok' if ok else 'FAILED'}: {first}")
         if cmd[2] == "update":
+            if ok:   # G7.9: the files must be the commit the registry now names; report and stop, never repair
+                toldf = os.path.join(BASE, "state", "cache-told.json")
+                told = pc.read_json(toldf, {}) or {}
+                problems = cache_problems(cmd[3])
+                for line in problems:
+                    log(f"plugin update: {cmd[3]}: {line}")
+                    if told.get(cmd[3]) != line:   # notify once per distinct state; the log says it every run
+                        notify(f"pit-stop: {line}")
+                    ok, first = False, line[:200]
+                new_told = dict(told, **({cmd[3]: problems[-1]} if problems else {}))
+                if not problems:
+                    new_told.pop(cmd[3], None)
+                if new_told != told:
+                    pc.write_json_atomic(toldf, new_told)
             out.append((cmd[3], ok, first))
-            if not ok:
+            if not ok and not first.startswith("cache folder "):
                 notify(f"pit-stop: plugin update failed for {cmd[3]}: {first}")
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     newest = plugin_root_now()
     if newest and os.path.realpath(newest) != os.path.realpath(here) and not os.environ.get("PIT_STOP_LAUNCHER"):
         log(f"plugin update: this timer runs {here}, not the installed {newest}; to follow updates, point it at "
             f"{os.path.join(pc.STATE_DIR, 'bin', 'pit-stop-restart')} (/pit-stop setup does)")
+    return out
+
+
+def cache_problems(plugin, run=None):
+    """G7.9: after an update, compare the cache folder each user-scope row of PLUGIN names in
+    plugins/installed_plugins.json with the commit that row names, read from the marketplace clone (blob ids
+    from `git ls-tree`, so nothing is copied). Returns one line per row whose folder does not hold that
+    commit's files. A row it cannot check (no folder, no sha, the commit not in the clone) is logged, not
+    reported. Files the commit does not have (such as __pycache__) are not counted. Reads only."""
+    import hashlib
+    run = run or (lambda cmd, t: subprocess.run(cmd, capture_output=True, timeout=t, stdin=subprocess.DEVNULL))
+    reg = pc.read_json(os.path.join(pc.CLAUDE_DIR, "plugins", "installed_plugins.json"), {}) or {}
+    market = plugin.split("@", 1)[-1]
+    clone = os.path.join(pc.CLAUDE_DIR, "plugins", "marketplaces", market)
+    out = []
+    for row in ((reg.get("plugins") or {}).get(plugin) or []):
+        if not isinstance(row, dict) or row.get("scope", "user") != "user":
+            continue
+        path, sha = row.get("installPath") or "", row.get("gitCommitSha") or ""
+        if not (path and sha and os.path.isdir(path) and os.path.isdir(clone)):
+            log(f"plugin update: {plugin}: cache not checked (no folder, no commit or no marketplace clone)")
+            continue
+        try:
+            r = run(["git", "-C", clone, "ls-tree", "-r", "-z", sha], 30)
+        except Exception as e:
+            log(f"plugin update: {plugin}: cache not checked ({type(e).__name__})")
+            continue
+        if r.returncode != 0:
+            log(f"plugin update: {plugin}: cache not checked (commit {sha[:12]} is not in the marketplace clone)")
+            continue
+        differ, total = [], 0
+        for entry in (r.stdout or b"").split(b"\0"):
+            if not entry:
+                continue
+            meta, name = entry.split(b"\t", 1)
+            kind, blob = meta.split()[1], meta.split()[2].decode()
+            if kind != b"blob":
+                continue
+            total += 1
+            rel = name.decode("utf-8", "replace")
+            f = os.path.join(path, rel)
+            try:
+                with open(f, "rb") as fh:
+                    data = fh.read()
+                got = hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+            except OSError:
+                got = None
+            if got != blob:
+                differ.append(rel)
+        if differ:
+            scope = row.get("scope", "user")
+            out.append(f"cache folder {path} does not hold {sha[:12]}: {len(differ)} of {total} files differ "
+                       f"(e.g. {', '.join(differ[:3])}). Claude Code's cache is not Pit Stop's to repair; to put it "
+                       f"right: claude plugin uninstall {plugin} --scope {scope}, then claude plugin install "
+                       f"{plugin} --scope {scope}")
     return out
 
 
@@ -1255,7 +1334,7 @@ def update_claude_code(now, run=None, machine=None):
         return None
     pc.write_json_atomic(stampf, {"released": m.get("released"), "at": now, "cmd": plan}, mode=0o644)  # first
     try:
-        r = run(plan, 600)
+        r = run(plan, CLAUDE_UPDATE_LIMIT)
         ok = r.returncode == 0
         tail = ((r.stdout or "") + (r.stderr or "")).strip().splitlines()
         first = (tail[-1] if tail else "")[:200]
@@ -1269,6 +1348,33 @@ def update_claude_code(now, run=None, machine=None):
     log(f"Claude Code update: FAILED ({m.get('method')}, {' '.join(plan)}): now {got}; {first}")
     notify(f"pit-stop: Claude Code update to {m.get('released')} failed here ({m.get('method')}): {first}")
     return None
+
+
+def timer_off_command():
+    """The command that takes off the fleet timer (launcher.timer_off()), or None on macOS."""
+    import launcher
+    return launcher.timer_off()
+
+
+def gone_line(here=None):
+    """None while Pit Stop is installed and HERE (this helper's plugin folder) is not one Claude Code left
+    behind; else the one line a pass logs before it does nothing (G12.8). Seen (Claude Code 2.1.280 and
+    2.1.331, Linux): `claude plugin uninstall` takes the plugin's entry off the list at once and leaves the
+    cache folder, marked .orphaned_at. A registry that cannot be read is not "gone": that pass changes no session, and the line
+    neither says Pit Stop is not installed nor advises taking the timer off."""
+    import launcher
+    here = here or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    said, rows = launcher.list_answer(pc.CLAUDE_DIR)   # read ONCE: two reads can disagree while Claude Code writes it
+    marked = launcher.orphaned(here)
+    if rows is None:                                 # not there or not read: never "not installed" (G12.25)
+        marked = f"plugin folder {here} carries .orphaned_at, and " if marked else ""
+        return f"plugin registry: {marked}{launcher.SAY[said]}"
+    if rows and not marked:
+        return None
+    if rows:
+        return (f"plugin folder {here}: {launcher.SAY['orphaned']}; nothing done. Pit Stop is installed elsewhere: "
+                f"point this timer at {os.path.join(pc.STATE_DIR, 'bin', 'pit-stop-restart')} (/pit-stop setup does)")
+    return f"{launcher.SAY['gone']}; nothing done {launcher.gone_advice()}"
 
 
 def plugin_root_now():
@@ -1297,6 +1403,8 @@ def tune_due(sessions, now, cfg, tuned_dir=None, week=None):
         cwd = s.get("cwd")
         if not cwd or not s.get("name") or not allowed(s["name"], cwd, cfg) or not os.path.isdir(cwd):
             continue
+        if str(s.get("entrypoint") or "").startswith("sdk-"):   # a running `claude -p` or SDK run (G2.27)
+            continue
         folder = os.path.abspath(cwd)
         if not pc.tune_wanted(folder):          # config.json "tune_folders": a test group only
             continue
@@ -1317,6 +1425,23 @@ def machine_busy():
         return False
 
 
+OWN_UNIT = "pit-stop-restart.service"      # the one unit /pit-stop setup --fleet installs (setup.py install_timer)
+
+
+def under_service(cgroup="/proc/self/cgroup"):
+    """OWN_UNIT when systemd runs THIS helper as that unit's own run: a line of the process's own cgroup file (one
+    "0::/path" line, or the older layout's several "N:name:/path" lines) whose path ends in /OWN_UNIT. Any other unit
+    (cron.service, a tmux server's own service, a unit of the person's) or a file that could not be read: None, and
+    the tune starts as 0.6.1 does. Seen 2026-11-24 (systemd 255): a Type=oneshot unit ends what its main process
+    started, even in a new session, when that process exits (G2.28); not known of other units."""
+    try:
+        with open(cgroup) as f:
+            lines = f.read().strip().splitlines()
+    except OSError:
+        return None
+    return OWN_UNIT if any(l.rsplit(":", 1)[-1].rstrip("/").endswith("/" + OWN_UNIT) for l in lines) else None
+
+
 def start_tune(sessions, now):
     """Fleet-wide tune (daily by default). A session's folder used to be tuned only when a
     session started there, so a session that runs for weeks was never looked at
@@ -1334,6 +1459,24 @@ def start_tune(sessions, now):
         pass
     folder = tune_due(sessions, now, CFG)
     if not folder or machine_busy():
+        return None
+    svc = under_service()
+    if svc:     # G2.28: the service's end would cut the tune off at any point of its own run; say so once a day
+        said = os.path.join(BASE, "state", "tune-not-started")
+        try:
+            if now - os.path.getmtime(said) < 86400:
+                return None
+        except OSError:
+            pass
+        log(f"daily tune not started: this run is inside systemd's {svc}, which ends what a run starts when the run "
+            f"ends; folders are tuned when a session there starts or ends a turn (Pit Stop's hooks)")
+        try:
+            os.makedirs(os.path.dirname(said), exist_ok=True)
+            with open(said, "w"):
+                pass
+            os.utime(said, (now, now))
+        except OSError:
+            pass
         return None
     script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "autotune.py")
     p = subprocess.Popen([sys.executable, "-I", script, "--project", folder], stdin=subprocess.DEVNULL,
@@ -1382,6 +1525,10 @@ def main():
     bad = unknown_options()
     if bad:
         log(f"unknown option(s) {' '.join(bad)}; nothing done (known: {' '.join(KNOWN_OPTIONS)})")
+        return
+    gone = gone_line()
+    if gone:   # G12.8: once the plugin is gone (or its registry cannot be read), no session is touched
+        log(gone)
         return
     for w in CFG_WARNINGS:
         log(w)

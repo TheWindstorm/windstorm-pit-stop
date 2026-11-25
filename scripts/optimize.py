@@ -54,6 +54,8 @@ import re
 import os
 import statistics
 import sys
+sys.dont_write_bytecode = True   # rule 23: no __pycache__ beside the plugin's code (G12.9)
+os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make has group or other write (G12.12)
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -73,6 +75,36 @@ DRIFT_WINDOW = 30       # file-touching tool calls per stretch of work
 COLD_GAP = 3600         # a prompt after this long finds the prompt cache cold
 # planned re-reading after a compaction is not lost context
 ROUTINE_READ = re.compile(r"(?i)(claude|memory|todo|start[-_]here|handoff|readme|status|changelog)[^/]*\.md$")
+# Context limits of models, by the id Claude Code writes in a transcript. Only sizes seen on a real
+# machine are here; this list goes stale as models change. A "[1m]" id is 1M whatever the list says.
+MODEL_CONTEXT = {
+    "claude-opus-5-5": 1_000_000,    # seen 2026-11-23: a session peaked at 588K
+    "claude-fable-5-2": 1_000_000,   # seen 2026-11-23: a session peaked at 569K
+    "claude-haiku-5-5": 1_000_000,   # seen 2026-11-22: its status line read 1.00M
+}
+UNKNOWN_CONTEXT = "could not tell this model's context; assumed 200K; pass --context-limit"
+
+
+def model_context(model):
+    """The context limit of MODEL (an id as a transcript or --model names it), or None when not known. Pure."""
+    if not isinstance(model, str) or not model:
+        return None
+    if model.lower().endswith("[1m]"):
+        return 1_000_000
+    return MODEL_CONTEXT.get(re.sub(r"-\d{8}$", "", model))
+
+
+def context_limit_of(m, context_limit=None):
+    """(limit, note) for a folder: the limit given, or the newest model's, or a peak above 200K
+    (only a 1M model gets there); else 200K, with a note that says it is assumed. Pure."""
+    if context_limit:
+        return context_limit, None
+    known = model_context(m.get("model"))
+    if known:
+        return known, None
+    if (m.get("max_context") or 0) > 200_000:
+        return 1_000_000, None
+    return 200_000, UNKNOWN_CONTEXT
 
 
 def drift_of(paths):
@@ -100,6 +132,7 @@ def analyze(project, days, only=None):
     when = {"idle": 0, "prompt": 0, "mid_task": 0, "instant": 0}
     comp_log = []          # one [time, kind, trigger] per compaction, for /pit-stop checkup's own time windows
     calls, read_once, seen_ids = 0, 0, set()   # one model call can span several transcript rows: count it once
+    newest = (None, None)                      # (time, model) of the folder's newest answer
     busiest = None                             # the most cache reads per day of any one session with a day of history
     for path in files:
         sessions += 1
@@ -157,6 +190,9 @@ def analyze(project, days, only=None):
                 total = pc.usage_total(e)
                 mid = pc.message(e).get("id")
                 mid = mid if isinstance(mid, str) else None      # an odd row never stops the read
+                mdl = pc.message(e).get("model")
+                if isinstance(mdl, str) and mdl and not mdl.startswith("<") and ts and (newest[0] is None or ts >= newest[0]):
+                    newest = (ts, mdl)
                 if total and (mid is None or mid not in seen_ids):
                     seen_ids.add(mid)
                     calls += 1
@@ -223,6 +259,7 @@ def analyze(project, days, only=None):
         "project": os.path.abspath(project), "days": days, "sessions": sessions,
         "transcripts": len(files), "compactions": boundaries,
         "max_context": max_ctx,
+        "model": newest[1],
         "median_peak_before_compaction": int(statistics.median([c["peak"] for c in compacted])) if compacted else None,
         "median_hours_per_cycle": round(statistics.median(hours), 1) if hours else None,
         "reread_after_compaction": round(rereads / reread_checks, 2) if reread_checks else None,
@@ -412,7 +449,7 @@ def recommend(m, context_limit=None, max_steps=None, budget=None, history=None, 
     budget = budget or pc.config().get("budget") or "balanced"
     if budget not in BUDGETS:
         budget = "balanced"
-    limit = context_limit or (1_000_000 if m["max_context"] > 200_000 else 200_000)
+    limit, limit_note = context_limit_of(m, context_limit)
     big = limit >= 1_000_000
     step = 100_000 if big else 20_000
     window = 500_000 if big else 150_000
@@ -489,7 +526,8 @@ def recommend(m, context_limit=None, max_steps=None, budget=None, history=None, 
     ilo, ihi = pc.IDLE_FLOOR, (300_000 if big else pc.IDLE_FLOOR)
     idle = pc.IDLE_DEFAULT if big else pc.IDLE_FLOOR
     iwhy = [f"idle point: Claude Code's default is {pc.fmt_k(pc.IDLE_DEFAULT)}"] if big else [
-        f"idle point: {pc.fmt_k(pc.IDLE_FLOOR)} is the lowest Claude Code allows, and the right one for a {pc.fmt_k(limit)} context"]
+        f"idle point: {pc.fmt_k(pc.IDLE_FLOOR)} is the lowest Claude Code allows" + (
+            "" if limit_note else f", and the right one for a {pc.fmt_k(limit)} context")]
     if big:
         cold = m.get("cold_wakes_per_day")
         if (gap is not None and gap >= 0.40) or (cold is not None and cold >= 3):
@@ -514,8 +552,10 @@ def recommend(m, context_limit=None, max_steps=None, budget=None, history=None, 
     # so with a window the user set very low the floor wins.
     idle = max(ilo, min(idle, window - step))
     why += iwhy
+    if limit_note:
+        why.append(limit_note)
     ceiling = max(min(window + 2 * step, int(limit * (0.85 if big else 0.90))), window)
-    base = {"context_limit": limit, "idle_point": idle, "window": window, "ceiling": ceiling, "why": why,
+    base = {"context_limit": limit, "context_limit_assumed": bool(limit_note), "idle_point": idle, "window": window, "ceiling": ceiling, "why": why,
             "budget": budget, "usage_class": usage_class, "est_read_saving": saving, "floor_set": floor_set}
     er = m["tool_error_rate"]
     if m["prompts"] < MIN_PROMPTS_FOR_SUGGESTIONS:
