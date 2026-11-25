@@ -539,6 +539,12 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.42 Undo puts the catalog entry back only by its own record (open).** With a ledger that holds no catalog record, undo leaves the entry and says so; the settings backups are read only where there is no ledger at all. Proof: `test_G12_42_undo_puts_the_catalog_entry_back_only_by_its_own_record`.
 
+**G12.43 Auto-update is named as the catalog's setting (open).** Setup's step 3, undo's step 4 and the README say that the setting belongs to the marketplace entry and covers every plugin installed from it; what they do does not change. Proof: `test_G12_43_auto_update_is_named_as_the_catalogs_setting`.
+
+**G12.44 Step 6 names a command to make only where it differs (open).** When something already schedules the restart helper, setup's step 6 names it and changes nothing, as now, and prints the command to make only when the found schedule's command is another; a command it could not read is said so. Proof: `test_G12_44_step_6_names_a_command_only_where_it_differs`.
+
+**G12.45 Undo's lines say what its record holds (open).** A file undo keeps because setup's record does not hold it is named as not in setup's record, never as one setup did not write; what undo keeps and removes does not change. Proof: `test_G12_45_undos_lines_say_what_its_record_holds`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.
@@ -624,6 +630,12 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 **G19.7 The suite's lists do not lean on where the machine keeps its programs.** The tests that count the open-folder lines run with the Python program where the test put it; one test runs them from a Python in a folder left open and sees them pass. Seen 2026-11-24 on a CI runner: its Python's folder was open, and the check rightly named it. Proof: `test_G19_7_the_suites_lists_do_not_lean_on_the_machines_python`.
 
 **G19.8 A row that still owes part is not proven (open).** A row may carry proof_owed, what is still to be seen on a real machine. The gate after a release counts a shipped row proven only when its proven line is not empty and proof_owed holds nothing, and names what is owed; words in the line decide nothing. One function decides, called by the gate and its test. Seen 2026-11-24: family rule 32. Proof: `test_G19_8_a_row_that_still_owes_part_is_not_proven`.
+
+**G19.9 CI runs the suite on a Mac (open).** Every release head is tested on GitHub's macOS runner with the python3 of Apple's developer tools; a proof of one platform is named with its reason in one list the gate reads, never skipped in bulk. Proof: `test_G19_9_ci_runs_the_suite_on_a_mac`.
+
+**G19.10 The Python floor is the one CI runs, checked first (open).** The README, the plan and CI's lowest leg name one floor; each program checks it as its first act and below it says so and changes nothing. Proof: `test_G19_10_the_python_floor_is_the_one_ci_runs_checked_first`.
+
+**G19.11 A test changes a mode only on the folder it made (open).** A child a test starts changes a mode only after reading that the folder is under the test's made folder; otherwise it changes nothing and the test is reported not run here, with the reason. Proof: `test_G19_11_a_test_changes_a_mode_only_on_the_folder_it_made`.
 
 ## Part 5. Milestones
 
