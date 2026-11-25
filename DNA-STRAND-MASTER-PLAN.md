@@ -624,6 +624,7 @@ The evolution so far, oldest first. Each line gives the date and release, what w
 - 2026-11-15: fix failures in the plugin, never by hand on the machine, so the plugin repairs every machine with the same fault.
 - 2026-11-17 (0.5.3): skill files must load in strict YAML parsers. CI also loads them with PyYAML's `safe_load`, and runs the Agent Skills validator (`gh skill publish --dry-run`) where the runner's `gh` has it.
 - 2026-11-17 (0.6.0): Pit Stop may update Claude Code itself. This is off by default, never uses sudo, never acts against the owner's no, and is tried on one machine first.
+- 2026-11-17 (takes effect at 1.0): the skill keeps the name `pit-stop` until 1.0 and is then renamed `windstorm-pit-stop`, because `gh skill search` finds other skills named `pit-stop`. The 1.0 update line says so, and that release's README shows both names.
 - 2026-11-20 (plan 1.0): this plan is written in arrears from the code and tests as they are. From now on the plan leads: new work is a plan change first, then built.
 - 2026-11-20 (plan 1.0): Pit Stop is for Claude Code only. Other agents are studied (G17), not promised.
 - 2026-11-20 (plan 1.1): the skill's description is gated by trigger evals on Sonnet (G12.4 to G12.6), 10 queries that must load it and 10 near misses that must not. A description that loads at the wrong time costs every session that carries it; one that fails to load leaves the person without Pit Stop.
