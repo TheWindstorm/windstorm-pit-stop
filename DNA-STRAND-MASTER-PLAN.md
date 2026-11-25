@@ -289,6 +289,12 @@ The helper `scripts/restart_at_break.py` types `/compact`, `/restart` or a short
 
 **G4.41 A session folder that is not UTF-8 is named, never dropped (open).** The helper and setup meet a session whose folder name is not UTF-8 with no traceback, and the session is named (its folder shown changed) or counted. Proof: `test_G4_41_a_session_folder_that_is_not_utf8_is_named`.
 
+**G4.42 The input box is found by its frame (open).** A status line under the input box that starts with the prompt mark is never read as the box. Proof: `test_G4_42_a_status_line_with_the_prompt_mark_is_not_the_box`.
+
+**G4.43 tmux that cannot be asked is said, never read as no panes (open).** Proof: `test_G4_43_tmux_that_cannot_be_asked_is_said`.
+
+**G4.44 The helper's own programs get an environment it builds (open).** Proof: `test_G4_44_the_helpers_programs_get_a_built_environment`.
+
 ### G5 Hook reload
 
 With `reload_plugins: true` in `restart.json`, the helper types `/reload-plugins` (no turn starts) into a session whose Pit Stop hooks are missing or of the wrong hook generation, at a break, and confirms it from the screen.
@@ -415,6 +421,8 @@ Pit Stop keeps a short list, `~/.claude/pit-stop/needs-you.md`, of what only a p
 
 **G9.7 An older install that wins is named.** When `plugins/installed_plugins.json` holds `windstorm-pit-stop@*` in two scopes and the version a folder's sessions load is lower than the newest installed, `/pit-stop checkup` shows `In <folder>, sessions load Pit Stop <old> (<scope>), not <new> (<scope>).` and the one command that removes or updates the older. Seen 2026-11-22: a user-scope 0.1.4 beat a project-scope 0.6.1. Proof: `test_G9_7_checkup_names_an_older_install_that_wins`.
 
+**G9.8 Checkup and status read the command a timer runs (open).** Proof: `test_G9_8_checkup_and_status_read_a_timers_command`.
+
 ### G10 Reading check
 
 `/pit-stop reading` trims a memory index that has grown past what Claude Code loads, without losing a single link.
@@ -508,6 +516,12 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 **G12.34 Setup's steps do not contradict each other on restart.json (open).** Where the open-folder step closes restart.json's mode, step 5 says the file's settings were kept, never that it was left exactly as it was. Proof: `test_G12_34_setup_does_not_say_left_as_it_is_after_closing_a_mode`.
 
 **G12.35 Setup's step 3 says where its update claim comes from (open).** Where setup switches a catalog's auto-update on, its line names the key it wrote and says that Claude Code's documentation says it checks for an update at each start; it says seen only after such an update was seen. Proof: `test_G12_35_setup_says_where_its_update_claim_comes_from`.
+
+**G12.36 Setup prints no command the same refusal refuses (open).** On a Mac account not logged in at the screen, setup names only the step that works and what it left. Proof: `test_G12_36_setup_prints_no_command_the_same_refusal_refuses`.
+
+**G12.37 A new restart.json names a tmux server only when it was read (open).** Proof: `test_G12_37_a_new_restart_json_names_a_tmux_server_only_when_read`.
+
+**G12.38 The timer names no version folder of Python or Node (open).** Proof: `test_G12_38_the_timer_names_no_version_folder`.
 
 ### G13 Self-update for everyone (open)
 
