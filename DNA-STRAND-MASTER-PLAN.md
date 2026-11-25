@@ -287,6 +287,8 @@ The helper `scripts/restart_at_break.py` types `/compact`, `/restart` or a short
 
 **G4.40 Panes that could not be parsed are "could not be read", not "no pane" (open).** When tmux answers list-panes with lines and none splits into its fields, the helper logs that the panes could not be read, with tmux's first line, types nothing that run, and never passes a session over as having no pane; lines that split and hold no such terminal still mean no pane (family rule 6). Proof: `test_G4_40_panes_that_could_not_be_parsed_are_could_not_be_read`.
 
+**G4.41 A session folder that is not UTF-8 is named, never dropped (open).** The helper and setup meet a session whose folder name is not UTF-8 with no traceback, and the session is named (its folder shown changed) or counted. Proof: `test_G4_41_a_session_folder_that_is_not_utf8_is_named`.
+
 ### G5 Hook reload
 
 With `reload_plugins: true` in `restart.json`, the helper types `/reload-plugins` (no turn starts) into a session whose Pit Stop hooks are missing or of the wrong hook generation, at a break, and confirms it from the screen.
@@ -496,6 +498,10 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 **G12.29 The helper never starts an update its unit's limit would cut (open).** It reads the limit of the unit it runs under, from its own cgroup, any name (could not be read: it says nothing), says once a day when that limit is below its road, and never starts an update when the time left before the limit is less than that update's own limit: it writes "next run" and goes on (family rule 30). Proof: `test_G12_29_the_helper_never_starts_an_update_its_units_limit_would_cut`.
 
 **G12.30 A printed line carries no shell form, and a command stands alone (open).** No line Pit Stop prints or logs holds a backtick or a dollar-parenthesis; every command for the person is alone on its line, its last character the line's last; one helper shows each value the tool did not write; a test runs each road and reads what it printed (family rule 31). Proof: `test_G12_30_a_printed_line_carries_no_shell_form`.
+
+**G12.31 A launcher older than the plugin is noticed and said (open).** After an update the helper or status notices a launcher copy older than the plugin and names the one step that replaces it; the launcher says its version; after an uninstall the tool says a timer is still on. It says so only: it replaces, stops and changes nothing by itself. Proof: `test_G12_31_a_launcher_older_than_the_plugin_is_said`.
+
+**G12.32 Setup's two steps agree on whether a unit is ours (open).** On Pit Stop's own unit, step 6 says the timer is there and gives no command to change it; another program's unit that runs the helper is named with the one line to change, as the open-folder step reads ownership. Proof: `test_G12_32_setups_steps_agree_on_whether_a_unit_is_ours`.
 
 ### G13 Self-update for everyone (open)
 
