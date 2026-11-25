@@ -487,7 +487,7 @@
   },
   {
    "id": "P44",
-   "seen": "2026-11-25, a stock Linux virtual machine, run by hand: on Pit Stop's own systemd unit (written by 0.6.1's setup, and again by 0.6.2's), a second fleet setup prints at step 6 that something already schedules the restart helper and nothing changed, then tells the person to make the unit's command the one it already has; in the same run the open-folder step treats that unit as Pit Stop's own and closes it. setup's schedule check counts any unit that holds the launcher's name. Released 0.6.1 says the same. Nothing is done wrong: the unit is left as it is and the launcher is refreshed.",
+   "seen": "2026-11-25, a stock Linux virtual machine, run by hand: on Pit Stop's own systemd unit (written by 0.6.1's setup, and again by 0.6.2's), a second fleet setup prints at step 6 that something already schedules the restart helper and nothing changed, then tells the person to make the unit's command the one it already has; in the same run the open-folder step treats that unit as Pit Stop's own and closes it. setup's schedule check counts any unit that holds the launcher's name. Released 0.6.1 says the same. Nothing is done wrong: the unit is left as it is and the launcher is refreshed. Seen again the same night: on a keeper's own unit (its own name) that already runs the launcher copy with --live, step 6 tells the person to make its command that same line; and step 5 says restart.json is 'left exactly as it is' while the open-folder step closes its mode from 664 to 644 (its bytes were kept).",
    "promise": "Setup's schedule step and its open-folder step agree on whether a unit is Pit Stop's own: on its own unit setup says the timer is there and gives no command to change it; another program's unit that runs the helper is still named with the one line to change.",
    "codon": "G12.32",
    "issue": 102,
@@ -501,7 +501,7 @@
   },
   {
    "id": "P45",
-   "seen": "2026-11-25, a stock Linux virtual machine: a tmux session in a folder whose name holds the byte 0xFF. The restart helper with no --live, setup's plan and status, 0.6.1 and 0.6.2, in the machine's language, the C language and a Latin-1 language: every call exit 0, no traceback; but each helper read sessions from Claude Code's session registry only, and a Claude Code that is not signed in writes no row there, so no call reached that session. Not seen with a real session.",
+   "seen": "2026-11-25, a stock Linux virtual machine: a tmux session in a folder whose name holds the byte 0xFF. The restart helper with no --live, setup's plan and status, 0.6.1 and 0.6.2, in the machine's language, the C language and a Latin-1 language: every call exit 0, no traceback; but each helper read sessions from Claude Code's session registry only, and a Claude Code that is not signed in writes no row there, so no call reached that session. Not seen with a real session. Seen 2026-11-25, Claude Code 2.1.332 in print mode, one Linux machine, once: started from a folder whose name holds a byte that is not UTF-8, it refused to start ('Can't access working directory ... does not exist', exit 1) and ran no hook. Not seen: an interactive start from such a folder; a folder renamed under a running session. The promise stays for those two.",
    "promise": "The restart helper and setup meet a session whose folder name is not UTF-8 with no traceback: the session is named (its folder shown changed) or counted, never dropped in silence. Its proof needs a real session row; where and how is settled with the row.",
    "codon": "G4.41",
    "issue": 103,
