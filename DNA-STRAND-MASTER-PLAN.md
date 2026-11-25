@@ -581,6 +581,8 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 
 **G19.7 The suite's lists do not lean on where the machine keeps its programs.** The tests that count the open-folder lines run with the Python program where the test put it; one test runs them from a Python in a folder left open and sees them pass. Seen 2026-11-24 on a CI runner: its Python's folder was open, and the check rightly named it. Proof: `test_G19_7_the_suites_lists_do_not_lean_on_the_machines_python`.
 
+**G19.8 A row that still owes part is not proven (open).** A row may carry proof_owed, what is still to be seen on a real machine. The gate after a release counts a shipped row proven only when its proven line is not empty and proof_owed holds nothing, and names what is owed; words in the line decide nothing. One function decides, called by the gate and its test. Seen 2026-11-24: family rule 32. Proof: `test_G19_8_a_row_that_still_owes_part_is_not_proven`.
+
 ## Part 5. Milestones
 
 - M0 (released 0.1 to 0.5): G1, G2, G3, G4, G5, G7 (fleet), G8, G9, G10, G11, G12.
