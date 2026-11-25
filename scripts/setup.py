@@ -381,15 +381,26 @@ def schedule_read(run_cmd=None, cron_none_said=False):
 def one_line(text):
     """(shown, changed) for a value Pit Stop did not write (rule 31 (vi)): every character a line breaks on or a
     terminal acts on (unicodedata class Cc: C0, DEL, C1; and U+2028, U+2029) is shown as \\x and its code
-    (\\xNN, or \\uNNNN above 0xff), so the value cannot make a line of its own or move the screen."""
+    (\\xNN, or \\uNNNN above 0xff), so the value cannot make a line of its own or move the screen. A name whose
+    bytes are not UTF-8 reaches Python as class Cs (surrogateescape): each such byte is shown as \\xNN too, so it
+    can neither go out raw nor stop the print."""
     out, changed = [], False
     for c in text:
-        if unicodedata.category(c) == "Cc" or c in "\u2028\u2029":
+        if unicodedata.category(c) == "Cs":
+            out.append(f"\\x{ord(c) - 0xdc00:02x}" if 0xdc80 <= ord(c) <= 0xdcff else f"\\u{ord(c):04x}")
+            changed = True
+        elif unicodedata.category(c) == "Cc" or c in "\u2028\u2029":
             out.append(f"\\x{ord(c):02x}" if ord(c) < 0x100 else f"\\u{ord(c):04x}")
             changed = True
         else:
             out.append(c)
     return "".join(out), changed
+
+
+def foreign(line):
+    """LINE, which holds a value Pit Stop did not write, made safe by one_line, with what was changed said."""
+    shown, bent = one_line(line)
+    return shown + (" (a character shown as \\x and its code)" if bent else "")
 
 
 def already_scheduled():
@@ -749,7 +760,7 @@ def open_lines(scan, first=()):
             which = "Pit Stop's installed code" if i == 0 else "another installed copy of Pit Stop"
             out.append(f"{n} file(s) or folder(s) in {which} "
                        f"({short(code)}) can be written by another account, and it runs as you. To close them: chmod -R go-w {code}")
-    out += [f"could not be read, so not checked: {short(p)}" for p in scan["unread"]]
+    out += [foreign(f"could not be read, so not checked: {short(p)}") for p in scan["unread"]]   # rule 31 (vi)
     return [f"{i}. {x}" for i, x in enumerate(out, 1)]
 
 
@@ -989,8 +1000,8 @@ def undo(ledger=None, run_cmd=None):
                 if isinstance(prof, dict) and prof.get("window") else box.get("set"))
         now_pts = folder_points(f)
         if isinstance(mine, dict) and any(str(now_pts.get(k)) != str(mine.get(k)) for k in (pc.WINDOW_ENV, pc.IDLE_ENV)):
-            out.append(f"5. {home(f)}: window and idle point left as you set them since "
-                       f"({now_pts.get(pc.WINDOW_ENV)}, {now_pts.get(pc.IDLE_ENV)})")
+            out.append(foreign(f"5. {home(f)}: window and idle point left as you set them since "
+                               f"({now_pts.get(pc.WINDOW_ENV)}, {now_pts.get(pc.IDLE_ENV)})"))
             continue
 
         def put_pts(d, pts=pts):
@@ -1005,7 +1016,7 @@ def undo(ledger=None, run_cmd=None):
             if not env:
                 d.pop("env", None)
         why = _put_back(sp, put_pts) if os.path.exists(sp) else "its settings file is gone"
-        out.append(f"5. {home(f)}: " + (why or "window and idle point put back as before setup (backed up first)"))
+        out.append(foreign(f"5. {home(f)}: " + (why or "window and idle point put back as before setup (backed up first)")))
     tuned = sorted(x for x in os.listdir(pc.FOLDERS) if x.endswith(".json")) if os.path.isdir(pc.FOLDERS) else []
     if tuned:
         out.append(f"   daily tuning's own moves stay where they are; its record of each folder: {home(pc.FOLDERS)}")
@@ -1187,8 +1198,8 @@ def main():
         print(f"  Fleet mode is NOT set up: nothing of it was made or changed. Install Pit Stop from its marketplace "
               f"(claude plugin install windstorm-pit-stop@{own_marketplace()[0] or 'thewindstorm'}), then this setup again.")
         for h in there:
-            print(f"  Left as it is, from an earlier install: {'your crontab' if h == 'crontab' else h.replace(pc.HOME, '~')}: "
-                  + LEFT_SAYS[what_it_runs(h)])
+            print(foreign(f"  Left as it is, from an earlier install: "
+                          f"{'your crontab' if h == 'crontab' else h.replace(pc.HOME, '~')}: " + LEFT_SAYS[what_it_runs(h)]))
         return 1 if a.apply else 0
     servers = tmux_servers()
     ttys = {session_tty(s.get("pid")) for s in sessions}

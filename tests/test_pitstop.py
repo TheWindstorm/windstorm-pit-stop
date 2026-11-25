@@ -4485,6 +4485,29 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
         assert changed and shown.isprintable() and shown.isascii() and shown != f"a{chr(cp)}b", (hex(cp), shown)
     for plain in ("my fleet.service", "tést", "no crontab for x", "a'b", "a`b"):
         assert su.one_line(plain) == (plain, False), plain
+    # a name whose bytes are not UTF-8 reaches Python as class Cs (surrogateescape): shown as its bytes, said changed
+    assert su.one_line("j\udcff\udc85x") == ("j\\xff\\x85x", True)
+
+    # rule 31 (vi), roads six to nine: open_lines' unread path (another account may have named it), undo's two
+    # folder lines (step 5) and the earlier-install line; a line breaks nowhere and says what was changed
+    lines = su.open_lines({"ways": [], "copies": [], "unread": [os.path.join(su.pc.HOME, "x\nsudo id #OPEN\udcff")]})
+    assert lines == ["1. could not be read, so not checked: ~/x\\x0asudo id #OPEN\\xff (a character shown as \\x "
+                     "and its code)"], lines
+    hu = tmp_path / "undo-bent"
+    bent = hu / "proj\nsudo id #\x1b[31m"
+    (bent / ".claude").mkdir(parents=True)
+    (bent / ".claude" / "settings.local.json").write_text(json.dumps({"env": {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "7\n1"}}))
+    led = tmp_path / "undo-bent.json"
+    bent2 = hu / "two\nsudo id #"                    # the put-back line: its file holds what setup wrote
+    (bent2 / ".claude").mkdir(parents=True)
+    (bent2 / ".claude" / "settings.local.json").write_text(json.dumps({"env": {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000"}}))
+    led.write_text(json.dumps({"folders": {str(b): {"before": {}, "set": {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000"}}
+                                           for b in (bent, bent2)}}))
+    said = [x for x in su.undo(ledger=str(led), run_cmd=lambda *c: (0, "")) if x.startswith("5. ")]
+    assert said and all(not su.one_line(x)[1] and "\n" not in x for x in said), said
+    assert any(x.endswith("(a character shown as \\x and its code)") and "proj\\x0asudo id #\\x1b[31m" in x
+               for x in said), said
+    assert any("two\\x0asudo id #: window and idle point put back as before setup" in x for x in said), said
 
     # rule 31 (B) on the --help road: the docstring and the option's own help both print there; no backtick on a
     # line that names crontab
@@ -4543,6 +4566,34 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
     assert not [ln for ln in r.stdout.splitlines() if ln.lstrip().startswith("sudo")], r.stdout[-600:]
     assert ("something else still runs it: ~/.config/systemd/user/mine.service\\x0asudo id #.service (a name holds a "
             "character shown as \\x and its code)") in r.stdout, r.stdout[-600:]
+
+    # a name whose bytes are not UTF-8, under a UTF-8 language: setup neither stops with a traceback nor prints it raw
+    h6, s6 = tmp_path / "not-utf8", tmp_path / "not-utf8-stub"
+    (h6 / "proj").mkdir(parents=True)
+    s6.mkdir()
+    for n, body in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
+        (s6 / n).write_text(f"#!/bin/sh\n{body}\n")
+        os.chmod(s6 / n, 0o755)
+    (h6 / ".claude" / "plugins").mkdir(parents=True)
+    (h6 / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
+    (h6 / ".config" / "systemd" / "user").mkdir(parents=True)
+    os.mkdir(os.path.join(os.fsencode(h6 / ".config" / "systemd" / "user"), b"j\xff\x85sudo id #.service"))
+    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--fleet"],
+                       cwd=str(h6 / "proj"), env=dict(env, HOME=str(h6), PATH=str(s6), LANG="en_US.UTF-8"),
+                       capture_output=True, timeout=120)
+    out6 = r.stdout.decode("utf-8")                    # strict: a raw byte that is not UTF-8 fails here
+    assert r.returncode == 1 and b"Traceback" not in r.stderr, (r.returncode, r.stderr[-400:])
+    assert "~/.config/systemd/user/j\\xff\\x85sudo id #.service could not be read here" in out6, out6[-600:]
+
+    # road (a): the plugin's row is not there; a file of an earlier install schedules the helper, its name bent
+    (h5 / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps({"plugins": {}}))
+    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--fleet"], cwd=str(h5 / "proj"),
+                       env=dict(env, HOME=str(h5), PATH=str(s5)), capture_output=True, text=True, timeout=120)
+    left = [ln for ln in r.stdout.splitlines() if "from an earlier install" in ln]
+    assert left and not [ln for ln in r.stdout.splitlines() if ln.lstrip().startswith("sudo")], r.stdout[-600:]
+    assert any("mine.service\\x0asudo id #.service" in ln and ln.endswith("(a character shown as \\x and its code)")
+               for ln in left), left
 
     # the word never outweighs a Pit Stop line that WAS read
     h4, s4 = tmp_path / "read", tmp_path / "read-stub"
