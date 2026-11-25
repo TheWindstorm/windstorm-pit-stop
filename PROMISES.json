@@ -666,6 +666,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P57",
+   "codon": "G2.31",
+   "issue": 116,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "seen": "2026-11-25, read from the code of the 0.6.2 release, not seen on a machine: setup's tune now (its step 2) tunes the folder of every session running at that moment and the folder setup is run in, and does not read the `tune_folders` list in `~/.claude/pit-stop/config.json`; daily tuning does read it and leaves a folder the list leaves out alone (scripts/pitstop_common.py, tune_wanted; scripts/setup.py, step 2). So on a machine whose list leaves folders out, `/pit-stop setup` without `--no-tune-now` writes points into those folders.",
+   "promise": "Setup's tune now tunes only the folders daily tuning would tune: a folder a `tune_folders` list leaves out is named as left out, and nothing is written there. A test holds it with a `config.json` that lists one of two running sessions' folders.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

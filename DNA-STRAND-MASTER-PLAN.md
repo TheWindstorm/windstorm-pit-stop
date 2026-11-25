@@ -182,6 +182,8 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 
 **G2.30 A 200K-context folder with no points starts at 150K and 100K (open).** Proof: `test_G2_30_a_200k_folder_with_no_points_starts_at_150k_and_100k`.
 
+**G2.31 Setup's tune now leaves out what tune_folders leaves out (open).** A folder a `tune_folders` list leaves out is named, and nothing is written there. Proof: `test_G2_31_setups_tune_now_leaves_out_what_tune_folders_leaves_out`.
+
 ### G3 Shared readers
 One shared module, `scripts/pitstop_common.py`, plus the hook generation file, reads Claude Code's transcripts, session listings, plugin records and Pit Stop's own state the same way for every part of the plugin.
 
