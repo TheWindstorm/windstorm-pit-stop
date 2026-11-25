@@ -531,6 +531,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.39 Setup's tuning line says what config.json holds (open).** With `--no-auto-tune` it says the setting was left as it is, and its value. Proof: `test_G12_39_setups_tuning_line_says_what_config_json_holds`.
 
+**G12.40 One word brings the launcher current and does only that (open).** It replaces the launcher copy with the plugin's own when they differ and writes nothing else: no settings.json, restart.json, config.json, unit or mode. Proof: `test_G12_40_one_word_brings_the_launcher_current_only`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

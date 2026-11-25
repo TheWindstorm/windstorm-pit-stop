@@ -708,6 +708,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P59",
+   "codon": "G12.40",
+   "issue": 119,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "seen": "2026-11-25, a stock Ubuntu 24.04 virtual machine, a home with fleet mode on, Pit Stop just updated from 0.6.1 to 0.6.2 by the helper, 0.6.1's launcher copy still in `~/.claude/pit-stop/bin`, and the thewindstorm entry in `~/.claude/settings.json` with no `autoUpdate` key (taken out by hand). The only way to bring the launcher current is setup. `setup.py --fleet --apply --no-tune-now --no-auto-tune` replaced the launcher and also switched the catalog's auto-update on: it wrote `autoUpdate: true` into settings.json, made a backup of it and put a marketplace key in the undo ledger. Adding `--no-self-update` left settings.json as it was. Both forms also closed write access for other accounts on 13 paths under `~/.claude/pit-stop` that an earlier setup had left open, which the undo ledger does not record. So bringing one file current takes three flags, and still does more than that.",
+   "promise": "One word of setup replaces the launcher copy with the plugin's own when they differ, and changes nothing else: no settings.json, no restart.json, no config.json, no unit, no modes. Its plan says which file it would replace and the two sums; its apply writes only that file and its line in the undo ledger. A test holds it on a home where every other step of setup would write.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
