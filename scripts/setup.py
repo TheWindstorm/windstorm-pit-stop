@@ -78,6 +78,7 @@ import os
 import platform
 import shlex
 import shutil
+import unicodedata
 import subprocess
 import sys
 import time
@@ -370,10 +371,25 @@ def schedule_read(run_cmd=None, cron_none_said=False):
                 hits.append("crontab")
         elif not (r and "no crontab for" in (r.stderr or "")) and not cron_none_said:
             unread.append("crontab")
-            first = ((r.stderr or "").strip().splitlines() or [""])[0][:160] if r else ""
+            first, bent = one_line(((r.stderr or "").strip().splitlines() or [""])[0][:160] if r else "")
             said = (f"crontab -l answered exit {r.returncode}" + (f": \"{first}\"" if first else ", with no words")
+                    + (" (a character shown as \\x and its code)" if bent else "")
                     if r else "crontab -l gave no answer in 10 s")
     return hits, unread, said
+
+
+def one_line(text):
+    """(shown, changed) for a value Pit Stop did not write (rule 31 (vi)): every character a line breaks on or a
+    terminal acts on (unicodedata class Cc: C0, DEL, C1; and U+2028, U+2029) is shown as \\x and its code
+    (\\xNN, or \\uNNNN above 0xff), so the value cannot make a line of its own or move the screen."""
+    out, changed = [], False
+    for c in text:
+        if unicodedata.category(c) == "Cc" or c in "\u2028\u2029":
+            out.append(f"\\x{ord(c):02x}" if ord(c) < 0x100 else f"\\u{ord(c):04x}")
+            changed = True
+        else:
+            out.append(c)
+    return "".join(out), changed
 
 
 def already_scheduled():
@@ -864,7 +880,9 @@ def undo(ledger=None, run_cmd=None):
     if os.path.exists(BIN) and not ours(BIN, ledger):
         out.append(f"   launcher {home(BIN)} not written by Pit Stop's setup: left as it is")
     elif os.path.exists(BIN) and others:
-        out.append(f"   launcher {home(BIN)} kept: something else still runs it: {', '.join(home(h) for h in others)}")
+        out.append(f"   launcher {home(BIN)} kept: something else still runs it: "
+                   f"{', '.join(one_line(home(h))[0] for h in others)}"
+                   + (" (a name holds a character shown as \\x and its code)" if any(one_line(h)[1] for h in others) else ""))
     elif os.path.exists(BIN):
         os.remove(BIN)
         try:
@@ -1201,13 +1219,20 @@ def main():
     if hits:
         print("6. timer: something already schedules the restart helper; nothing changed:")
         for h in hits:
-            print(f"     {h}")
+            shown, bent = one_line(h)
+            print(f"     {shown}" + (" (its name holds a character shown as \\x and its code)" if bent else ""))
         print(f"   To follow plugin updates by itself, make its command: {sys.executable} -I {BIN} --live")
     elif unread:      # rule 6: what could not be read is not "none there"; never a second schedule
         placed = False
         files = [u.replace(pc.HOME, "~") for u in unread if u != "crontab"]
         print("6. timer: not checked, so no timer is made (never a second schedule):")
         for f in files:
+            named, bent = one_line(f)                  # rule 31 (vi): a name not ours never makes a line
+            if bent:
+                print(f"   {named} could not be read here; what it runs is not known. Its name holds a character that "
+                      f"cannot be typed on one line (shown here as \\x and its code). It is in your own folder: rename or "
+                      f"remove it there, then run this setup again.")
+                continue
             shown = "~/" + shlex.quote(f[2:]) if f.startswith("~/") else shlex.quote(f)   # rule 31 (iv): a name not ours
             print(f"   {f} could not be read here; what it runs is not known. It is in your own folder. To see why, run:")
             print(f"   ls -l {shown}")
@@ -1239,6 +1264,10 @@ def main():
             elif h is None or h in (os.path.join(UNIT_DIR, "pit-stop-restart.service"), PLIST):
                 unit = LAUNCHD_LABEL if darwin else "pit-stop-restart.timer"
                 states.append((*timer_state(unit), unit, h is None))
+            elif one_line(h)[1]:                    # rule 31 (vi): a name not ours never makes a line; no command for it
+                states.append(("unread", f"{one_line(h.replace(pc.HOME, '~'))[0]} is not Pit Stop's and its name holds a "
+                               f"character that cannot be typed on one line (shown here as \\x and its code); whether it "
+                               f"runs is not checked here", None, False))
             elif h.endswith(".service"):
                 unit = os.path.basename(h)[:-len(".service")] + ".timer"
                 st, said = timer_state(unit)

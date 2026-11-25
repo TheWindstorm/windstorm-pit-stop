@@ -4411,6 +4411,7 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
     # rule 6 on the decision (the row IS there): what could not be read is not "none there"; no second schedule
     for case, cron in (("a unit that cannot be read", 'echo "no crontab for x" >&2; exit 1'),
                        ("a unit with a space in its name", 'echo "no crontab for x" >&2; exit 1'),
+                       ("a unit whose name breaks a line", 'printf "not \\033[31mallowed\\n" >&2; exit 1'),
                        ("crontab not allowed", 'echo "You (x) are not allowed to use this program (crontab)" >&2; exit 1'),
                        ("crontab killed", "kill -9 $$"),
                        ("no crontab program", None)):
@@ -4431,6 +4432,8 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
             (u2 / "my-fleet.service").mkdir()          # opening it fails for any account, root too
         if case == "a unit with a space in its name":
             (u2 / "my fleet.service").mkdir()          # a name not ours: shown shell-quoted (rule 31 (iv))
+        if case == "a unit whose name breaks a line":  # rule 31 (vi): a line feed, a carriage return and ESC
+            (u2 / "a.service\nsudo id #\r\x1b[31m.service").mkdir()
         e2 = dict(env, HOME=str(h2), PATH=str(s2))
         r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--fleet"],
                            cwd=str(h2 / "proj"), env=e2, capture_output=True, text=True, timeout=120)
@@ -4444,6 +4447,16 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
         assert "fleet mode is set up" not in r.stdout, case
         if case == "a unit with a space in its name":
             assert "   ls -l ~/'.config/systemd/user/my fleet.service'" in r.stdout.splitlines(), r.stdout[-800:]
+            continue
+        if case == "a unit whose name breaks a line":  # no line of the tool's starts with the name's words; no command
+            assert not [c for c in r.stdout if __import__("unicodedata").category(c) == "Cc" and c != "\n"], repr(r.stdout[-600:])
+            assert not [ln for ln in r.stdout.splitlines() if ln.lstrip().startswith("sudo")], r.stdout[-800:]
+            assert ("   ~/.config/systemd/user/a.service\\x0asudo id #\\x0d\\x1b[31m.service could not be read here; "
+                    "what it runs is not known. Its name holds a character that cannot be typed on one line (shown "
+                    "here as \\x and its code). It is in your own folder: rename or remove it there, then run this "
+                    "setup again.") in r.stdout.splitlines(), r.stdout[-800:]
+            assert "ls -l" not in r.stdout, r.stdout[-800:]
+            assert 'crontab -l answered exit 1: "not \\x1b[31mallowed" (a character shown as \\x and its code)' in r.stdout
             continue
         if case.startswith("a unit"):
             assert "   ls -l ~/.config/systemd/user/my-fleet.service" in r.stdout.splitlines(), r.stdout[-800:]
@@ -4465,6 +4478,13 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
                             "--crontab-has-no-pit-stop-line"], cwd=str(h2 / "proj"), env=e2, capture_output=True,
                            text=True, timeout=120)
         assert r.returncode == 0 and (u2 / "pit-stop-restart.timer").exists() and "fleet mode is set up" in r.stdout, r.stdout[-600:]
+
+    # rule 31 (vi): the changing function over the whole class (C0, DEL, C1, U+2028, U+2029), and nothing else
+    for cp in list(range(0x20)) + [0x7f] + list(range(0x80, 0xa0)) + [0x2028, 0x2029]:
+        shown, changed = su.one_line(f"a{chr(cp)}b")
+        assert changed and shown.isprintable() and shown.isascii() and shown != f"a{chr(cp)}b", (hex(cp), shown)
+    for plain in ("my fleet.service", "tést", "no crontab for x", "a'b", "a`b"):
+        assert su.one_line(plain) == (plain, False), plain
 
     # rule 31 (B) on the --help road: the docstring and the option's own help both print there; no backtick on a
     # line that names crontab
@@ -4493,6 +4513,36 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
                        capture_output=True, text=True, timeout=120)
     assert r.returncode == 0 and "fleet mode is set up" in r.stdout, r.stdout[-800:]
     assert (h3 / ".config" / "systemd" / "user" / "pit-stop-restart.timer").exists()
+
+    # rule 31 (vi), the third road: a file that already schedules the helper is named on its own line, changed
+    h5, s5 = tmp_path / "bent-hit", tmp_path / "bent-hit-stub"
+    (h5 / "proj").mkdir(parents=True)
+    s5.mkdir()
+    for n, body in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
+        (s5 / n).write_text(f"#!/bin/sh\n{body}\n")
+        os.chmod(s5 / n, 0o755)
+    (h5 / ".claude" / "plugins").mkdir(parents=True)
+    (h5 / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
+    u5 = h5 / ".config" / "systemd" / "user"
+    u5.mkdir(parents=True)
+    (u5 / "mine.service\nsudo id #.service").write_text("[Service]\nExecStart=/usr/bin/python3 restart_at_break.py\n")
+    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--fleet"],
+                       cwd=str(h5 / "proj"), env=dict(env, HOME=str(h5), PATH=str(s5)), capture_output=True, text=True,
+                       timeout=120)
+    assert "6. timer: something already schedules the restart helper; nothing changed:" in r.stdout, r.stdout[-600:]
+    assert not [ln for ln in r.stdout.splitlines() if ln.lstrip().startswith("sudo")], r.stdout[-600:]
+    assert any(ln.endswith("mine.service\\x0asudo id #.service (its name holds a character shown as \\x and its code)")
+               for ln in r.stdout.splitlines()), r.stdout[-600:]
+    assert ("   the timer: ~/.config/systemd/user/mine.service\\x0asudo id #.service is not Pit Stop's and its name holds "
+            "a character that cannot be typed on one line (shown here as \\x and its code); whether it runs is not "
+            "checked here") in r.stdout.splitlines(), r.stdout[-600:]
+    assert "systemctl --user" not in r.stdout and not [c for c in r.stdout if c != "\n" and not c.isprintable()]
+    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--undo"], cwd=str(h5 / "proj"),
+                       env=dict(env, HOME=str(h5), PATH=str(s5)), capture_output=True, text=True, timeout=120)
+    assert not [ln for ln in r.stdout.splitlines() if ln.lstrip().startswith("sudo")], r.stdout[-600:]
+    assert ("something else still runs it: ~/.config/systemd/user/mine.service\\x0asudo id #.service (a name holds a "
+            "character shown as \\x and its code)") in r.stdout, r.stdout[-600:]
 
     # the word never outweighs a Pit Stop line that WAS read
     h4, s4 = tmp_path / "read", tmp_path / "read-stub"
