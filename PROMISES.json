@@ -157,11 +157,11 @@
    "issue": 52,
    "owner": "maintainer",
    "first_ship_in": "0.6.2",
-   "ship_in": "0.6.2",
+   "ship_in": "0.6.3",
    "test": "",
    "proven": "",
-   "moved_why": "",
-   "moved_by_person": ""
+   "moved_why": "The proof is a test that needs the conformance kit's interactive session (G16.1, open), and no honest test of it can be written before the 0.6.2 tag: moved once, on the maintainer's ruling of 2026-11-24. The README's two update lines ship in 0.6.2. Seen by hand, not by a test: on a stock virtual machine on 2026-11-23, against a copy of the catalog, installs of 0.1.4, 0.6.1 at its tag and 0.6.1 at a later commit each reached the candidate of that day with the two update lines and kept their settings; that candidate had no fleet launcher or timer in place, no session was started through it, and no way back was walked. For 0.6.3 the kit's session and the test are built, or the row goes back to the maintainer before 0.6.3's first cut.",
+   "moved_by_person": "maintainer"
   },
   {
    "id": "P12",
