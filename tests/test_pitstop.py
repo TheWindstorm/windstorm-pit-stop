@@ -4288,10 +4288,20 @@ def made_python(folder=None):
     p = os.path.join(str(folder), "python3")
     if not os.path.exists(p):
         os.makedirs(str(folder), mode=0o700, exist_ok=True)
+        real = os.path.realpath("/proc/self/exe" if os.path.exists("/proc/self/exe") else sys.executable)
         with open(p, "w") as f:
-            real = os.path.realpath("/proc/self/exe" if os.path.exists("/proc/self/exe") else sys.executable)
             f.write("#!/bin/bash\nexec -a \"$0\" " + shlex.quote(real) + ' "$@"\n')   # the binary, never a stand-in
         os.chmod(p, 0o755)
+        # A Python built for another place (seen: a standalone 3.9 built for /install) finds no library under
+        # another name; a pyvenv.cfg beside the stand-in names the real one's folder, and Python reads it under -I.
+        env = {"HOME": os.environ["HOME"], "TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "PATH": str(folder)}
+        ok = lambda: subprocess.run([p, "-I", "-c", "import encodings, json"], env=env, capture_output=True,
+                                    timeout=60).returncode == 0
+        if not ok():
+            with open(os.path.join(str(folder), "pyvenv.cfg"), "w") as f:
+                f.write(f"home = {os.path.dirname(real)}\ninclude-system-site-packages = true\n"
+                        f"version = {'.'.join(map(str, sys.version_info[:3]))}\n")
+            assert ok(), f"the Python stand-in at {p} does not start, with or without a pyvenv.cfg"
     return p
 
 

@@ -356,6 +356,9 @@ def test_G19_7_the_suites_lists_do_not_lean_on_the_machines_python(tmp_path):
         stubs.mkdir()
         env = {k: v for k, v in os.environ.items() if k not in ("PYTEST_ADDOPTS", "PYTEST_CURRENT_TEST")}
         env["PATH"] = str(stubs)
+        import pytest as _pt                           # the child finds pytest where this run found it
+        env["PYTHONPATH"] = os.pathsep.join(x for x in (os.path.dirname(os.path.dirname(_pt.__file__)),
+                                                        env.get("PYTHONPATH")) if x)
         r = subprocess.run([os.path.join(opened, "python3"), "-m", "pytest", "-q", "-p", "no:cacheprovider",
                             os.path.join(HERE, "test_pitstop.py"), "-k",
                             "G8_5 or G8_6 or G12_13 or G12_14 or G12_15 or G12_18"],
