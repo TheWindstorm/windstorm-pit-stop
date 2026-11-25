@@ -722,6 +722,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P61",
+   "codon": "G12.41",
+   "issue": 120,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "seen": "2026-11-25. On a stock Ubuntu 24.04 virtual machine, setup's plan printed one `would close` line for each of 13 paths under `~/.claude/pit-stop` that an earlier setup under an open umask had left writable by group or others, between steps 3 and 4 (`scripts/setup.py`, close_open, lines 767 to 787). On a long-running machine, a read of that account's `~/.claude/pit-stop` with 0.6.2's own naming rule (open_scan, state_name_is_ours) counted 3215 such paths, most of them under `seen/` and `restart/`. Read in the code, not seen: the plan there is one line per path with no limit, so a keeper reading it before a go reads some three thousand lines, with the numbered steps among them.",
+   "promise": "Where many paths are open, the plan still shows its numbered steps without a search. It prints a count per top folder and writes the full list to a file it names. Every path setup will close can still be read before it is closed, and setup closes nothing that was not listed. A test holds it with a planted folder of several thousand open files.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

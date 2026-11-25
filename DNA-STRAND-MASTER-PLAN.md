@@ -533,6 +533,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.40 One word brings the launcher current and does only that (open).** It replaces the launcher copy with the plugin's own when they differ and writes nothing else: no settings.json, restart.json, config.json, unit or mode. Proof: `test_G12_40_one_word_brings_the_launcher_current_only`.
 
+**G12.41 The setup plan stays readable when many paths are open (open).** Where many paths are open it prints a count per top folder and names a file with the full list; it closes nothing it did not list. Proof: `test_G12_41_the_setup_plan_stays_readable_when_many_paths_are_open`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.
