@@ -106,18 +106,25 @@ def log(session, trigger, tokens, decision, why):
         pass
 
 
+UNREADABLE = 0  # tail lines json could not load, in the last tail read; the log line counts them (no text)
+
+
 def tail_messages(path):
+    global UNREADABLE
     size = os.path.getsize(path)
     with open(path, "rb") as f:
         f.seek(max(0, size - TAIL_BYTES))
-        lines = f.read().decode("utf-8", "replace").splitlines()
+        lines = f.read().split(b"\n")  # a record ends at a line feed only: not at U+2028, U+2029, NEL or CR
     if size > TAIL_BYTES:
         lines = lines[1:]
-    out = []
+    out, UNREADABLE = [], 0
     for line in lines:
+        if not line:
+            continue
         try:
-            o = json.loads(line)
+            o = json.loads(line.decode("utf-8", "replace"))
         except Exception:
+            UNREADABLE += 1
             continue
         if isinstance(o, dict) and o.get("type") in ("user", "assistant") and not o.get("isSidechain"):
             out.append(o)
@@ -332,7 +339,8 @@ def main():
         return 0
     if code == 0:
         clear_hold(payload.get("session_id"))
-    log(payload.get("session_id"), trigger, tokens, "HOLD" if code == 2 else "ALLOW", why)
+    log(payload.get("session_id"), trigger, tokens, "HOLD" if code == 2 else "ALLOW",
+        why + (f" unreadable-lines={UNREADABLE}" if UNREADABLE else ""))
     if code == 2:
         sys.stderr.write(f"pit-stop: holding auto-compact until a break (context ~{tokens} tokens)\n")
     elif trigger == "auto" and why.startswith(("break:", "ceiling", "checkpoint:")):

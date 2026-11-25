@@ -5095,3 +5095,56 @@ def test_G12_19_setup_finds_tmux_servers_where_tmux_does(tmp_path, monkeypatch):
     servers = su.tmux_servers()
     assert set(servers) == {None, "mine"}, servers
     assert log.read_text().splitlines() == ["list-panes -a -F #{pane_tty}", "-L mine list-panes -a -F #{pane_tty}"]
+
+
+def test_G1_18_a_record_is_read_whole_to_its_line_feed(tmp_path):
+    """Seen 2026-11-24 (row P42), in released 0.6.1 and the 0.6.2 build head: the hook split the transcript's tail
+    with str.splitlines(), which also breaks at U+2028, U+2029 and NEL; a record holding one did not parse, was
+    dropped with no word, and the hook decided from the record before it: a tool call in flight after a text record
+    was let through, a final answer after a tool result was held. Claude Code writes U+2028 and U+2029 raw (seen
+    in a 2.1.331 transcript). Each case with each character planted gets its control's decision; a line that cannot
+    be read is counted in the log line."""
+    U = {"input_tokens": 1000, "cache_read_input_tokens": 99000, "cache_creation_input_tokens": 0, "output_tokens": 500}
+    asst = lambda mid, b: {"type": "assistant", "message": {"id": mid, "role": "assistant", "content": b, "usage": U}}
+    user = lambda c: {"type": "user", "message": {"role": "user", "content": c}}
+    prompt, X = user("please run the build"), "\u0000"
+    cases = {   # X marks where the character goes (json writes it as the escape \u0000); the control puts a space there
+        "in flight after text": ([prompt, asst("m1", [{"type": "text", "text": "Running it."}]),
+                                  asst("m1", [{"type": "tool_use", "id": "t1", "name": "Bash",
+                                               "input": {"command": "make", "description": "Build" + X + "all"}}])], 2),
+        "a tool result in flight": ([prompt, asst("m1", [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}]),
+                                     user([{"tool_use_id": "t1", "type": "tool_result", "content": "built" + X}])], 2),
+        "a final answer after a result": ([prompt, asst("m1", [{"type": "tool_use", "id": "t1", "name": "Bash", "input": {}}]),
+                                           user([{"tool_use_id": "t1", "type": "tool_result", "content": "ok"}]),
+                                           asst("m2", [{"type": "text", "text": "Done:" + X + "passed."}])], 0),
+        "a new prompt": ([prompt, asst("m1", [{"type": "text", "text": "Done."}]), user("next" + X + "step")], 0),
+    }
+    hook = os.path.join(ROOT, "hooks", "precompact_wait_for_break.py")
+    cfg = tmp_path / "cfg"
+    env = {"HOME": str(tmp_path), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": str(tmp_path / "none"),
+           "TMUX_TMPDIR": os.environ["TMUX_TMPDIR"]}
+    logf = cfg / "pit-stop" / "precompact.log"
+
+    def run(name, char, recs):
+        fn = tmp_path / f"{name.replace(' ', '-')}-{ord(char):04x}.jsonl"
+        fn.write_text("".join(json.dumps(r, ensure_ascii=False).replace("\\u0000", char) + "\n" for r in recs), encoding="utf-8")
+        raw = fn.read_bytes()
+        assert char.encode("utf-8") in raw and b"\\u0000" not in raw, (name, hex(ord(char)))   # it was planted
+        r = subprocess.run([sys.executable, "-I", hook], input=json.dumps(
+            {"trigger": "auto", "transcript_path": str(fn), "session_id": f"s-{name.replace(' ', '-')}-{ord(char)}"}),
+            env=env, capture_output=True, text=True, timeout=30)
+        return r.returncode, logf.read_text().splitlines()[-1]
+    for name, (recs, want) in cases.items():
+        control = run(name, " ", recs)
+        assert control[0] == want, (name, control)
+        for char in ("\u2028", "\u2029", "\u0085"):
+            got = run(name, char, recs)
+            assert got[0] == want, (name, hex(ord(char)), got, control)
+            assert got[1].split(" ", 4)[-1] == control[1].split(" ", 4)[-1], (name, hex(ord(char)), got, control)
+    # a line that cannot be read is no longer dropped with no word: the log line counts it (no text of it)
+    fn = tmp_path / "broken.jsonl"
+    fn.write_text(json.dumps(prompt) + "\n" + json.dumps(asst("m1", [{"type": "text", "text": "Done."}])) + "\n{not json\n")
+    subprocess.run([sys.executable, "-I", hook], input=json.dumps({"trigger": "auto", "transcript_path": str(fn),
+                   "session_id": "s-broken"}), env=env, capture_output=True, text=True, timeout=30)
+    last = logf.read_text().splitlines()[-1]
+    assert last.endswith("ALLOW break:turn-ended unreadable-lines=1") and "not json" not in last, last

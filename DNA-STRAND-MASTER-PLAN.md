@@ -117,6 +117,8 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 
 **G1.17 A tool call cut off by a restart is a break (guard).** `hooks/session_start.py` with `"source": "resume"` writes the time to `pit-stop/started/<session_id>`. `hooks/precompact_wait_for_break.py` treats a newest `tool_use` with no `tool_result`, dated before that time, as a break and exits 0; one dated after it still exits 2. A guard: 0.6.1, run by hand on such a transcript, answers hold; Claude Code 2.1.330 never asked to compact in three hours idle after the resume (2026-11-22). Proof: `test_G1_17_a_tool_call_cut_off_by_a_restart_is_a_break`.
 
+**G1.18 A record is read whole, to its line feed.** `hooks/precompact_wait_for_break.py` splits the transcript's tail on line-feed bytes only, then decodes each line, so a record holding U+2028, U+2029 or NEL gets its control's decision; the log line counts lines json cannot load (`unreadable-lines=N`). Seen 2026-11-24 in 0.6.1 and the 0.6.2 build: U+2028 in the last record let a tool call in flight through and held a break. Proof: `test_G1_18_a_record_is_read_whole_to_its_line_feed`.
+
 ### G2 Refresh point tuned per folder
 `/pit-stop optimize` and a daily background tune read a folder's own session history and set its idle point, window and hook ceiling, moving one step at a time and checking each move before the next.
 
