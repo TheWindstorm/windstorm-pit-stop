@@ -238,7 +238,15 @@ The new version loads the next time you start Claude Code, or at once in an open
 
 **In fleet mode** the helper can also update plugins before it restarts sessions (`"plugin_updates"`, under Fleet mode below), so a machine that runs many sessions moves to a new Pit Stop at a break without anyone typing.
 
-**The fleet launcher after an update.** Fleet mode's timer runs a small launcher that setup copied to `~/.claude/pit-stop/bin/pit-stop-restart`, and a plugin update does not replace that copy. The launcher's changes take effect after `/pit-stop setup --fleet --apply` once; a plugin update alone keeps the old launcher, which runs the new helper.
+**The fleet launcher after an update.** Fleet mode's timer runs a small launcher that setup copied to `~/.claude/pit-stop/bin/pit-stop-restart`, and a plugin update does not replace that copy: a plugin update alone keeps the old launcher, which runs the new helper. So after updating to 0.6.2 with fleet mode on, run the fleet setup once:
+
+```
+/pit-stop setup --fleet --apply
+```
+
+The new launcher runs nothing once Pit Stop is no longer on Claude Code's plugin list, and never runs code from a folder Claude Code has marked for removal; the old one checks neither. Seen once, on a stock Linux machine: after a plugin uninstall with fleet mode on, with the 0.6.2 folder taken out of the cache by hand and the 0.6.1 folder still there, the old launcher ran the 0.6.1 helper at each timer pass; there was no session there for it to act on.
+
+That setup's step 6 says that something already schedules the restart helper, and names a command to make. Where the file it names is `pit-stop-restart.service`, that is Pit Stop's own timer, and its command is already that one: change nothing. A timer or crontab line you wrote yourself is named there too, and for that one the command is the line to put in it, unless it is that line already.
 
 ## Fleet mode: what it types, and what it costs
 
@@ -271,7 +279,20 @@ Settings live in `~/.claude/pit-stop/restart.json` (see the top of `scripts/rest
 - **Your folder, not the project's.** Profiles, switches and extra summary notes are read from `~/.claude/pit-stop/` only, so a cloned repo cannot steer the summary. A ceiling from a 0.1.x project file is still read, and clamped.
 - **Capped ceilings.** A ceiling from a profile or the environment is clamped to 1.5x the first hold and 95% of the model's context size, so a cloned repo cannot hold compaction until the context overflows.
 - **Backups first.** Every file is backed up before it is written. Only the keys Pit Stop owns are changed.
-- **Undone by one command.** `python3 -I scripts/setup.py --undo` (in the plugin's folder) puts back what `/pit-stop setup` changed: the timer and launcher, `auto_tune` and `budget`, the marketplace's auto-update entry, and the two points of each folder setup tuned. A value you changed after setup is yours and stays. It lists each step and names the history files it leaves in `~/.claude/pit-stop/`. Run it before `claude plugin uninstall`.
+- **Undone by one command, before the uninstall.** `python3 -I scripts/setup.py --undo` (in the plugin's folder) puts back what `/pit-stop setup` changed: the timer and launcher, `auto_tune` and `budget`, the marketplace's auto-update entry, and the two points of each folder setup tuned. A value you changed after setup is yours and stays. It lists each step; what stays is named there, and the history files it leaves are in `~/.claude/pit-stop/`. It also leaves the backups of `~/.claude/settings.json` that setup and undo made, beside it, named `settings.json.bak-pitstop-` and the UTC time; that file and its backups end without group or other write.
+  - **To leave Pit Stop**, run the undo first, then `claude plugin uninstall windstorm-pit-stop@thewindstorm`. The plugin uninstall alone does not take fleet mode's timer off. If you already uninstalled first, this takes it off on Linux:
+
+    ```
+    systemctl --user disable --now pit-stop-restart.timer
+    ```
+
+    and on a Mac (the command setup itself uses; not seen after an uninstall):
+
+    ```
+    launchctl bootout gui/$(id -u)/ai.thewindstorm.pit-stop-restart
+    ```
+
+  - **Run the undo from your own login session**, where `systemctl --user` answers. Run where it does not answer, the undo removes Pit Stop's files but cannot stop a timer that is already loaded, and its first line still says stopped. On one Linux machine (systemd 255) the loaded timer stayed active until a daemon-reload from the login session ended it.
 - **Local, except one version check.** To tell whether this machine's Claude Code is behind, Pit Stop asks the address Anthropic's own install script reads (`downloads.claude.ai/claude-code-releases/latest` or `/stable`) for the newest version number, at most every six hours, with a generic client name. Like any web request, it reaches Anthropic's server from your IP address; nothing else about you, the machine or its sessions is sent. It does not ask when `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or `DISABLE_UPDATES` is set, or with `"release_check": false` in `~/.claude/pit-stop/config.json`. Pit Stop makes no other network calls itself. Logs hold counts only and rotate at 5 MB.
 
 `/pit-stop setup --fleet` installs a timer (systemd user timer or launchd) that runs a small launcher every 5 minutes; the launcher finds the installed plugin each run, so the timer keeps working across plugin updates. A timer you wrote yourself that names a version folder stays pinned to that version until you change it. Timers start with a bare PATH: setup puts the folders of `tmux` and `claude` in it. Fleet mode reads Claude Code's local session registry (`~/.claude/sessions/`), which is not a public interface; if that gives nothing usable it falls back to the documented `claude agents --json`.
