@@ -505,6 +505,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.33 Undo names by path everything it leaves (open).** Every file undo leaves and every file it made on the way, each settings.json backup among them, is named by its full path, and a file it rewrote keeps the mode it had. Nothing more is deleted to make a listing equal. Proof: `test_G12_33_undo_names_by_path_everything_it_leaves`.
 
+**G12.34 Setup's steps do not contradict each other on restart.json (open).** Where the open-folder step closes restart.json's mode, step 5 says the file's settings were kept, never that it was left exactly as it was. Proof: `test_G12_34_setup_does_not_say_left_as_it_is_after_closing_a_mode`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.
