@@ -86,6 +86,7 @@
 - README, a new section "What Pit Stop changes on your computer": every place Pit Stop writes, which hook writes what, that installing does not tune a folder, where a folder's points start, that tuning never runs in a headless run, and what Claude Code's own commands touch when Pit Stop runs them.
 - README, "Other known edges" beside the two known edges: a status line that starts with the prompt mark, a Mac account not logged in at the screen, the tmux server in a new restart.json, tmux that cannot be asked, the Python and PATH the timer names, the environment the helper hands on, and what checkup and status do not read.
 - README, the daily-tuning row: on Linux, the helper starts no tune when it runs as fleet mode's own systemd timer (G2.28), and the hooks tune each folder.
+- README, a known edge: lines that still show a value as it comes or put a command inside a sentence, and how to pass such a line on (as text, never inside shell double quotes); the cure is row P39 (G12.30) in 0.6.3.
 - Hooks changed, same generation (2): a running session works with this release without a reload, but keeps the hook it started with; the cured PreCompact hook reaches a session at its next start.
 
 ## 0.6.1 (2026-11-20)
