@@ -4282,7 +4282,10 @@ def made_python(folder=None):
     own name (bash's exec -a), so Python reports the stand-in as sys.executable and its real path is itself. Seen on
     a CI runner, 2026-11-24 (row P40): its Python sat in a folder of mode 777, and the open-folder check, which walks
     the Python program's folders, rightly named it, so every test that counts those lines leaned on where the
-    machine keeps its Python. Default place: beside the run's made home, in a folder only this account can reach."""
+    machine keeps its Python. Default place: beside the run's made home, in a folder only this account can reach.
+    NOTHING IS STARTED FROM A FOLDER AFTER A TEST OPENS IT (rule 28): Python reads a pyvenv.cfg beside its program at
+    each start, so a folder others can write would let them choose what it loads. A test that needs the Python
+    program's folder open starts the program while its folder is closed, and the child opens its own folder."""
     import shlex
     folder = folder or os.path.join(os.path.dirname(os.environ["HOME"]), "made-python")
     p = os.path.join(str(folder), "python3")
@@ -5052,10 +5055,10 @@ def test_G12_18_the_walk_covers_what_decides_what_runs():
         for d in (sessions, bindir):
             os.chmod(d, 0o777)
         env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg), "PATH": str(bindir)}
-        pybin = home / "pybin"                         # P40: the Python program Pit Stop runs, in a folder left open
+        pybin = home / "pybin"                         # P40: the Python program Pit Stop runs; the child opens its folder
         made_python(pybin)
-        os.chmod(pybin, 0o777)
-        r = subprocess.run([str(pybin / "python3"), "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import setup as su; "
+        r = subprocess.run([str(pybin / "python3"), "-I", "-c", "import os, sys; os.chmod(os.path.dirname(sys.executable), 0o777); "
+                            "sys.path.insert(0, sys.argv[1]); import setup as su; "
                             "su.group_members = lambda gid: set(); print('\\n'.join(su.open_lines(su.open_scan())))",
                             os.path.join(ROOT, "scripts")], env=env, capture_output=True, text=True, timeout=60)
         out = r.stdout

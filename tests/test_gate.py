@@ -339,19 +339,22 @@ def test_G19_6_undo_in_the_suite_reaches_only_its_made_home(tmp_path, monkeypatc
 
 
 
-def test_G19_7_the_suites_lists_do_not_lean_on_the_machines_python(tmp_path):
+def test_G19_7_the_suites_lists_do_not_lean_on_the_machines_python(tmp_path, monkeypatch):
     """Seen 2026-11-24 on a CI runner (row P40): its Python sat in a folder of mode 777, and setup's open-folder
     check, which walks the folders of the Python program Pit Stop runs, rightly named it; five tests that count
     those lines failed there, and no machine of ours could show it, as each keeps its Python in a closed folder.
-    Here the six tests that count those lines run in a child suite started from a Python reached through a folder
-    left open (one any account can reach: directly in the temporary folder, mode 777), and pass."""
+    Here the six tests that count those lines run in a child suite whose Python is in a folder any account can
+    reach (made directly in /tmp) and open: the child opens its own folder once it has started, so nothing is
+    started from an open folder (rule 28). The test holds its own premise: after the child has ended, the check
+    run here with that Python names that folder, so the test fails, never passes, where it cannot show its point."""
     import tempfile
     sys.path.insert(0, HERE)
     from test_pitstop import made_python
-    opened = tempfile.mkdtemp(prefix="pitstop-open-python-", dir=tempfile.gettempdir())
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    opened = tempfile.mkdtemp(prefix="pitstop-open-python-", dir="/tmp")
     try:
         made_python(opened)
-        os.chmod(opened, 0o777)
         stubs = tmp_path / "no-programs"
         stubs.mkdir()
         env = {k: v for k, v in os.environ.items() if k not in ("PYTEST_ADDOPTS", "PYTEST_CURRENT_TEST")}
@@ -359,10 +362,17 @@ def test_G19_7_the_suites_lists_do_not_lean_on_the_machines_python(tmp_path):
         import pytest as _pt                           # the child finds pytest where this run found it
         env["PYTHONPATH"] = os.pathsep.join(x for x in (os.path.dirname(os.path.dirname(_pt.__file__)),
                                                         env.get("PYTHONPATH")) if x)
-        r = subprocess.run([os.path.join(opened, "python3"), "-m", "pytest", "-q", "-p", "no:cacheprovider",
+        code = ("import os, sys; os.chmod(os.path.dirname(sys.executable), 0o777); import pytest; "
+                "sys.exit(pytest.main(sys.argv[1:]))")
+        r = subprocess.run([os.path.join(opened, "python3"), "-c", code, "-q", "-p", "no:cacheprovider",
                             os.path.join(HERE, "test_pitstop.py"), "-k",
                             "G8_5 or G8_6 or G12_13 or G12_14 or G12_15 or G12_18"],
                            cwd=ROOT, env=env, capture_output=True, text=True, timeout=600)
         assert r.returncode == 0 and "6 passed" in r.stdout, r.stdout[-1500:]
+        assert os.stat(opened).st_mode & 0o777 == 0o777, oct(os.stat(opened).st_mode)   # the child opened it
+        monkeypatch.setattr(su, "group_members", lambda gid: set())
+        monkeypatch.setattr(sys, "executable", os.path.join(opened, "python3"))      # started nothing more from it
+        named = [w for w in su.open_scan()["ways"] if w[0] == opened]
+        assert named and named[0][2] == "the Python program Pit Stop runs as you", (opened, su.open_scan()["ways"])
     finally:
         shutil.rmtree(opened, ignore_errors=True)
