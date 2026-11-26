@@ -977,7 +977,11 @@ def open_scan(home=None):
                 ways.append((d, st.st_mode & 0o7777, what, note, st.st_uid))
     counts = []
     for c in copies:
-        n = 0
+        n, owners = 0, set()
+        try:
+            owners.add(os.lstat(c).st_uid)
+        except OSError:
+            unread.append(c)
         for d, dirs, files in os.walk(c, followlinks=False, onerror=lambda e: unread.append(e.filename)):
             dirs[:] = [x for x in dirs if x != ".git"]
             for x in dirs + files:
@@ -989,8 +993,10 @@ def open_scan(home=None):
                 except OSError:
                     unread.append(p)
                     continue
-                n += not os.path.islink(p) and writable_by_others(p, st.st_mode)
-        counts.append((c, n))
+                if not os.path.islink(p) and writable_by_others(p, st.st_mode):
+                    n += 1
+                    owners.add(st.st_uid)
+        counts.append((c, n, owners))
     return {"mine": mine, "ways": ways, "copies": counts, "unread": unread}
 
 
@@ -1005,10 +1011,54 @@ def owner_name(uid):
         return f"account number {uid}"
 
 
+COMMAND_STOPS = ("`", "$(")
+
+
+def shown_path(path):
+    """(shown, changed) for a path named in a sentence instead of a command (G12.50): every character that cannot be
+    seen (cannot_be_seen), every backtick and the $ of every "$(" is shown as \\x and its code (\\xNN, or \\uNNNN
+    above 0xff; a byte that is not UTF-8 as \\xNN), and how many were changed is counted."""
+    out, changed = [], 0
+    for i, c in enumerate(path):
+        if unicodedata.category(c) == "Cs":
+            out.append(f"\\x{ord(c) - 0xdc00:02x}" if 0xdc80 <= ord(c) <= 0xdcff else f"\\u{ord(c):04x}")
+        elif cannot_be_seen(c) or c == "`" or path.startswith("$(", i):
+            out.append(f"\\x{ord(c):02x}" if ord(c) < 0x100 else f"\\u{ord(c):04x}")
+        else:
+            out.append(c)
+            continue
+        changed += 1
+    return "".join(out), changed
+
+
+def command_line(*words):
+    """G12.50: the command alone on a line of its own under the sentence, its last word (the path, always absolute)
+    in single quotes for the shell whatever it holds, so the line taken as printed changes that path and nothing else. None
+    when a word holds a character a pasted line should not carry (a line break, one that cannot be seen, a
+    backtick, "$("): that path gets a sentence instead (shown_path)."""
+    for w in words:
+        if any(cannot_be_seen(c) for c in w) or any(x in w for x in COMMAND_STOPS):
+            return None
+    return "\n      " + " ".join(words[:-1] + ("'" + words[-1].replace("'", "'\"'\"'") + "'",))
+
+
 def open_lines(scan, first=()):
     """The numbered lines that name what Pit Stop may not change (rule 28): which folder, what it means, the one
-    command. Setup prints them; /pit-stop status repeats them until they are closed."""
-    short = lambda p: p.replace(pc.HOME, "~", 1) if p.startswith(pc.HOME) else p
+    command, alone on its own line (G12.50). Setup prints them; /pit-stop status repeats them until they are
+    closed. A path no command can carry whole is named shown changed, with what to do in words."""
+    home_short = lambda p: p.replace(pc.HOME, "~", 1) if p.startswith(pc.HOME) else p
+    short = lambda p: shown_path(home_short(p))[0]
+
+    def close(p, *cmd, them=False):
+        line = command_line(*cmd, os.path.abspath(p))
+        if line:
+            return f" To close {'them' if them else 'it'}, run this line:{line}"
+        shown, n = shown_path(os.path.abspath(p))
+        return (f" Pit Stop gives no command for it: its name holds a character Pit Stop will not put in a command. "
+                f"Its full name, with {n} character(s) shown as \\x and its code, is {shown} . To close "
+                f"{'them' if them else 'it'}, take away write for group and others "
+                f"{'everywhere in that folder' if them else 'from that folder'} yourself, typing its real name.")
+
     out = list(first)
     for d, m, what, note, owner in scan["ways"]:
         folder = os.path.isdir(d) and not os.path.islink(d)
@@ -1016,15 +1066,21 @@ def open_lines(scan, first=()):
                 + (f"it could delete and replace what is in it, and below it is {what}." if folder else f"it is {what}."))
         if owner == os.getuid():
             out.append(f"{head} " + ("Pit Stop cannot tell whether it made this folder, so it stays."
-                                     if folder else "It is not Pit Stop's, so it stays.") + f" To close it: chmod go-w {d}")
+                                     if folder else "It is not Pit Stop's, so it stays.") + close(d, "chmod", "go-w"))
         else:                                   # rule 28: no command the person cannot run (G12.16)
             out.append(f"{head} It belongs to {owner_name(owner)}, not to you, so only an administrator can close it.")
-    for i, (code, n) in enumerate(scan["copies"]):
+    for i, (code, n, owners) in enumerate(scan["copies"]):
         if n:
             which = "Pit Stop's installed code" if i == 0 else "another installed copy of Pit Stop"
-            out.append(f"{n} file(s) or folder(s) in {which} "
-                       f"({short(code)}) can be written by another account, and it runs as you. To close them: chmod -R go-w {code}")
-    out += [foreign(f"could not be read, so not checked: {short(p)}") for p in scan["unread"]]   # rule 31 (vi)
+            head = (f"{n} file(s) or folder(s) in {which} ({short(code)}) can be written by another account, "
+                    f"and it runs as you.")
+            others = sorted(u for u in owners if u != os.getuid())
+            if others:                          # G12.16 on this line too: no command the person cannot run whole
+                out.append(f"{head} {'Some of it belongs' if os.getuid() in owners else 'It belongs'} to "
+                           f"{owner_name(others[0])}, not to you, so only an administrator can close it.")
+            else:
+                out.append(head + close(code, "chmod", "-R", "go-w", them=True))
+    out += [foreign(f"could not be read, so not checked: {home_short(p)}") for p in scan["unread"]]   # rule 31 (vi)
     return [f"{i}. {x}" for i, x in enumerate(out, 1)]
 
 

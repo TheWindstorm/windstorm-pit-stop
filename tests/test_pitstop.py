@@ -4074,7 +4074,8 @@ def _g12_13(tmp_path, stat):
     named = [l.strip() for l in r.stdout.splitlines() if "Pit Stop cannot tell whether it made this folder" in l]
     assert [l.split(" (")[0] for l in named] == ["1. ~/.config", "2. ~/.config/systemd", "3. ~/.config/systemd/user"], r.stdout
     assert named[2].endswith(f"below it is Pit Stop's systemd timer, which runs as you. Pit Stop cannot tell whether it made this folder, "
-                             f"so it stays. To close it: chmod go-w {units}") and "rm " not in r.stdout
+                             f"so it stays. To close it, run this line:") and "rm " not in r.stdout
+    assert f"chmod go-w '{units}'" in [l.strip() for l in r.stdout.splitlines()], r.stdout         # G12.50: alone, quoted
     r = run("--apply")                                                 # a second run finds nothing of ours open
     assert "none of what Pit Stop wrote has group or other write in its permission bits (access lists are not read)" in r.stdout, r.stdout
 
@@ -4106,7 +4107,7 @@ def test_G12_14_status_repeats_an_open_folder_until_it_is_closed():
         assert "Can be written by another account" in r.stdout and "Nothing needs you" not in r.stdout
         assert "1. 1 of Pit Stop's own files or folders (such as ~/.claude/pit-stop, 777)" in r.stdout, r.stdout
         assert f"2. ~/.config/systemd (777)" in r.stdout and f"3. ~/.config/systemd/user (777)" in r.stdout
-        assert f"To close it: chmod go-w {units}" in r.stdout and "3 thing(s) another account can write" in r.stdout
+        assert f"To close it, run this line:\n      chmod go-w '{units}'" in r.stdout and "3 thing(s) another account can write" in r.stdout
         subprocess.run([made_python(), "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--no-tune-now"],
                        cwd=str(home), env=env, capture_output=True, timeout=120)
         r = status()                                                   # setup closed its own; the folders stay named
@@ -4208,7 +4209,7 @@ def test_G12_16_a_folder_the_person_does_not_own_gets_no_command():
         run = lambda me: _json.loads(subprocess.run([sys.executable, "-I", "-c", code, os.path.join(ROOT, "scripts"), str(me)],
                                                     env=env, capture_output=True, text=True, timeout=60).stdout or "null")
         own = run(os.getuid())                                          # the person's folder: the chmod
-        assert len(own) == 1 and "below it is Pit Stop's launch agent, which runs as you." in own[0] and own[0].endswith(f"chmod go-w {agents}"), own
+        assert len(own) == 1 and "below it is Pit Stop's launch agent, which runs as you." in own[0] and own[0].endswith(f"To close it, run this line:\n      chmod go-w '{agents}'"), own
         other = run(os.getuid() + 4242)                                 # Pit Stop runs as another number: not the person's
         assert len(other) == 1 and "chmod" not in other[0], other
         assert f"(number {os.getuid()}), not to you, so only an administrator can close it." in other[0], other
@@ -5486,7 +5487,7 @@ def test_G12_18_the_walk_covers_what_decides_what_runs():
         assert r.returncode == 0, r.stderr[-600:]
         assert (f"~/.claude/plugins/installed_plugins.json (666) can be written by another account, by its permission bits: "
                 f"it is the plugin list that tells Pit Stop's launcher which code to run. It is not Pit Stop's, so it stays. "
-                f"To close it: chmod go-w {plist}") in out, out
+                f"To close it, run this line:\n      chmod go-w '{plist}'") in out, out
         assert "~/.claude/sessions (777)" in out and "Claude Code's list of sessions, which tells Pit Stop's helper where to type" in out
         assert "~/.local/bin (777)" in out and "below it is the claude program Pit Stop runs as you" in out
         assert ("~/pybin (777) can be written by another account, by its permission bits: it could delete and replace "
@@ -5495,6 +5496,157 @@ def test_G12_18_the_walk_covers_what_decides_what_runs():
                 f"(~/.claude/plugins/cache/m/windstorm-pit-stop/0.1.0) can be written by another account") in out, out
     finally:
         shutil.rmtree(tmp_path)
+
+
+def _g12_50_home(base, name):
+    """A made home named NAME whose own folder another account can write (777), with an installed copy of Pit Stop
+    made where Pit Stop finds them (the plugin cache), one file in it left open, and the folders a path taken in
+    parts would name, each 777."""
+    home = base / name
+    cfg = home / ".claude"
+    copy = cfg / "plugins" / "cache" / name / "windstorm-pit-stop" / name
+    (copy / "scripts").mkdir(parents=True)
+    (cfg / "pit-stop").mkdir()
+    (copy / "scripts" / "restart_at_break.py").write_text("")
+    for d in (cfg, cfg / "pit-stop", cfg / "plugins", cfg / "plugins" / "cache", cfg / "plugins" / "cache" / name,
+              copy.parent, copy, copy / "scripts"):
+        os.chmod(d, 0o755)
+    os.chmod(copy / "scripts" / "restart_at_break.py", 0o666)
+    os.chmod(home, 0o777)
+    decoys = [base / "pit", base / "space", cfg / "plugins" / "cache" / "pit"]
+    for d in decoys:
+        d.mkdir(exist_ok=True)
+        os.chmod(d, 0o777)
+    return home, cfg, copy, decoys
+
+
+def _g12_50_roads(home, cfg, uid=None):
+    """Setup's own print (its plan, as main() prints close_open) and /pit-stop status's repeat (needs_you), each as
+    printed, for a made home; UID: the number Pit Stop is made to run as (G12.16's way)."""
+    env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg),
+           "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    pre = ("import os, sys; sys.path.insert(0, sys.argv[1]); "
+           + (f"os.getuid = lambda: {uid}; " if uid is not None else "")
+           + "import setup as su; su.group_members = lambda gid: set(); ")
+    codes = {"setup": pre + "print('\\n'.join(su.close_open(False)))",
+             "status": pre + ("import needs_you as ny, time; now = time.time(); "
+                              "print(ny.render(ny.collect([], None, now, open_=ny.open_now()), now))")}
+    if uid is None:
+        r = subprocess.run([made_python(), "-I", os.path.join(ROOT, "scripts", "setup.py"), "--no-tune-now"],
+                           cwd=str(cfg), env=env, capture_output=True, text=True, timeout=120)
+        assert r.returncode == 0, r.stderr[-600:]
+        assert "would close" in r.stdout or "none of what Pit Stop wrote" in r.stdout, r.stdout
+        out = {"setup": r.stdout}
+    else:
+        out = {}
+    for road, code in codes.items():
+        if road in out:
+            continue
+        r = subprocess.run([made_python(), "-I", "-c", code, os.path.join(ROOT, "scripts")], env=env,
+                           capture_output=True, text=True, timeout=120)
+        assert r.returncode == 0, r.stderr[-600:]
+        out[road] = r.stdout
+    return out
+
+
+def _g12_50_commands(out):
+    """The chmod commands as printed: each line that is the command alone; where none is alone on its line (the
+    form before G12.50), the text after "To close it: " or "To close them: ", so the red shows what a shell does
+    with it."""
+    alone = [l.strip() for l in out.splitlines() if l.strip().startswith("chmod ")]
+    inline = [l.split(m, 1)[1] for l in out.splitlines() for m in ("To close it: ", "To close them: ") if m in l]
+    return alone, inline
+
+
+def test_G12_50_the_chmod_lines_hold_the_folders_path_as_one_value():
+    """G12.50 (i): through both roads (setup's own print and /pit-stop status), in made homes whose path holds a
+    space, an apostrophe, a semicolon, or a leading dash in its last part, each chmod line stands alone on its own
+    line and, handed to a shell exactly as printed, closes the named folder (the home; the installed copy, with
+    -R) and leaves every folder a path taken in parts would name as it was. A path the line cannot carry as one
+    value gets no command: a sentence names it shown changed, and nothing is run."""
+    import shutil
+    import stat
+    mode = lambda p: stat.S_IMODE(os.lstat(p).st_mode)
+    bad = []
+    for name in ("pit space", "pit's", "pit;x", "-pit"):
+        base = _open_home()
+        try:
+            home, cfg, copy, decoys = _g12_50_home(base, name)
+            opened = copy / "scripts" / "restart_at_break.py"
+            for road, out in _g12_50_roads(home, cfg).items():
+                alone, inline = _g12_50_commands(out)
+                cmds = alone or inline
+                if len(alone) != 2:                                             # the command alone on its own line
+                    bad.append((name, road, "not alone on a line", inline))
+                for c in cmds:
+                    subprocess.run(["sh", "-c", c], cwd=str(base), capture_output=True, timeout=30)
+                if (mode(home), mode(opened)) != (0o755, 0o644):                # that folder, closed
+                    bad.append((name, road, "not closed", oct(mode(home)), oct(mode(opened))))
+                if [mode(d) for d in decoys] != [0o777] * len(decoys):          # and nothing else
+                    bad.append((name, road, "another folder changed", [str(d) for d in decoys if mode(d) != 0o777]))
+                for d in decoys:
+                    os.chmod(d, 0o777)
+                os.chmod(home, 0o777)
+                os.chmod(opened, 0o666)
+        finally:
+            shutil.rmtree(base)
+    for name, shown in (("pit`x", "pit\\x60x"), ("pit$(x)", "pit\\x24(x)"), ("pit\nx", "pit\\x0ax"),
+                        ("pit\x1bx", "pit\\x1bx")):
+        base = _open_home()
+        try:
+            home, cfg, copy, decoys = _g12_50_home(base, name)
+            for road, out in _g12_50_roads(home, cfg).items():
+                said = [l for l in out.splitlines() if "Pit Stop gives no command for it" in l]
+                if "chmod" in out:
+                    bad.append((name, road, "a command printed", [l for l in out.splitlines() if "chmod" in l]))
+                if len(said) != 2 or not all(f"{base}/{shown}" in l and "character(s) shown as \\x and its code" in l
+                                             for l in said):
+                    bad.append((name, road, "not named shown changed"))
+                if "\x1b" in out or name in out:
+                    bad.append((name, road, "the name went out raw"))
+            assert mode(home) == 0o777
+        finally:
+            shutil.rmtree(base)
+    assert not bad, bad
+
+
+def test_G12_50_a_copy_the_person_does_not_own_gets_no_command():
+    """G12.50 (ii), G12.16 on the copies line: an installed copy of Pit Stop made where Pit Stop finds them (the
+    plugin cache), and the person's own version folder there under another name, each with an entry another
+    account can write: when Pit Stop runs as the person, the line gives the chmod -R that closes it; when the copy
+    is another account's, through both roads the line says who owns it and that only an administrator can close
+    it, and gives no command."""
+    import shutil
+    base = _open_home()
+    try:
+        home, cfg = base / "home", base / "home" / ".claude"
+        cache = cfg / "plugins" / "cache"
+        made = [cache / "m" / "windstorm-pit-stop" / "0.1.0", cache / "thewindstorm" / "windstorm-pit-stop" / "0.6.2 renamed"]
+        (cfg / "pit-stop").mkdir(parents=True)
+        for c in made:
+            (c / "scripts").mkdir(parents=True)
+            (c / "scripts" / "restart_at_break.py").write_text("")
+            os.chmod(c / "scripts" / "restart_at_break.py", 0o666)
+        for d in [home, cfg, cfg / "pit-stop", cfg / "plugins", cache] + [x for c in made for x in
+                                                                          (c.parent.parent, c.parent, c, c / "scripts")]:
+            os.chmod(d, 0o755)
+        me, bad = os.getuid(), []
+        for uid, mine in ((me + 4242, False), (me, True)):
+            for road, out in _g12_50_roads(home, cfg, uid).items():
+                lines = [l for l in out.splitlines() if "another installed copy of Pit Stop" in l]
+                assert len(lines) == 2, (road, out)
+                if not mine:
+                    if not all(l.endswith(f"It belongs to account {__import__('pwd').getpwuid(me).pw_name} (number {me}), "
+                                          f"not to you, so only an administrator can close it.") for l in lines):
+                        bad.append((road, "not said as another account's", lines))
+                    if "chmod -R" in out:
+                        bad.append((road, "a command for a copy that is not the person's"))
+                elif not (all(l.endswith("To close them, run this line:") for l in lines)
+                          and sorted(_g12_50_commands(out)[0]) == sorted(f"chmod -R go-w '{c}'" for c in made)):
+                    bad.append((road, "the person's own copy lacks its command alone on a line", lines))
+    finally:
+        shutil.rmtree(base)
+    assert not bad, bad
 
 
 def test_G12_19_setup_finds_tmux_servers_where_tmux_does(tmp_path, monkeypatch):
