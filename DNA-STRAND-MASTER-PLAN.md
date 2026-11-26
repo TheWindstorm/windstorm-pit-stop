@@ -301,6 +301,8 @@ The helper `scripts/restart_at_break.py` types `/compact`, `/restart` or a short
 
 **G4.44 The helper's own programs get an environment it builds (open).** Proof: `test_G4_44_the_helpers_programs_get_a_built_environment`.
 
+**G4.45 A value the helper did not write is typed as text only (open).** Before the helper types a note into a pane, each line of a session's re-arm list it carries is checked for characters that cannot be seen (control characters, U+2028, U+2029, bytes that are not UTF-8); a list holding one is not typed: the note names the list's file instead, and the log says why. Proof: `test_G4_45_a_value_the_helper_did_not_write_is_typed_as_text_only`.
+
 ### G5 Hook reload
 
 With `reload_plugins: true` in `restart.json`, the helper types `/reload-plugins` (no turn starts) into a session whose Pit Stop hooks are missing or of the wrong hook generation, at a break, and confirms it from the screen.
@@ -381,13 +383,19 @@ Pit Stop switches on Claude Code's own updates for the marketplace it came from,
 
 **G7.7 The catalog installs a release, not main.** Once the tag `v<version in .claude-plugin/plugin.json>` exists (`git ls-remote`), Pit Stop's own entry pins `ref` to it and `sha` to its commit; before, the old state passes. Each release is the tag first, then the pin on main, with nothing else merged between; the test fails while a tag waits for its pin. Seen 2026-11-22: a fresh install took main's code labelled 0.6.1. Proof: `test_G7_7_pit_stops_catalog_entry_pins_a_release_tag`.
 
-**G7.8 An install from `./` moves to the pinned release (open).** Due 0.6.3 (row P11, moved once). On a test machine, installs of 0.1.4 and 0.6.1 made from the `./` entry reach the pinned release with the README's own update lines, with no reinstall, keep `pit-stop/config.json` and the settings Pit Stop wrote, and the cache folder's files match the commit the registry names. Needs: G7.7, G16.1. Proof: `test_G7_8_conformance_kit_sees_a_dot_install_move_to_the_pinned_release`.
+**G7.8 An install from `./` moves to the pinned release (open).** Due 0.6.4 (row P11, moved once, then renumbered). On a test machine, installs of 0.1.4 and 0.6.1 made from the `./` entry reach the pinned release with the README's own update lines, with no reinstall, keep `pit-stop/config.json` and the settings Pit Stop wrote, and the cache folder's files match the commit the registry names. Needs: G7.7, G16.1. Proof: `test_G7_8_conformance_kit_sees_a_dot_install_move_to_the_pinned_release`.
 
 **G7.9 After an update, the files match the registry.** After each plugin update `update_plugins()` in `scripts/restart_at_break.py` runs, `cache_problems()` compares the cache folder a user-scope row of `plugins/installed_plugins.json` names with that row's commit, read from the marketplace clone. When they differ it logs each run, notifies once per state `cache folder <path> does not hold <sha>`, counts the update as not done, repairs nothing and prints the uninstall and install lines. Seen 2026-11-22: 2.1.280 reused a stale same-version folder. Proof: `test_G7_9_update_checks_the_cache_folder_against_the_registry_commit`.
 
 **G7.10 One version, and new code gets a new one .** A test holds that the first release heading in `CHANGELOG.md` equals `version` in `.claude-plugin/plugin.json`; that once the tag `v<version>` exists, Pit Stop's own entry has `ref` `v<version>`; that every catalog entry's `ref` is a tag and its `sha` that tag's commit (`git ls-remote`); and that `scripts/release_check.py` fails when `hooks/`, `scripts/` or `skills/` differ from the newest tag still named in `plugin.json`. Seen 2026-11-22: main moved 28 commits past v0.6.1, still labelled 0.6.1. Needs: G7.7. Proof: `test_G7_10_one_version_in_every_place_and_new_code_gets_a_new_one`.
 
 **G7.11 The cache check works on a shallow marketplace clone (open).** After an update the helper checks the cache folder against the registry commit even when the marketplace clone holds only its newest commit, or says once a day that it cannot and why. Proof: `test_G7_11_the_cache_check_works_on_a_shallow_marketplace_clone`.
+
+**G7.12 A released tree's own suite is never red by design (open).** G7.7's and G7.10's "a tag waits for its pin" is asked of every tree after the tagged commit, never of the tagged commit itself, read from git and the remote, with "could not be read" as a third answer, so neither the tag's own run nor a clone of the tag fails for it. Proof: `test_G7_12_a_released_trees_own_suite_is_never_red_by_design`.
+
+**G7.13 A version that is not three numbers is refused by name (open).** The one-version test's changelog read, G7.6's ref pattern and `scripts/release_check.py` each stop on such a version with a line naming it; the release check never passes by comparing with an older tag. The launcher's log line names each version folder it cannot rank, shown as G12.21 shows a value Pit Stop did not write. Proof: `test_G7_13_a_version_that_is_not_three_numbers_is_refused_by_name`.
+
+**G7.14 The suite runs with the tag at its head before the tag is pushed (open).** The release step makes the tag locally in a fresh clone, runs the whole suite there, and pushes the real tag only on exit code 0 with the G19 gate's last line read; otherwise no tag, saying what stopped it. Checks needing the tag at the head or on GitHub are named in the release list. Proof: `test_G7_14_a_red_suite_with_the_tag_at_its_head_pushes_no_tag`.
 
 ### G8 Needs-you list
 
@@ -450,6 +458,8 @@ Two hooks speak at the edges of a turn: SessionStart gives a short checklist aft
 **G11.3 An ask with a foreign field is not passed on.** `ask_ok()` in `hooks/stop_pit_stop.py` refuses an ask whose `newest` or `ver` is not a plain x.y.z string, whose `okf` is not a file directly inside `pit-stop/restart/ok/` named with letters, digits, `.`, `_`, `-`, or whose `days` is not a whole number 0 to 3650. The hook then exits 0 with no output, renames the file to `<session>.json.refused` and writes `not passed on` to `pit-stop/stop.log`. The proof runs 12 such cases. Needs: G11.2. Proof: `test_G11_3_stop_hook_does_not_pass_on_an_ask_with_a_field_the_helper_would_not_write`.
 
 **G11.4 Escalation counted from the first ask.** `escalate_days(first, now, cfg)` in `scripts/restart_at_break.py` returns whole days since `first` once they reach `"jobs_escalate_days"` (default 3; 2.5 works), else 0; 0 when that setting is 0, `true`, `"3"` or `None`, or `first` is `None` or later than `now`. `handle_ask()` keeps `first` across re-asks for the same `ver` and resets on another. `ask_note(..., days=4)` contains `for 4 days your background jobs have kept you` and `stop ALL of them`, at most `NOTE_MAX` (560) characters. The Stop hook prints `For 4 days its background jobs have kept it from restarting`, or `Sort them now` for 0 or none. Needs: G11.2. Proof: `test_G11_4_escalation_counts_from_the_first_ask_in_the_helper_and_the_stop_hook`.
+
+**G11.5 Every hook command holds the plugin's folder inside double quotes (open).** A test reads every command in `hooks/hooks.json`: each use of the plugin-folder variable, with braces or without, stands inside double quotes, and no command names the plugin's folder another way; a planted copy with the variable outside double quotes fails it. Proof: `test_G11_5_every_hook_command_holds_the_plugin_folder_inside_double_quotes`.
 
 ### G12 Skill, setup and launcher
 
@@ -545,6 +555,16 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.45 Undo's lines say what its record holds (open).** A file undo keeps because setup's record does not hold it is named as not in setup's record, never as one setup did not write; what undo keeps and removes does not change. Proof: `test_G12_45_undos_lines_say_what_its_record_holds`.
 
+**G12.46 The README says what fleet mode does after a Mac restarts (open).** A known edge says that after a restart fleet mode on a Mac runs only once the person logs in at the screen, and with FileVault on that needs the disk password; it is marked read in the launch agent's own file until a restart round has seen it. Proof: `test_G12_46_the_readme_says_what_fleet_mode_does_after_a_mac_restarts`.
+
+**G12.47 Undo says setup wrote the catalog entry only when its record holds it (open).** With no record of a change to the marketplace entry, undo's step 4 says the record holds none and leaves the entry as it is, never "setup wrote true"; what undo does does not change. Proof: `test_G12_47_undo_says_setup_wrote_the_entry_only_when_its_record_holds_it`.
+
+**G12.48 A value setup writes into a timer file is held whole by that file's grammar (open).** The systemd unit quotes each path and escapes its specifiers and backslashes; the launch agent escapes each for XML; the line setup prints to run quotes each path; a value neither can hold is refused before the first write, in one line. Proof: `test_G12_48_a_value_setup_writes_into_a_timer_file_is_held_whole`.
+
+**G12.49 Fleet mode is "set up" only when the timer's own command line is read whole (open).** For a unit setup wrote, setup reads from systemd or launchd the command the timer's service holds, argument by argument, and says set up only when it is the launcher setup wrote; "could not be read" never says set up; a person's own unit is never called wrong; a crontab line is said as today. Proof: `test_G12_49_fleet_mode_is_set_up_only_when_the_timers_command_line_is_read_whole`.
+
+**G12.50 The two chmod lines setup and status print hold the folder's path as one value (open).** The commands closing a folder another account can write (`chmod go-w`, `chmod -R go-w`), printed by setup and `/pit-stop status`, carry the path quoted for the shell, so the line taken as printed changes that folder and nothing else; a copy the person does not own gets no command (G12.16); a path no line carries whole gets a sentence naming it, shown changed. Proof: `test_G12_50_the_chmod_lines_hold_the_folders_path_as_one_value`, `test_G12_50_a_copy_the_person_does_not_own_gets_no_command`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.
@@ -637,13 +657,16 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 
 **G19.11 A test changes a mode only on the folder it made (open).** A child a test starts changes a mode only after reading that the folder is under the test's made folder; otherwise it changes nothing and the test is reported not run here, with the reason. Proof: `test_G19_11_a_test_changes_a_mode_only_on_the_folder_it_made`.
 
+**G19.12 A run that ends early is never green (open).** CI's test job fails unless the runner's summary line and the gate's last line are both in its output, read by a step outside the test process; a planted `os._exit(0)` makes the job fail. Proof: `test_G19_12_a_run_that_ends_early_is_never_green`.
+
 ## Part 5. Milestones
 
 - M0 (released 0.1 to 0.5): G1, G2, G3, G4, G5, G7 (fleet), G8, G9, G10, G11, G12.
 - M1 (0.6.0): G6. Claude Code updates are off by default, and are tried on one machine before any other.
 - M2 (0.6.1): G13, G14, G15.
 - M2.1 (0.6.2): G19, with the open G7 codons (G7.6 to G7.10), and G12.8.
-- M2.2 (0.6.3): G6.19.
+- The cure 0.6.3: G12.48, G12.49 and G12.50, a release of their own (the maintainer's ruling of 2026-11-25; G12.50 added 2026-11-26, the maintainer's ruling: the same class), and G7.14, the release step (added 2026-11-26, the maintainer's word: each skill's next version holds it).
+- M2.2 (0.6.4; it was 0.6.3 until a cure release took that number on 2026-11-25): G6.19.
 - M3 (0.7): G16, then G17 from the kit's results.
 - M4 (0.8): G18.
 - M5 (1.0): the skill is renamed `windstorm-pit-stop`, with a notice in the update line and both names in the README for that release.
