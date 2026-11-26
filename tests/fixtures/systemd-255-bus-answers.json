@@ -1,0 +1,251 @@
+{
+ "what": "systemd's own answers to `busctl --user --json=short get-property org.freedesktop.systemd1 <unit's object path> org.freedesktop.systemd1.<Unit|Service> <property>`, word for word",
+ "where": "a stock Ubuntu 24.04.5 guest (the cloud image, a fresh copy), systemd 255 (255.4-1ubuntu8.18), in a made account whose home folder's path is written here as <home>: \"/home/\", a made-up name, a space and a second word, in its own ssh login, lingering; units written by this version's setup and by hand",
+ "when": "2026-11-26",
+ "home": "<home>",
+ "answers": {
+  "pit-stop-restart.service, as 0.6.3's setup writes it": {
+   "LoadState": {
+    "type": "s",
+    "data": "loaded"
+   },
+   "ExecStart": {
+    "type": "a(sasbttttuii)",
+    "data": [
+     [
+      "/usr/bin/python3",
+      [
+       "/usr/bin/python3",
+       "-I",
+       "<home>/.claude/pit-stop/bin/pit-stop-restart",
+       "--live"
+      ],
+      false,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   },
+   "Environment": {
+    "type": "as",
+    "data": [
+     "PATH=/usr/bin:/usr/local/bin:/bin"
+    ]
+   },
+   "DropInPaths": {
+    "type": "as",
+    "data": []
+   },
+   "FragmentPath": {
+    "type": "s",
+    "data": "<home>/.config/systemd/user/pit-stop-restart.service"
+   }
+  },
+  "pit-stop-restart.service, with one drop-in that adds a variable": {
+   "LoadState": {
+    "type": "s",
+    "data": "loaded"
+   },
+   "ExecStart": {
+    "type": "a(sasbttttuii)",
+    "data": [
+     [
+      "/usr/bin/python3",
+      [
+       "/usr/bin/python3",
+       "-I",
+       "<home>/.claude/pit-stop/bin/pit-stop-restart",
+       "--live"
+      ],
+      false,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   },
+   "Environment": {
+    "type": "as",
+    "data": [
+     "PATH=/usr/bin:/usr/local/bin:/bin",
+     "MADE_UP_TOKEN=madeup-not-a-secret-7f3a"
+    ]
+   },
+   "DropInPaths": {
+    "type": "as",
+    "data": [
+     "<home>/.config/systemd/user/pit-stop-restart.service.d/10-own.conf"
+    ]
+   },
+   "FragmentPath": {
+    "type": "s",
+    "data": "<home>/.config/systemd/user/pit-stop-restart.service"
+   }
+  },
+  "pit-stop-restart.service, with that drop-in and a second one over PATH": {
+   "LoadState": {
+    "type": "s",
+    "data": "loaded"
+   },
+   "ExecStart": {
+    "type": "a(sasbttttuii)",
+    "data": [
+     [
+      "/usr/bin/python3",
+      [
+       "/usr/bin/python3",
+       "-I",
+       "<home>/.claude/pit-stop/bin/pit-stop-restart",
+       "--live"
+      ],
+      false,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   },
+   "Environment": {
+    "type": "as",
+    "data": [
+     "PATH=/opt/made-up/bin",
+     "MADE_UP_TOKEN=madeup-not-a-secret-7f3a"
+    ]
+   },
+   "DropInPaths": {
+    "type": "as",
+    "data": [
+     "<home>/.config/systemd/user/pit-stop-restart.service.d/10-own.conf",
+     "<home>/.config/systemd/user/pit-stop-restart.service.d/20-path.conf"
+    ]
+   },
+   "FragmentPath": {
+    "type": "s",
+    "data": "<home>/.config/systemd/user/pit-stop-restart.service"
+   }
+  },
+  "lab-062.service, 0.6.2's shape": {
+   "LoadState": {
+    "type": "s",
+    "data": "loaded"
+   },
+   "ExecStart": {
+    "type": "a(sasbttttuii)",
+    "data": [
+     [
+      "/usr/bin/python3",
+      [
+       "/usr/bin/python3",
+       "-I",
+       "<home's first word>",
+       "<home's second word>/.claude/pit-stop/bin/pit-stop-restart",
+       "--live"
+      ],
+      false,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   },
+   "Environment": {
+    "type": "as",
+    "data": [
+     "PATH=/usr/bin:/bin"
+    ]
+   },
+   "DropInPaths": {
+    "type": "as",
+    "data": []
+   },
+   "FragmentPath": {
+    "type": "s",
+    "data": "<home>/.config/systemd/user/lab-062.service"
+   }
+  },
+  "lab-own.service, a person's own shape": {
+   "LoadState": {
+    "type": "s",
+    "data": "loaded"
+   },
+   "ExecStart": {
+    "type": "a(sasbttttuii)",
+    "data": [
+     [
+      "/bin/sh",
+      [
+       "/bin/sh",
+       "-c",
+       "exec python3 -I \"$HOME/.claude/pit-stop/bin/pit-stop-restart\" --live"
+      ],
+      false,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    ]
+   },
+   "Environment": {
+    "type": "as",
+    "data": []
+   },
+   "DropInPaths": {
+    "type": "as",
+    "data": []
+   },
+   "FragmentPath": {
+    "type": "s",
+    "data": "<home>/.config/systemd/user/lab-own.service"
+   }
+  },
+  "not-there-at-all.service, not there": {
+   "LoadState": {
+    "type": "s",
+    "data": "not-found"
+   },
+   "ExecStart": {
+    "type": "a(sasbttttuii)",
+    "data": []
+   },
+   "Environment": {
+    "type": "as",
+    "data": []
+   },
+   "DropInPaths": {
+    "type": "as",
+    "data": []
+   },
+   "FragmentPath": {
+    "type": "s",
+    "data": ""
+   }
+  }
+ },
+ "no bus": {
+  "how": "the same calls with DBUS_SESSION_BUS_ADDRESS and XDG_RUNTIME_DIR unset; stdout and stderr were kept together",
+  "words": "Failed to set bus address: $DBUS_SESSION_BUS_ADDRESS and $XDG_RUNTIME_DIR not defined (consider using --machine=<user>@.host --user to connect to bus of other user)",
+  "exit with --json=short": 0,
+  "exit without it": 1
+ }
+}
