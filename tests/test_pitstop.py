@@ -4845,7 +4845,7 @@ def test_G12_23_nothing_setup_writes_names_a_plugin_cache_folder(tmp_path, monke
             assert "plugins/cache" not in text, f
         assert not FIXED_VERSION_FOLDER.search(text) and str(ROOT) not in text, f
     exec_line = [l for l in (unit_dir / "pit-stop-restart.service").read_text().splitlines() if l.startswith("ExecStart=")]
-    assert exec_line == [f"ExecStart={sys.executable} -I {home}/.claude/pit-stop/bin/pit-stop-restart --live"], exec_line
+    assert exec_line == [f'ExecStart="{sys.executable}" -I "{home}/.claude/pit-stop/bin/pit-stop-restart" --live'], exec_line
     # the macOS job file, written in-process with the platform said to be Darwin
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     import setup as su
@@ -5027,6 +5027,158 @@ def test_G12_28_the_services_time_limit_is_above_the_runs_longest_road(tmp_path,
     unit = (tmp_path / "units" / "pit-stop-restart.service").read_text()
     limits = re.findall(r"^TimeoutStartSec=(\d+)$", unit, re.M)
     assert len(limits) == 1 and int(limits[0]) > su.RUN_BOUND, (limits, su.RUN_BOUND, unit)
+
+
+def systemd_words(line):
+    """A start line or Environment= value split as systemd 255 reads it (systemd.syntax: words split on blanks,
+    double and single quotes held whole, a backslash takes the next character), then each word's specifiers and,
+    past the first word of a start line, its $ read: "%%" and "$$" are one character; any other "%" or "$" is a
+    specifier or a variable the word does not hold whole, and is answered None."""
+    words, i = [], 0
+    while i < len(line):
+        if line[i] in " \t":
+            i += 1
+            continue
+        w = []
+        while i < len(line) and line[i] not in " \t":
+            if line[i] in "\"'":
+                q, i = line[i], i + 1
+                while line[i] != q:
+                    if line[i] == "\\":
+                        i += 1
+                    w.append(line[i])
+                    i += 1
+                i += 1
+            elif line[i] == "\\":
+                w.append(line[i + 1])
+                i += 2
+            else:
+                w.append(line[i])
+                i += 1
+        words.append("".join(w))
+    return words
+
+
+def systemd_unescape(word, dollars):
+    out, i = [], 0
+    while i < len(word):
+        c = word[i]
+        if c == "%" or (dollars and c == "$"):
+            if word[i + 1:i + 2] != c:
+                return None
+            i += 1
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+P74_CHARS = (" ", "%", '"', "\\", "&", "<", "$")
+
+
+@pytest.mark.parametrize("c", P74_CHARS + ("".join(P74_CHARS),), ids=lambda c: "all" if len(c) > 1 else f"U+{ord(c):04X}")
+def test_G12_48_a_value_setup_writes_into_a_timer_file_is_held_whole(tmp_path, c):
+    """Row P74: setup --fleet --apply in a home whose path holds C, with tmux found in a folder whose path holds C
+    (so the timer's PATH holds it too). The service's start line and Environment= line, read as systemd splits
+    them, give the launcher's path and the PATH whole; every line setup prints for a person to run, split as a
+    shell splits it, gives each path whole."""
+    import shlex
+    home, stub = tmp_path / f"ho{c}me", tmp_path / f"st{c}ub"
+    (home / "proj").mkdir(parents=True)
+    stub.mkdir()
+    for n, b in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
+        (stub / n).write_text(f"#!/bin/sh\n{b}\n")
+        os.chmod(stub / n, 0o755)
+    (home / ".claude" / "plugins").mkdir(parents=True)
+    (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
+    env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "PATH": str(stub),
+           "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    setup = [sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--fleet", "--no-tune-now"]
+    plan = subprocess.run(setup, cwd=str(home / "proj"), env=env, capture_output=True, text=True, timeout=120)
+    r = subprocess.run(setup + ["--apply"], cwd=str(home / "proj"), env=env, capture_output=True, text=True, timeout=120)
+    launcher = str(home / ".claude" / "pit-stop" / "bin" / "pit-stop-restart")
+    want_path = ":".join([str(stub), "/usr/local/bin", "/usr/bin", "/bin"])
+    unit = (home / ".config" / "systemd" / "user" / "pit-stop-restart.service").read_text()
+    start = [l[len("ExecStart="):] for l in unit.splitlines() if l.startswith("ExecStart=")]
+    envs = [l[len("Environment="):] for l in unit.splitlines() if l.startswith("Environment=")]
+    assert len(start) == 1 and len(envs) == 1, unit
+    words = systemd_words(start[0])
+    read = [systemd_unescape(words[0], False)] + [systemd_unescape(w, True) for w in words[1:]]
+    assert read == [sys.executable, "-I", launcher, "--live"], (start[0], read)
+    assert [systemd_unescape(w, False) for w in systemd_words(envs[0])] == [f"PATH={want_path}"], envs[0]
+    shown = [l.split("First look at what it would do: ", 1)[1] for l in (plan.stdout + r.stdout).splitlines()
+             if "First look at what it would do: " in l]
+    assert len(shown) == 2 and "fleet mode is set up" in r.stdout, plan.stdout[-1200:] + r.stdout[-1200:] + r.stderr[-800:]
+    for s in shown:
+        assert shlex.split(s) == [sys.executable, "-I", launcher], s
+
+
+@pytest.mark.parametrize("c", P74_CHARS + ("".join(P74_CHARS),), ids=lambda c: "all" if len(c) > 1 else f"U+{ord(c):04X}")
+def test_G12_48_the_launch_agent_and_its_lines_hold_each_value_whole(tmp_path, monkeypatch, capsys, c):
+    """Row P74, the Mac's side: the launch agent setup writes, with C in the Python program's path, the launcher's
+    path and the PATH, is read by a property-list reader and gives each value whole; the lines setup prints that
+    name the job's file (load it, switch it off, start it) split as a shell splits them give the path whole."""
+    import plistlib
+    import shlex
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    agents = tmp_path / f"La{c}unch"
+    py, binp, path = f"/op{c}t/python3", str(tmp_path / f"b{c}in" / "pit-stop-restart"), f"/us{c}r/bin:/bin"
+    monkeypatch.setattr(su.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(su, "PLIST", str(agents / "ai.thewindstorm.pit-stop-restart.plist"))
+    monkeypatch.setattr(su, "BIN", binp)
+    monkeypatch.setattr(su, "UNDO", str(tmp_path / "setup-undo.json"))
+    monkeypatch.setattr(su, "timer_path", lambda: path)
+    monkeypatch.setattr(su.sys, "executable", py)
+    monkeypatch.setattr(su, "run", lambda cmd, t=30, env=None: subprocess.CompletedProcess(
+        cmd, 113 if cmd[:2] == ["launchctl", "print"] else 5, "", ""))
+    assert su.install_timer(5, True) is True
+    job = plistlib.loads((agents / "ai.thewindstorm.pit-stop-restart.plist").read_bytes())
+    assert job["ProgramArguments"] == [py, "-I", binp, "--live"] and job["EnvironmentVariables"] == {"PATH": path}, job
+    lines = [capsys.readouterr().out.split("load it with: ", 1)[1].strip(),
+             su.fleet_stop_line("stopped", su.LAUNCHD_LABEL, False, True).split("Start it with: ", 1)[1]]
+    (agents / "ai.thewindstorm.pit-stop-restart.plist").write_text("<plist>a person's own job</plist>\n")
+    lines += [l.split("To switch it off: ", 1)[1] for l in su.undo(ledger=str(tmp_path / "none.json"),
+                                                                   run_cmd=lambda *a, **k: None) if "To switch it off: " in l]
+    assert len(lines) == 3, lines
+    for s in lines:
+        assert shlex.split(s)[-1] == su.PLIST, s
+    assert shlex.split(su.helper_command("--live")) == [py, "-I", binp, "--live"]
+
+
+@pytest.mark.parametrize("where,value,named", [
+    ("program", 'py"x', "a double quote"), ("program", "py'x", "an apostrophe"), ("program", "py\\x", "a backslash"),
+    ("program", "py${x", "a dollar sign followed by an opening brace"), ("program", "py\x01x", "\\x01"),
+    ("home", "ho\nme", "a line break"), ("home", "ho​me", "a character that cannot be seen"),
+    ("path", "st ub", "a line break"), ("path", "st\x7fub", "\\x7f")],
+    ids=lambda v: v if v in ("program", "home", "path") else None)
+def test_G12_48_a_value_no_timer_file_can_hold_is_refused_before_the_first_write(tmp_path, where, value, named):
+    """Row P74: a value the unit cannot hold is refused by setup --fleet --apply before its first write, in one
+    line that names the character and says nothing was made; the home's bytes are read unchanged."""
+    home = tmp_path / ("ho me" if where != "home" else value)
+    stub = tmp_path / (value if where == "path" else "stub")
+    (home / "proj").mkdir(parents=True)
+    stub.mkdir()
+    for n, b in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
+        (stub / n).write_text(f"#!/bin/sh\n{b}\n")
+        os.chmod(stub / n, 0o755)
+    (home / ".claude" / "plugins").mkdir(parents=True)
+    (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
+    py = sys.executable
+    if where == "program":
+        (tmp_path / value).mkdir()
+        py = str(tmp_path / value / "python3")
+        os.symlink(sys.executable, py)
+    before = {str(f): (f.is_symlink(), f.read_bytes() if f.is_file() else None) for f in home.rglob("*")}
+    r = subprocess.run([py, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--fleet", "--no-tune-now", "--apply"],
+                       cwd=str(home / "proj"), env={"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home),
+                                                    "PATH": str(stub), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
+                       capture_output=True, text=True, timeout=120)
+    after = {str(f): (f.is_symlink(), f.read_bytes() if f.is_file() else None) for f in home.rglob("*")}
+    out = r.stdout.splitlines()
+    assert after == before, sorted(set(after) ^ set(before))
+    assert r.returncode == 1 and len(out) == 1 and named in out[0] and "nothing was made" in out[0], r.stdout + r.stderr
 
 
 def test_G12_18_the_walk_covers_what_decides_what_runs():

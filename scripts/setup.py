@@ -326,7 +326,7 @@ def fleet_stop_line(st, unit, wrote_now, darwin):
                 f"Enable it with: systemctl --user enable {unit}")
     if st == "stopped":
         return (f"   Fleet mode is NOT running: {unit} is {'written but ' if wrote_now else ''}stopped. Start it with: "
-                + (f"launchctl bootstrap gui/{os.getuid()} {PLIST}" if darwin else
+                + (f"launchctl bootstrap gui/{os.getuid()} {shlex.quote(PLIST)}" if darwin else
                    ("systemctl --user daemon-reload && " if wrote_now else "") + f"systemctl --user enable --now {unit}"))
     if st == "unknown" and unit == "pit-stop-restart.timer" and not darwin:
         return (f"   Fleet mode is NOT running: its file is written but systemd does not know {unit}. Start it with: "
@@ -417,6 +417,65 @@ def timer_path():
     return ":".join(out)
 
 
+def cannot_be_seen(c):
+    """A character no timer file can hold whole (G12.48): a line break or one a reader cannot see (Unicode classes
+    Cc, Cf, Cs, Co, Cn, Zl, Zp, and every space but the plain one)."""
+    cat = unicodedata.category(c)
+    return cat in ("Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp") or (cat == "Zs" and c != " ")
+
+
+PROGRAM_PATH_STOPS = (('"', "a double quote"), ("'", "an apostrophe"), ("\\", "a backslash"),
+                      ("${", "a dollar sign followed by an opening brace"))
+
+
+def timer_value_stop(py, darwin):
+    """G12.48: the one line that refuses, before setup's first write, a value the timer file cannot hold whole; None
+    when every value can be held. The values: the Python program's path, the launcher's path, the timer's PATH.
+    In a systemd unit the program's own path (the first word of the start line) has no escaped form, so a quote,
+    an apostrophe, a backslash or "${" there is refused too."""
+    for name, value in (("the Python program's path", py), ("the launcher's path", BIN), ("the timer's PATH", timer_path())):
+        for c in value:
+            if cannot_be_seen(c):
+                what = "a line break" if c in "\n\r  " else "a character that cannot be seen"
+                return (f"fleet mode not set up: {name} holds {what} ({one_line(c)[0] if one_line(c)[1] else f'U+{ord(c):04X}'}), "
+                        f"which a timer file cannot hold whole, so nothing was made. Setup runs as it is without --fleet.")
+    if not darwin:
+        for ch, says in PROGRAM_PATH_STOPS:
+            if ch in py:
+                return (f"fleet mode not set up: the Python program's path holds {says}, which systemd cannot take in the "
+                        f"first word of a service's start line, so nothing was made. Setup runs as it is without --fleet; "
+                        f"for fleet mode, run it with a Python whose path holds no double quote, apostrophe, backslash "
+                        f"or \"${{\".")
+    return None
+
+
+def unit_word(value, first=False):
+    """VALUE as one word of a systemd start line (G12.48): in double quotes, every % doubled (a specifier), and,
+    past the first word, every backslash and double quote escaped and every $ doubled (systemd's variables). The
+    first word, the program, is never expanded; what it cannot hold is refused first (timer_value_stop)."""
+    value = value.replace("%", "%%")
+    if not first:
+        value = value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "$$")
+    return f'"{value}"'
+
+
+def unit_env(name, value):
+    """One Environment= assignment held whole (G12.48): in double quotes, backslashes and double quotes escaped,
+    every % doubled; systemd does not expand $ there."""
+    return '"' + f"{name}={value}".replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
+
+
+def xml_text(value):
+    """VALUE escaped for a launch agent's <string> (G12.48)."""
+    from xml.sax.saxutils import escape
+    return escape(value, {'"': "&quot;", "'": "&apos;"})
+
+
+def helper_command(*extra):
+    """The helper's command as a person runs it: each path one shell word (G12.48)."""
+    return " ".join([shlex.quote(sys.executable), "-I", shlex.quote(BIN), *extra])
+
+
 RUN_BOUND = 960   # rule 30: a run's longest road by the helper's own limits: Claude Code's update (600 s), then
                   # plugin updates (300 s in all), and 60 s for the rest; launchd itself sets a job no time limit
 WAIT_STEP = 5
@@ -472,8 +531,8 @@ def install_timer(interval, apply):
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>ai.thewindstorm.pit-stop-restart</string>
-  <key>ProgramArguments</key><array><string>{py}</string><string>-I</string><string>{BIN}</string><string>--live</string></array>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{timer_path()}</string></dict>
+  <key>ProgramArguments</key><array><string>{xml_text(py)}</string><string>-I</string><string>{xml_text(BIN)}</string><string>--live</string></array>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{xml_text(timer_path())}</string></dict>
   <key>StartInterval</key><integer>{interval * 60}</integer>
   <key>ProcessType</key><string>Background</string>
 </dict></plist>
@@ -513,9 +572,9 @@ def install_timer(interval, apply):
                       + (" (the job loaded from an earlier file was taken off first)" if was else ""))
             elif was:
                 print(f"    written; launchd still has the job loaded from an earlier file. To load this one: "
-                      f"launchctl bootout {job}, then launchctl bootstrap gui/{os.getuid()} {PLIST}")
+                      f"launchctl bootout {job}, then launchctl bootstrap gui/{os.getuid()} {shlex.quote(PLIST)}")
             else:
-                print(f"    written; load it with: launchctl bootstrap gui/{os.getuid()} {PLIST}")
+                print(f"    written; load it with: launchctl bootstrap gui/{os.getuid()} {shlex.quote(PLIST)}")
         return True
     svc, tmr = os.path.join(UNIT_DIR, "pit-stop-restart.service"), os.path.join(UNIT_DIR, "pit-stop-restart.timer")
     print(f"  timer: {tmr} (systemd user timer, every {interval} min)")
@@ -533,7 +592,8 @@ def install_timer(interval, apply):
     os.makedirs(UNIT_DIR, exist_ok=True)
     with open(svc, "w") as f:
         f.write(f"[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
-                f"Environment=PATH={timer_path()}\nExecStart={py} -I {BIN} --live\nTimeoutStartSec=1200\nNice=10\n")
+                f"Environment={unit_env('PATH', timer_path())}\nExecStart={unit_word(py, first=True)} -I {unit_word(BIN)} "
+                f"--live\nTimeoutStartSec=1200\nNice=10\n")
     with open(tmr, "w") as f:
         f.write(f"[Unit]\nDescription=Windstorm Pit Stop every {interval} minutes\n\n[Timer]\nOnBootSec=3min\n"
                 f"OnUnitActiveSec={interval}min\nAccuracySec=20s\n\n[Install]\nWantedBy=timers.target\n")
@@ -884,7 +944,7 @@ def undo(ledger=None, run_cmd=None):
         out.append(f"1. timer: stopped and removed {home(PLIST)}")
     elif os.path.exists(PLIST):
         out.append(f"1. timer: {home(PLIST)} not written by Pit Stop's setup: left as it is. "
-                   f"To switch it off: launchctl bootout gui/{os.getuid()} {PLIST}")
+                   f"To switch it off: launchctl bootout gui/{os.getuid()} {shlex.quote(PLIST)}")
     else:
         out.append("1. timer: none of setup's here")
     others = [h for h in already_scheduled() if h not in (svc, tmr, PLIST) or not ours(h, ledger)]
@@ -1095,6 +1155,10 @@ def main():
         for line in undo():
             print(line)
         return 0
+    stop = timer_value_stop(sys.executable, platform.system() == "Darwin") if a.fleet else None
+    if stop:      # G12.48: before the first write
+        print(f"Pit Stop setup: {stop}")
+        return 1 if a.apply else 0
     if a.apply:   # before anything is written: what this setup will make that was not here (G12.17)
         made = missing_chain(pc.STATE_DIR)
         cfg_was = os.path.lexists(pc.CONFIG)
@@ -1232,7 +1296,7 @@ def main():
         for h in hits:
             shown, bent = one_line(h)
             print(f"     {shown}" + (" (its name holds a character shown as \\x and its code)" if bent else ""))
-        print(f"   To follow plugin updates by itself, make its command: {sys.executable} -I {BIN} --live")
+        print(f"   To follow plugin updates by itself, make its command: {helper_command('--live')}")
     elif unread:      # rule 6: what could not be read is not "none there"; never a second schedule
         placed = False
         files = [u.replace(pc.HOME, "~") for u in unread if u != "crontab"]
@@ -1263,7 +1327,7 @@ def main():
     root, why = ln.find(pc.CLAUDE_DIR)
     if root and not a.apply:
         print(f"7. check: the launcher the timer runs finds Pit Stop at {root.replace(pc.HOME, '~')}")
-        print(f"   First look at what it would do: {sys.executable} -I {BIN}")
+        print(f"   First look at what it would do: {helper_command()}")
         return 0
     if root:
         print(f"7. check: the launcher the timer runs finds Pit Stop at {root.replace(pc.HOME, '~')}")
@@ -1292,7 +1356,7 @@ def main():
             print(f"   the timer: {said}")
         if any(st == "running" for st, *_ in states):
             print("   fleet mode is set up")
-            print(f"   First look at what it would do: {sys.executable} -I {BIN}")
+            print(f"   First look at what it would do: {helper_command()}")
             return 0
         for st, said, unit, wrote_now in states:
             print(fleet_stop_line(st, unit, wrote_now, darwin))
