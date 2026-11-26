@@ -5352,6 +5352,104 @@ def test_G12_49_launchd_answers_as_printed(tmp_path, monkeypatch):
         assert (step is None) == (want == "running") and "/opt/x" not in said, (said, step)
 
 
+P82_GOOD = {"allow_names": ["on-list", "keep-out"], "deny_names": ["keep-out"], "deny_name_globs": [], "deny_paths": [],
+            "notify_command": "echo made-up-token-5c2e"}
+P82_STATES = ("0 bytes", "cut short", "a stray comma", "a JSON list", "mode 000")
+
+
+def _p82_run(tmp_path, monkeypatch, state):
+    """One helper run (--live) after restart.json is planted in STATE (None: not there; "good": P82_GOOD), the
+    module read again as a new run reads it. Every step the helper can take is a recorder: (what it did, its log)."""
+    cfg = tmp_path / "cfg" / "pit-stop"
+    cfg.mkdir(parents=True, exist_ok=True)
+    rj = cfg / "restart.json"
+    good = json.dumps(P82_GOOD, indent=2).encode()
+    if os.path.exists(rj):
+        os.chmod(rj, 0o600)
+        os.remove(rj)
+    if state is not None:
+        rj.write_bytes({"0 bytes": b"", "cut short": good[:len(good) // 2], "a JSON list": b'["deny_names", "keep-out"]',
+                        "a stray comma": good.replace(b'"deny_paths": []', b'"deny_paths": [],', 1)}.get(state, good))
+    if state == "mode 000":
+        os.chmod(rj, 0)
+    monkeypatch.setattr(sys, "argv", ["pit-stop-restart", "--live"])
+    rab = _rab(tmp_path, monkeypatch)
+    did, names = [], ("keep-out", "off-list", "on-list")
+    sessions = [dict(_sess(name=n), sessionId=f"{n}-0000", pid=1000 + i) for i, n in enumerate(names)]
+    monkeypatch.setattr(rab.pc, "live_sessions", lambda *a, **k: (sessions, "registry"))
+    monkeypatch.setattr(rab.pc, "newest_installed_version", lambda *a: "2.1.400")
+    monkeypatch.setattr(rab, "panes", lambda: {f"tty{1000 + i}": f"pane-{n}" for i, n in enumerate(names)})
+    monkeypatch.setattr(rab, "pid_tty", lambda pid: f"tty{pid}")
+    monkeypatch.setattr(rab, "type_line", lambda target, text: did.append(("typed", target, text)) or (True, ""))
+    monkeypatch.setattr(rab, "handle", lambda s, *a: did.append(("handle", s["name"])))
+    monkeypatch.setattr(rab, "maybe_reload", lambda s, *a: did.append(("reload", s["name"])))
+    monkeypatch.setattr(rab, "update_claude_code", lambda *a: did.append(("Claude Code update",)))
+    monkeypatch.setattr(rab, "update_plugins", lambda *a: did.append(("plugin update",)))
+    monkeypatch.setattr(rab, "start_tune", lambda *a: did.append(("tune",)))
+    import needs_you
+    monkeypatch.setattr(needs_you, "refresh", lambda *a, **k: did.append(("needs-you list",)))
+    before = os.path.getsize(rab.LOG) if os.path.exists(rab.LOG) else 0
+    rab.main()
+    if not os.path.exists(rab.LOG):
+        return rab, did, ""
+    with open(rab.LOG) as f:
+        f.seek(before)
+        return rab, did, f.read()
+
+
+@pytest.mark.parametrize("state", P82_STATES)
+def test_G4_46_an_unreadable_restart_json_restarts_nothing(tmp_path, monkeypatch, capsys, state):
+    """Row P82: restart.json holding a deny list and an allow list, planted in a state that cannot be read. The
+    helper's run acts on no session (neither the deny-listed one nor the one off the allow list) and takes no step
+    a key of the file switches: no typing, restart, reload, plugin or Claude Code update, needs-you list or tune. One
+    log line names the file, where the read stopped and the one next step; no value of the file is in it. The step,
+    taken as printed, and the file mended: the next run acts with the lists in force and the stop does not come back.
+    Not there: today's defaults, every session a candidate."""
+    rab, did, log = _p82_run(tmp_path, monkeypatch, None)                    # not there: the defaults, as today
+    assert ("handle", "keep-out") in did and ("handle", "off-list") in did and "could not be read" not in log, (did, log)
+    rab, did, log = _p82_run(tmp_path, monkeypatch, state)
+    if state == "mode 000" and os.geteuid() == 0:                          # the administrator reads it: the lists hold
+        assert [d for d in did if d[0] == "handle"] == [("handle", "on-list")] and "could not be read" not in log
+        return
+    stop = [l for l in log.splitlines() if "restart.json could not be read" in l]
+    assert did == [] and len(stop) == 1 and len(log.splitlines()) == 1, (did, log)
+    where = {"0 bytes": "it is empty (0 bytes)", "cut short": "its JSON stops at line ", "a stray comma":
+             "its JSON stops at line ", "a JSON list": "it holds a JSON list where one JSON object ({ ... }) is wanted",
+             "mode 000": "it could not be opened (PermissionError)"}[state]
+    assert where in stop[0] and str(tmp_path / "cfg" / "pit-stop" / "restart.json") in stop[0], stop[0]
+    assert "made-up-token" not in log + capsys.readouterr().out and "keep-out" not in stop[0], stop[0]
+    step = stop[0].split("The one next step, ", 1)[1].split("; the next run reads it again.", 1)[0]
+    if ": " in step:                                                    # a command: run as printed
+        ran = subprocess.run(["sh", "-c", step.split(": ", 1)[1]], capture_output=True, text=True, timeout=60)
+        if state in ("cut short", "a stray comma"):
+            line, col = re.search(r"line (\d+), column (\d+)", stop[0]).groups()
+            assert ran.returncode != 0 and f"line {line} column {col}" in ran.stderr, (step, ran.stderr)
+        else:
+            assert ran.returncode == 0, (step, ran.stderr)
+    if state != "mode 000":                                             # the person mends what it showed
+        (tmp_path / "cfg" / "pit-stop" / "restart.json").write_text(json.dumps(P82_GOOD))
+    else:
+        assert json.loads((tmp_path / "cfg" / "pit-stop" / "restart.json").read_text()) == P82_GOOD
+    rab, did, log = _p82_run(tmp_path, monkeypatch, "kept")
+    assert [d for d in did if d[0] == "handle"] == [("handle", "on-list")] and "could not be read" not in log, (did, log)
+
+
+def test_G4_46_status_says_the_helper_is_stopped_and_never_uses_the_defaults(tmp_path, monkeypatch):
+    """Row P82 in /pit-stop status: with restart.json not read, status (not stopped itself) says the helper is
+    stopped with the same line, and a session behind is never judged by the default lists."""
+    rab, did, log = _p82_run(tmp_path, monkeypatch, "a stray comma")
+    import needs_you as ny
+    monkeypatch.setattr(ny, "_rab", lambda: rab)
+    monkeypatch.setattr(ny, "behind_since", lambda v: time.time() - 3 * 86400)
+    monkeypatch.setattr(rab, "plugin_info", lambda: {"root": None, "gen": None, "versions": []})
+    d = ny.collect([dict(_sess(name="off-list"), sessionId="off-list-0000")], "2.1.400", time.time())
+    page = ny.render(d, time.time())
+    assert "The restart helper is stopped:" in page and rab.CFG_STOP in page and "Nothing needs you." not in page, page
+    assert "the restart helper does nothing while restart.json cannot be read" in page, page
+    assert "not on the list the helper may touch" not in page and "made-up-token" not in page, page
+    assert "the restart helper is stopped" in ny.headline(d)
+
+
 def test_G12_18_the_walk_covers_what_decides_what_runs():
     """Rule 28, WHAT RUNS INCLUDES WHAT DECIDES WHAT RUNS: besides Pit Stop's own settings, launcher, timer and
     code, status names, when another account can write them, installed_plugins.json (it tells the launcher
