@@ -186,6 +186,8 @@ An automatic compaction is held by a PreCompact hook until the session reaches a
 
 **G2.32 No fleet tune starts inside a systemd run that ends what it starts (open).** Under any `Type=oneshot` unit, not only Pit Stop's own, the helper starts no tune and says why once a day. Proof: `test_G2_32_no_fleet_tune_inside_a_oneshot_run`.
 
+**G2.33 A tune history that cannot be read stops that folder's tune (open).** A history in `tuned/<key>.json` that exists and does not read (0 bytes, cut short, not JSON, not an object, cannot be opened) stops that folder's tune for the run with one tune-log line naming the file and where the read stopped; the file is never written over. Not there is no history. Proof: `test_G2_33_a_tune_history_that_cannot_be_read_stops_the_tune`.
+
 ### G3 Shared readers
 One shared module, `scripts/pitstop_common.py`, plus the hook generation file, reads Claude Code's transcripts, session listings, plugin records and Pit Stop's own state the same way for every part of the plugin.
 
@@ -208,6 +210,8 @@ One shared module, `scripts/pitstop_common.py`, plus the hook generation file, r
 **G3.9 Every apply keeps three backups.** `main()` in `scripts/optimize.py` with `--apply` calls `prune_backups(s)` after `apply()`, as `scripts/autotune.py` and `scripts/setup.py` already do, so each settings file keeps its newest three `.bak-pitstop-*` copies (G2.11). Seen 2026-11-22: 55 hand-run `--apply` writes left 56 copies; daily tuning prunes. Proof: `test_G3_9_optimize_apply_keeps_three_backups`.
 
 **G3.10 Only our own backups are pruned.** `pitstop_common.prune_backups(path)` counts and removes only files named exactly as `backup()` writes them, `<file>.bak-pitstop-YYYYMMDDTHHMMSSZ`; any other name that starts the same way is the person's and stays. Seen 2026-11-24 in a scratch home: a stand-in `settings.local.json.bak-pitstop-0-person` was deleted by the glob. Proof: `test_G3_10_prune_removes_only_backups_pit_stop_wrote`.
+
+**G3.11 A kept file that cannot be read is said, never taken for empty (open).** The readers of config.json, the folder and lane profiles, the checkup baseline and a folder's settings.local.json (`pitstop_common.config`, `folder_profile`, `points`, `env_int`, the PreCompact hook) tell there, not there and could not be read apart; the last is said where the result is shown, naming the file and where the read stopped, never a value, and no write runs on it. Proof: `test_G3_11_a_kept_file_that_cannot_be_read_is_said`.
 
 ### G4 Restart helper at a break
 
@@ -302,6 +306,10 @@ The helper `scripts/restart_at_break.py` types `/compact`, `/restart` or a short
 **G4.44 The helper's own programs get an environment it builds (open).** Proof: `test_G4_44_the_helpers_programs_get_a_built_environment`.
 
 **G4.45 A value the helper did not write is typed as text only (open).** Before the helper types a note into a pane, each line of a session's re-arm list it carries is checked for characters that cannot be seen (control characters, U+2028, U+2029, bytes that are not UTF-8); a list holding one is not typed: the note names the list's file instead, and the log says why. Proof: `test_G4_45_a_value_the_helper_did_not_write_is_typed_as_text_only`.
+
+**G4.46 A restart.json that cannot be read stops the helper's restarts (open).** A `restart.json` that exists and does not read stops restarts, reloads and typed steps for the run and says so once in the log and in status, never with its values; never the defaults. Not there keeps the defaults. Proof: `test_G4_46_an_unreadable_restart_json_restarts_nothing`.
+
+**G4.47 The helper's own records that cannot be read are never written over (open).** The mismatch back-off, the asks, cache-told.json, claude-update.json and machine-behind.json: a record that exists and does not read is never written over or taken for none; the step it guards is left out with one log line; the mismatch record is written whole by rename. Proof: `test_G4_47_an_unreadable_record_is_kept_and_its_step_left_out`.
 
 ### G5 Hook reload
 
@@ -564,6 +572,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 **G12.49 Fleet mode is "set up" only when the timer's own command line is read whole (open).** For a unit setup wrote, setup reads from systemd or launchd the command the timer's service holds, argument by argument, and says set up only when it is the launcher setup wrote; "could not be read" never says set up; a person's own unit is never called wrong; a crontab line is said as today. Proof: `test_G12_49_fleet_mode_is_set_up_only_when_the_timers_command_line_is_read_whole`.
 
 **G12.50 The two chmod lines setup and status print hold the folder's path as one value (open).** The commands closing a folder another account can write (`chmod go-w`, `chmod -R go-w`), printed by setup and `/pit-stop status`, carry the path quoted for the shell, so the line taken as printed changes that folder and nothing else; a copy the person does not own gets no command (G12.16); a path no line carries whole gets a sentence naming it, shown changed. Proof: `test_G12_50_the_chmod_lines_hold_the_folders_path_as_one_value`, `test_G12_50_a_copy_the_person_does_not_own_gets_no_command`.
+
+**G12.51 A setup record that cannot be read is never written over (open).** `setup-undo.json` that exists and does not read stops `setup --apply` before its first change, saying where the read stopped and the one next step; nothing is changed. Not there is no record. Proof: `test_G12_51_an_unreadable_setup_record_stops_setup_before_its_first_change`.
 
 ### G13 Self-update for everyone (open)
 
