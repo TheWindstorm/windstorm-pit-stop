@@ -21,6 +21,7 @@ os.umask(os.umask(0) | 0o022)   # rule 28: nothing we make has group or other wr
 
 TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 WATCHED = ("hooks/", "scripts/", "skills/")
+PLAIN_REMOTE = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]*$")   # a remote name a printed line may carry
 
 
 def git(repo, *args):
@@ -108,8 +109,15 @@ def tag_step(repo, remote="origin", runner=subprocess.run):
     git(repo, "tag", tag, sha)
     p = runner(["git", "-C", repo, "push", "--quiet", remote, f"refs/tags/{tag}"], capture_output=True, text=True)
     if p.returncode:
+        if TAG.match(tag) and PLAIN_REMOTE.match(remote):
+            step = f"to finish, run this line in this repository: git push {remote} refs/tags/{tag}"
+        else:
+            step = f"to finish, push the tag {tag} to {remote} from this repository yourself"
+        refused = [l.strip() for l in (p.stderr or "").splitlines() if l.startswith(" ! ")]
         return 1, lines + [f"release step: {tag} made here on {sha[:12]}; its push to {remote} failed: "
-                           f"{first_line(p.stderr)}"]
+                           f"{refused[0][:200] if refused else first_line(p.stderr)}",
+                           f"release step: the suite passed with {tag} at its head, so the tag stays here and a "
+                           f"second run refuses it; {step}"]
     return 0, lines + [f"release step: {tag} made on {sha[:12]} and pushed to {remote}"]
 
 
