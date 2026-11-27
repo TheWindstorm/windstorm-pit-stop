@@ -1072,6 +1072,34 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P86",
+   "codon": "G12.52",
+   "issue": 152,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.3",
+   "ship_in": "0.6.3",
+   "seen": "2026-11-26, on a stock Ubuntu 24.04 guest (systemd 255), in a home whose folder's name holds a space, over the timer that 0.6.2's setup had written there (the helper's unit failed at its runs). The 0.6.3 build's `setup.py --fleet` without `--apply`, the plan, said at step 6 that something already schedules the restart helper, gave the line meant for a person's own timer (\"To follow plugin updates by itself, make its command: ...\"), and said nothing at step 7 of the command the service holds. With `--apply`, the same build read that command back from systemd (row P76) and said fleet mode is not set up, with the one next step. The plan is setup's first word and the place where a person decides, so there the finding did not reach the person. The same plan lines were seen on a Mac test account over the launch agent 0.6.2's setup wrote.",
+   "promise": "AIM: over a unit setup wrote (as row P76 defines it: one its record holds or one carrying Pit Stop's mark, an earlier version's too), the plan makes the same read-only read-back as the apply road and says the same finding (set up, differs, or could not be read) and the same one next step. It never gives the line meant for a person's own timer for such a unit. LIMIT: it reads only, and the plan still changes nothing; a unit setup did not write keeps today's words. A test holds it, seen red first: for each answer of the read-back, the plan's finding and step equal the apply road's, and no file changes.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
+  },
+  {
+   "id": "P87",
+   "codon": "G4.48",
+   "issue": 153,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.4",
+   "ship_in": "0.6.4",
+   "seen": "2026-11-26, on the same stock guest as row P86: while the timer 0.6.2's setup wrote failed at each of its runs (the helper's unit failed at its runs), `/pit-stop status` said \"Nothing needs you.\" Status does not read the helper's last run.",
+   "promise": "AIM: status never says nothing needs the person while the timer or launch agent setup wrote failed at its last run; it names that the helper's last run failed and the one next step. LIMIT: only the timer or agent setup wrote is read; a read that cannot be made is said as that, never as a good run; none of the service manager's or the program's own words is printed. A test holds it, seen red first: a last run that failed, one that did not, and a read that cannot be made, each through status.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

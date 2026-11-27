@@ -311,6 +311,8 @@ The helper `scripts/restart_at_break.py` types `/compact`, `/restart` or a short
 
 **G4.47 The helper's own records that cannot be read are never written over (open).** The mismatch back-off, the asks, cache-told.json, claude-update.json and machine-behind.json: a record that exists and does not read is never written over or taken for none; the step it guards is left out with one log line; the mismatch record is written whole by rename. Proof: `test_G4_47_an_unreadable_record_is_kept_and_its_step_left_out`.
 
+**G4.48 Status says when the helper's last run failed (open).** While the timer or launch agent setup wrote failed at its last run, status never says nothing needs the person: it names that run and the one next step; a read that cannot be made is said as that; none of the service manager's or the program's own words is printed. Proof: `test_G4_48_status_says_when_the_helpers_last_run_failed`.
+
 ### G5 Hook reload
 
 With `reload_plugins: true` in `restart.json`, the helper types `/reload-plugins` (no turn starts) into a session whose Pit Stop hooks are missing or of the wrong hook generation, at a break, and confirms it from the screen.
@@ -574,6 +576,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 **G12.50 The two chmod lines setup and status print hold the folder's path as one value (open).** The commands closing a folder another account can write (`chmod go-w`, `chmod -R go-w`), printed by setup and `/pit-stop status`, carry the path quoted for the shell, so the line taken as printed changes that folder and nothing else; a copy the person does not own gets no command (G12.16); a path no line carries whole gets a sentence naming it, shown changed. Proof: `test_G12_50_the_chmod_lines_hold_the_folders_path_as_one_value`, `test_G12_50_a_copy_the_person_does_not_own_gets_no_command`.
 
 **G12.51 A setup record that cannot be read is never written over (open).** `setup-undo.json` that exists and does not read stops `setup --apply` before its first change, saying where the read stopped and the one next step; nothing is changed. Not there is no record. Proof: `test_G12_51_an_unreadable_setup_record_stops_setup_before_its_first_change`.
+
+**G12.52 Setup's plan reads back a unit setup wrote, as applying it does (open).** Over a unit setup wrote, an earlier version's too, the plan makes the same read-only read-back as the apply road and says the same finding and the same one next step; it never gives the line meant for a person's own timer for such a unit, and it changes nothing. Proof: `test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does`.
 
 ### G13 Self-update for everyone (open)
 
