@@ -5320,6 +5320,76 @@ def test_G12_49_fleet_mode_is_set_up_only_when_the_timers_command_line_is_read_w
             assert "a crontab line runs it" in said and "*/5" not in out, said
 
 
+@pytest.mark.parametrize("case", ["0.6.2's unit, a home with a space", "the unit as this version writes it",
+                                  "a manager that cannot be asked", "a person's drop-in over PATH",
+                                  "a person's unit of another shape"])
+def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, case):
+    """Row P86: over a unit setup wrote (an earlier version's too), setup --fleet without --apply, the plan, makes the
+    same read-only read-back as the apply road and says the same finding and the same one next step, word for word;
+    it never gives the line meant for a person's own timer for such a unit; it changes nothing in the home. A unit
+    setup did not write keeps the plan's words of before. The answers are systemd 255's, recorded (G12.49)."""
+    home = tmp_path / ("pit space" if "space" in case else "home")
+    stub, ud = tmp_path / "stub", home / ".config" / "systemd" / "user"
+    (home / "proj").mkdir(parents=True)
+    stub.mkdir()
+    for n, b in (("tmux", "exit 0"), ("crontab", 'echo "no crontab for x" >&2; exit 1'), ("systemctl", SYSTEMCTL_RUNNING)):
+        (stub / n).write_text(f"#!/bin/sh\n{b}\n")
+        os.chmod(stub / n, 0o755)
+    (home / ".claude" / "plugins").mkdir(parents=True)
+    (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
+    env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "PATH": str(stub),
+           "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    setup = lambda *x: subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--fleet",
+                                       "--no-tune-now", *x], cwd=str(home / "proj"), env=env, capture_output=True,
+                                      text=True, timeout=120)
+    launcher = f"{home}/.claude/pit-stop/bin/pit-stop-restart"
+    answers = "file"
+    if case == "0.6.2's unit, a home with a space":         # 0.6.2's own words, its mark, no record
+        ud.mkdir(parents=True)
+        (ud / "pit-stop-restart.service").write_text(
+            "[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
+            f"Environment=PATH=/usr/bin:/bin\nExecStart=/usr/bin/python3 -I {launcher} --live\nTimeoutStartSec=1200\n")
+        answers = {"ExecStart": "lab-062.service, 0.6.2's shape"}
+    elif case == "a person's unit of another shape":
+        ud.mkdir(parents=True)
+        (ud / "my-fleet.service").write_text("[Service]\nExecStart=/bin/sh -c 'exec python3 -I \"$HOME/.claude/pit-stop/"
+                                             "bin/pit-stop-restart\" --live'\n")
+        answers = {"ExecStart": "lab-own.service, a person's own shape"}
+    else:                                                   # this version's setup wrote the unit first
+        busctl_standin.plant(str(stub), "file")
+        r = setup("--apply")
+        assert r.returncode == 0 and "fleet mode is set up" in r.stdout, r.stdout[-1500:]
+        if case == "a manager that cannot be asked":
+            answers = "no bus"
+        if case == "a person's drop-in over PATH":
+            (ud / "pit-stop-restart.service.d").mkdir(parents=True)
+            (ud / "pit-stop-restart.service.d" / "10-own.conf").write_text("[Service]\nEnvironment=PATH=/opt/made-up/bin\n")
+    busctl_standin.plant(str(stub), answers)
+    look = lambda: {str(f): (f.is_symlink(), f.read_bytes() if f.is_file() else None) for f in home.rglob("*")}
+    before = look()
+    plan = setup()
+    assert plan.returncode == 0 and look() == before, (plan.stdout[-1500:], sorted(set(look()) ^ set(before)))
+    applied = setup("--apply")
+    step = lambda out: out[out.find("7. check"):]
+    six = lambda out: out[out.find("6. timer"):out.find("7. check")]
+    if case == "a person's unit of another shape":          # not setup's: the plan's words of before
+        assert "the timer:" not in step(plan.stdout) and "First look at what it would do:" in step(plan.stdout), plan.stdout
+        assert "To follow plugin updates by itself, make its command:" in six(plan.stdout), plan.stdout
+        return
+    assert step(plan.stdout) == step(applied.stdout), (step(plan.stdout), step(applied.stdout))
+    assert "To follow plugin updates by itself" not in six(plan.stdout) + six(applied.stdout), plan.stdout
+    said = step(plan.stdout)
+    if case == "0.6.2's unit, a home with a space":
+        assert "the service's start line holds 5 arguments where setup wrote 4:" in said and "--undo, then this setup again" in said
+    elif case == "the unit as this version writes it":
+        assert "is the launcher setup wrote, argument by argument, with its PATH" in said and "fleet mode is set up" in said
+    elif case == "a manager that cannot be asked":
+        assert "could not be read" in said and "fleet mode is set up" not in said, said
+    else:
+        assert "systemctl --user cat pit-stop-restart.service" in said and "fleet mode is set up" not in said, said
+
+
 def test_G12_49_launchd_answers_as_printed(tmp_path, monkeypatch):
     """Row P76, the Mac's side: the job file setup wrote, then `launchctl print` in the form the family recorded on
     macOS 15, 26 and 27 (11-25): the arguments one to a line after two tabs, the job's own environment block beside

@@ -1396,6 +1396,67 @@ def json_word(v):
     return "true" if v is True else "false" if v is False else str(v)
 
 
+def setups_unit(h):
+    """G12.52: whether a schedule found is a unit setup wrote (G12.49: its record holds it, or it carries Pit Stop's
+    mark; an earlier version's too), at the path of setup's own unit."""
+    return h in (os.path.join(UNIT_DIR, "pit-stop-restart.service"), PLIST) and ours(h)
+
+
+def fleet_states(hits, darwin, only_setups=False):
+    """Step 7's read of what schedules the helper (G12.49), read only: (states, notes, steps). STATES: (state, what was
+    read, the unit read, whether this run wrote it) per schedule; NOTES: the person's own additions (warnings); STEPS:
+    the one next step per unit. HITS: what step 6 found ([] when this run wrote the timer). ONLY_SETUPS: read only
+    the units setup wrote (the plan, G12.52); every other schedule keeps the plan's words of before."""
+    states, notes, steps = [], [], {}
+    for h in (hits or [None]):
+        if only_setups and not setups_unit(h):
+            continue
+        if h == "crontab":
+            states.append(("running", "a crontab line runs it (read from crontab -l)", None, False))
+        elif h is None or h in (os.path.join(UNIT_DIR, "pit-stop-restart.service"), PLIST):
+            unit = LAUNCHD_LABEL if darwin else "pit-stop-restart.timer"
+            st, said = timer_state(unit)
+            if st == "running" and (h is None or ours(h)):     # G12.49: a unit setup wrote, read back
+                st, read, steps[unit], more = command_read_back(darwin, h is None)
+                said, notes = f"{said}; {read}", notes + more
+            elif st == "running":           # a person's own file at the path of setup's unit
+                notes += [f"   {os.path.basename(h)}'s command is your own: setup did not check what it runs"]
+            states.append((st, said, unit, h is None))
+        elif one_line(h)[1]:                    # rule 31 (vi): a name not ours never makes a line; no command for it
+            states.append(("unread", f"{one_line(h.replace(pc.HOME, '~'))[0]} is not Pit Stop's and its name holds a "
+                           f"character that cannot be typed on one line (shown here as \\x and its code); whether it "
+                           f"runs is not checked here", None, False))
+        elif h.endswith(".service"):
+            unit = os.path.basename(h)[:-len(".service")] + ".timer"
+            st, said = timer_state(unit)
+            if st == "unknown":                 # what starts that service was not read
+                st, said = "unread", f"what starts {h.replace(pc.HOME, '~')} was not read ({said})"
+            elif st == "running":               # G12.49 (c): a person's unit is never called wrong
+                notes += own_unit_note(os.path.basename(h))
+            states.append((st, said, unit, False))
+        else:
+            states.append(("unread", f"{h.replace(pc.HOME, '~')} is not Pit Stop's; whether it runs is not checked here",
+                           None, False))
+    return states, notes, steps
+
+
+def say_fleet_states(states, notes, steps, darwin):
+    """Prints step 7's finding from fleet_states: what was read, the person's own additions, then "fleet mode is set
+    up" with the first look, or the one next step. True when set up. The same words on the plan and when applied
+    (G12.52)."""
+    for st, said, _, _ in states:
+        print(f"   the timer: {said}")
+    for line in notes:
+        print(line)
+    if any(st == "running" for st, *_ in states):
+        print("   fleet mode is set up")
+        print(f"   First look at what it would do: {helper_command()}")
+        return True
+    for st, said, unit, wrote_now in states:
+        print(fleet_stop_line(st, unit, wrote_now, darwin, steps.get(unit)))
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--apply", action="store_true")
@@ -1556,7 +1617,8 @@ def main():
         for h in hits:
             shown, bent = one_line(h)
             print(f"     {shown}" + (" (its name holds a character shown as \\x and its code)" if bent else ""))
-        print(f"   To follow plugin updates by itself, make its command: {helper_command('--live')}")
+        if not all(setups_unit(h) for h in hits):     # G12.52: never for a unit setup wrote
+            print(f"   To follow plugin updates by itself, make its command: {helper_command('--live')}")
     elif unread:      # rule 6: what could not be read is not "none there"; never a second schedule
         placed = False
         files = [u.replace(pc.HOME, "~") for u in unread if u != "crontab"]
@@ -1587,51 +1649,17 @@ def main():
     root, why = ln.find(pc.CLAUDE_DIR)
     if root and not a.apply:
         print(f"7. check: the launcher the timer runs finds Pit Stop at {root.replace(pc.HOME, '~')}")
-        print(f"   First look at what it would do: {helper_command()}")
+        darwin = platform.system() == "Darwin"
+        states, notes, steps = fleet_states(hits, darwin, only_setups=True) if hits else ([], [], {})
+        if states:                      # G12.52: over a unit setup wrote, the plan reads back as applying it does
+            say_fleet_states(states, notes, steps, darwin)
+        else:
+            print(f"   First look at what it would do: {helper_command()}")
         return 0
     if root:
         print(f"7. check: the launcher the timer runs finds Pit Stop at {root.replace(pc.HOME, '~')}")
-        states = []                     # (state, what was read, the unit read, whether this run wrote it)
-        notes, steps = [], {}           # G12.49: the person's own additions (warnings); the one next step per unit
         darwin = platform.system() == "Darwin"
-        for h in (hits or [None]):
-            if h == "crontab":
-                states.append(("running", "a crontab line runs it (read from crontab -l)", None, False))
-            elif h is None or h in (os.path.join(UNIT_DIR, "pit-stop-restart.service"), PLIST):
-                unit = LAUNCHD_LABEL if darwin else "pit-stop-restart.timer"
-                st, said = timer_state(unit)
-                if st == "running" and (h is None or ours(h)):     # G12.49: a unit setup wrote, read back
-                    st, read, steps[unit], more = command_read_back(darwin, h is None)
-                    said, notes = f"{said}; {read}", notes + more
-                elif st == "running":           # a person's own file at the path of setup's unit
-                    notes += [f"   {os.path.basename(h)}'s command is your own: setup did not check what it runs"]
-                states.append((st, said, unit, h is None))
-            elif one_line(h)[1]:                    # rule 31 (vi): a name not ours never makes a line; no command for it
-                states.append(("unread", f"{one_line(h.replace(pc.HOME, '~'))[0]} is not Pit Stop's and its name holds a "
-                               f"character that cannot be typed on one line (shown here as \\x and its code); whether it "
-                               f"runs is not checked here", None, False))
-            elif h.endswith(".service"):
-                unit = os.path.basename(h)[:-len(".service")] + ".timer"
-                st, said = timer_state(unit)
-                if st == "unknown":                 # what starts that service was not read
-                    st, said = "unread", f"what starts {h.replace(pc.HOME, '~')} was not read ({said})"
-                elif st == "running":               # G12.49 (c): a person's unit is never called wrong
-                    notes += own_unit_note(os.path.basename(h))
-                states.append((st, said, unit, False))
-            else:
-                states.append(("unread", f"{h.replace(pc.HOME, '~')} is not Pit Stop's; whether it runs is not checked here",
-                               None, False))
-        for st, said, _, _ in states:
-            print(f"   the timer: {said}")
-        for line in notes:
-            print(line)
-        if any(st == "running" for st, *_ in states):
-            print("   fleet mode is set up")
-            print(f"   First look at what it would do: {helper_command()}")
-            return 0
-        for st, said, unit, wrote_now in states:
-            print(fleet_stop_line(st, unit, wrote_now, darwin, steps.get(unit)))
-        return 1
+        return 0 if say_fleet_states(*fleet_states(hits, darwin), darwin) else 1
     print(f"7. check: the launcher the timer runs would run nothing: {ln.SAY[why]}.")
     if why == "unreadable":
         print("   Not checked, so fleet mode is not said to be set up; the timer's next pass reads the list again.")
