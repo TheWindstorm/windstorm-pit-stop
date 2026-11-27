@@ -5322,19 +5322,30 @@ def test_G12_49_fleet_mode_is_set_up_only_when_the_timers_command_line_is_read_w
 
 @pytest.mark.parametrize("case", ["0.6.2's unit, a home with a space", "the unit as this version writes it",
                                   "a manager that cannot be asked", "a person's drop-in over PATH",
-                                  "a person's unit of another shape", "setup's marked unit changed by hand"])
+                                  "a person's unit of another shape", "setup's marked unit changed by hand",
+                                  "0.6.2's unit and a crontab line, a home with a space",
+                                  "setup's unit that differs and a person's unit",
+                                  "setup's unit as this version writes it and a crontab line"])
 def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, case):
     """Row P86: over a unit setup wrote (an earlier version's too), setup --fleet without --apply, the plan, makes the
     same read-only read-back as the apply road and says the same finding and the same one next step, word for word;
     it never gives the line meant for a person's own timer for such a unit; it changes nothing in the home. A unit
     setup did not write keeps the plan's words of before. A unit that carries setup's mark but was changed by hand:
-    the plan's read-back gives the count and place, and no word of the changed file is printed as setup's. The
-    answers are systemd 255's, recorded (G12.49)."""
+    the plan's read-back gives the count and place, and no word of the changed file is printed as setup's. More than
+    one schedule, setup's unit not starting the launcher and a person's schedule that does: both roads read the same
+    schedules and say the same words; setup's unit gets its line and step, the screen never says "NOT set up", and
+    the closing sentence names what runs the helper first. The step is walked exactly as printed: then only the
+    person's schedule runs the helper, and nothing of the person's changed. The answers are systemd 255's, recorded
+    (G12.49)."""
     home = tmp_path / ("pit space" if "space" in case else "home")
     stub, ud = tmp_path / "stub", home / ".config" / "systemd" / "user"
     (home / "proj").mkdir(parents=True)
     stub.mkdir()
-    for n, b in (("tmux", "exit 0"), ("crontab", 'echo "no crontab for x" >&2; exit 1'), ("systemctl", SYSTEMCTL_RUNNING)):
+    launcher = f"{home}/.claude/pit-stop/bin/pit-stop-restart"
+    cron_line = f'echo "*/5 * * * * python3 -I {shlex.quote(launcher)} --live"'
+    cron = cron_line if "crontab line" in case and "this version" not in case else 'echo "no crontab for x" >&2; exit 1'
+
+    for n, b in (("tmux", "exit 0"), ("crontab", cron), ("systemctl", SYSTEMCTL_RUNNING)):
         (stub / n).write_text(f"#!/bin/sh\n{b}\n")
         os.chmod(stub / n, 0o755)
     (home / ".claude" / "plugins").mkdir(parents=True)
@@ -5345,14 +5356,19 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
     setup = lambda *x: subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--fleet",
                                        "--no-tune-now", *x], cwd=str(home / "proj"), env=env, capture_output=True,
                                       text=True, timeout=120)
-    launcher = f"{home}/.claude/pit-stop/bin/pit-stop-restart"
     answers = "file"
-    if case == "0.6.2's unit, a home with a space":         # 0.6.2's own words, its mark, no record
+    if case.startswith("0.6.2's unit"):                     # 0.6.2's own words, its mark, no record
         ud.mkdir(parents=True)
         (ud / "pit-stop-restart.service").write_text(
             "[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
             f"Environment=PATH=/usr/bin:/bin\nExecStart=/usr/bin/python3 -I {launcher} --live\nTimeoutStartSec=1200\n")
         answers = {"ExecStart": "lab-062.service, 0.6.2's shape"}
+    elif case == "setup's unit that differs and a person's unit":   # the mark kept, a fifth argument; the person's own
+        ud.mkdir(parents=True)
+        (ud / "pit-stop-restart.service").write_text(
+            "[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
+            f"Environment=PATH=/usr/bin:/bin\nExecStart=/usr/bin/python3 -I {launcher} --live --hand\n")
+        (ud / "my-fleet.service").write_text(f'[Service]\nExecStart=/usr/bin/env python3 -I "{launcher}" --live\n')
     elif case == "setup's marked unit changed by hand":     # the mark kept, no record, a hand-made first word
         ud.mkdir(parents=True)
         (ud / "pit-stop-restart.service").write_text(
@@ -5372,6 +5388,8 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
         if case == "a person's drop-in over PATH":
             (ud / "pit-stop-restart.service.d").mkdir(parents=True)
             (ud / "pit-stop-restart.service.d" / "10-own.conf").write_text("[Service]\nEnvironment=PATH=/opt/made-up/bin\n")
+        if "crontab line" in case:          # the person adds a crontab line after setup wrote its unit
+            (stub / "crontab").write_text(f"#!/bin/sh\n{cron_line}\n")
     busctl_standin.plant(str(stub), answers)
     look = lambda: {str(f): (f.is_symlink(), f.read_bytes() if f.is_file() else None) for f in home.rglob("*")}
     before = look()
@@ -5386,6 +5404,37 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
         assert "hand-made" not in plan.stdout + plan.stderr, plan.stdout
         return
     applied = setup("--apply")
+    if case in ("0.6.2's unit and a crontab line, a home with a space", "setup's unit that differs and a person's unit",
+                "setup's unit as this version writes it and a crontab line"):
+        carrier = "a crontab line" if "crontab" in case else "my-fleet.timer"
+        theirs = {f: b for f, (_, b) in before.items() if "my-fleet" in f}
+        assert applied.returncode == 0 and step(plan.stdout) == step(applied.stdout), (step(plan.stdout), step(applied.stdout))
+        said = step(applied.stdout)
+        assert "NOT set up" not in plan.stdout + applied.stdout, said
+        if "this version" in case:          # both run the helper: the count, one is enough, setup's step, no command for theirs
+            assert ("   fleet mode is set up: setup's own timer and a crontab line each run the helper, so 2 schedules "
+                    "run it. One schedule is enough. To take setup's own timer off, so that a crontab line alone runs "
+                    "the helper: ") in said, said
+            assert said.rstrip("\n").split("\n")[-2].endswith(", then this setup again. Taking off a crontab line "
+                                                               "instead is yours to do, in your own schedule."), said
+            assert not any(w in said for w in ("crontab -e", "crontab -r", "*/5")) and "setup's own timer:" not in said, said
+        else:
+            assert ("   setup's own timer: it runs, but its service does not start the launcher (the line above). To "
+                    f"take it off, so that {carrier} alone runs the helper: ") in said, said
+            assert (f"   fleet mode is set up: {carrier} runs the helper; setup's own timer does not start the helper "
+                    "(its line and step are above)\n") in said, said
+        cmd = said.split(f"{carrier} alone runs the helper: ", 1)[1].split(", then this setup again", 1)[0]
+        walked = subprocess.run(["/bin/sh", "-c", cmd], cwd=str(home / "proj"), env=env, capture_output=True, text=True,
+                                timeout=120)
+        assert walked.returncode == 0, walked.stdout + walked.stderr
+        plan, applied = setup(), setup("--apply")      # one schedule, the person's: each road keeps its words
+        assert plan.returncode == 0 and "First look at what it would do:" in step(plan.stdout), plan.stdout
+        assert applied.returncode == 0, applied.stdout
+        assert not (ud / "pit-stop-restart.service").exists() and not (ud / "pit-stop-restart.timer").exists()
+        assert step(applied.stdout).count("fleet mode is set up\n") == 1 and "setup's own timer" not in applied.stdout
+        assert {f: b for f, (_, b) in look().items() if "my-fleet" in f} == theirs
+        assert (home / ".claude" / "pit-stop" / "restart.json").is_file(), applied.stdout
+        return
     if case == "a person's unit of another shape":          # not setup's: the plan's words of before
         assert "the timer:" not in step(plan.stdout) and "First look at what it would do:" in step(plan.stdout), plan.stdout
         assert "To follow plugin updates by itself, make its command:" in six(plan.stdout), plan.stdout
