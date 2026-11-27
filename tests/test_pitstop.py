@@ -5396,10 +5396,14 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
             (stub / "crontab").write_text("#!/bin/sh\necho 'crontab: made-up refusal' >&2; exit 1\n")
             rj = home / ".claude" / "pit-stop" / "restart.json"
             kept = rj.read_bytes()
+            launcher_was = (home / ".claude" / "pit-stop" / "bin" / "pit-stop-restart").read_bytes()
             u = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--undo"],
                                cwd=str(home / "proj"), env=env, capture_output=True, text=True, timeout=120)
             assert u.returncode == 0 and rj.read_bytes() == kept, u.stdout
             assert ("2. restart.json: kept ~/.claude/pit-stop/restart.json: whether something else still runs it "
+                    "could not be read: crontab\n") in u.stdout, u.stdout
+            assert (home / ".claude" / "pit-stop" / "bin" / "pit-stop-restart").read_bytes() == launcher_was, u.stdout
+            assert ("   launcher ~/.claude/pit-stop/bin/pit-stop-restart kept: whether something else still runs it "
                     "could not be read: crontab\n") in u.stdout, u.stdout
             return
     busctl_standin.plant(str(stub), answers)
@@ -5424,7 +5428,7 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
         said = step(applied.stdout)
         assert "NOT set up" not in plan.stdout + applied.stdout, said
         if "this version" in case:          # both run the helper: the count, one is enough, setup's step, no command for theirs
-            assert ("   fleet mode is set up: setup's own timer and a crontab line each run the helper, so 2 schedules "
+            assert ("   fleet mode is set up: setup's own timer and a crontab line each run the helper now, so 2 schedules "
                     "run it. One schedule is enough. To take setup's own timer off, so that a crontab line alone runs "
                     "the helper: ") in said, said
             assert said.rstrip("\n").split("\n")[-2].endswith(
@@ -5467,6 +5471,61 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
         assert "could not be read" in said and "fleet mode is set up" not in said, said
     else:
         assert "systemctl --user cat pit-stop-restart.service" in said and "fleet mode is set up" not in said, said
+
+
+@pytest.mark.parametrize("world", ["a person's unit not read, alone", "setup's unit that differs and a person's unit not read",
+                                   "a crontab line and setup's timer active but disabled",
+                                   "a crontab line and setup's timer stopped",
+                                   "setup's timer and a person's timer active but disabled"])
+def test_G12_52_another_schedule_found_gets_no_step_to_a_second(world):
+    """Row P86, where more than one schedule is found: a timer read as active, enabled or not, is said to run the
+    helper now and is counted; no step printed for setup's own unit starts, enables or writes again setup's timer
+    (a second schedule), and none says setup writes its timer again where it does not; no screen says both "set up"
+    and "NOT set up", and nothing says a timer that runs now does not start the helper. A world with one schedule
+    keeps its words. Step 7's finding from made states (the read itself is G12.49's)."""
+    import io
+    import contextlib
+    import setup as su
+    T = "pit-stop-restart.timer"
+    cron = ("running", "a crontab line runs it (read from crontab -l)", None, False, "a crontab line")
+    mine_unread = ("unread", "what starts mine.service was not read (x)", "mine.timer", False, "mine.timer")
+    states, steps = {
+        "a person's unit not read, alone": ([mine_unread], {}),
+        "setup's unit that differs and a person's unit not read": (
+            [("differs", "argument 5 ...", T, False, "setup"), mine_unread], {T: su.rewrite_step()}),
+        "a crontab line and setup's timer active but disabled": (
+            [cron, ("not-enabled", f"{T} is active but disabled: it runs now and will not start again after a restart",
+                    T, False, "setup")], {}),
+        "a crontab line and setup's timer stopped": ([cron, ("stopped", f"{T} is inactive (enabled)", T, False, "setup")], {}),
+        "setup's timer and a person's timer active but disabled": (
+            [("running", "its service's command ... is the launcher setup wrote", T, False, "setup"),
+             ("not-enabled", "mine.timer is active but disabled: it runs now and will not start again after a restart",
+              "mine.timer", False, "mine.timer")], {}),
+    }[world]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        set_up = su.say_fleet_states(states, [], steps, False)
+    out = buf.getvalue()
+    if world == "a person's unit not read, alone":
+        assert out.endswith(su.fleet_stop_line("unread", "mine.timer", False, False) + "\n") and not set_up, out
+        return
+    assert "enable --now" not in out and "Enable it with" not in out and "write it again" not in out, out
+    assert not ("set up" in out.replace("NOT set up", "") and "NOT set up" in out), out
+    if world == "setup's unit that differs and a person's unit not read":
+        assert not set_up and "Setup does not write its timer again while another schedule is found. To take it off: " in out
+        assert "restart.json is kept, so --plugin-updates holds" in out, out
+    if world == "a crontab line and setup's timer active but disabled":
+        assert set_up and "a crontab line and setup's own timer each run the helper now, so 2 schedules run it" in out
+        assert "setup's own timer does not start" not in out and "The step that takes setup's own timer off is above." in out
+        assert "To take it off, so that a crontab line alone runs the helper: " in out, out
+    if world == "a crontab line and setup's timer stopped":
+        assert set_up and "   setup's own timer: pit-stop-restart.timer is stopped. To take it off, so that a crontab line " \
+            "alone runs the helper: " in out, out
+        assert "a crontab line runs the helper; setup's own timer does not start the helper (its line and step are above)" in out
+    if world == "setup's timer and a person's timer active but disabled":
+        assert set_up and "setup's own timer and mine.timer each run the helper now, so 2 schedules run it; mine.timer " \
+            "will not start again after a restart. One schedule is enough. Taking off mine.timer is yours to do" in out, out
+        assert "mine.timer does not start" not in out and "To take setup's own timer off" not in out, out
 
 
 @pytest.mark.parametrize("image", ["macos-15-intel-15.7.9", "macos-15-15.8.2", "macos-26-intel-26.6.1", "macos-26-26.7.2"])

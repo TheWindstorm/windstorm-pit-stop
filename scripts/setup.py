@@ -321,17 +321,24 @@ def timer_state(unit="pit-stop-restart.timer", run_cmd=None):
     return "stopped", f"{unit} is {act} ({en})"
 
 
-def fleet_stop_line(st, unit, wrote_now, darwin, step=None):
+def fleet_stop_line(st, unit, wrote_now, darwin, step=None, take_off=None):
     """Family rule 7: the one line, with the one next step, for a timer read as not running (timer_state's answers),
-    or whose service's command was read back as not the launcher or could not be read (G12.49; STEP is its step)."""
+    or whose service's command was read back as not the launcher or could not be read (G12.49; STEP is its step).
+    TAKE_OFF (G12.52): setup's own unit where another schedule is found: that step replaces every step that would
+    write, start or enable setup's own timer (a second schedule); a look step stays."""
     if st == "differs":
-        return f"   Fleet mode is NOT set up: the timer runs, but its service does not start the launcher (the line above). {step}"
+        return (f"   Fleet mode is NOT set up: the timer runs, but its service does not start the launcher (the line "
+                f"above). {take_off if take_off and step == rewrite_step() else step}")
     if st == "cmd-unread":
         return (f"   Fleet mode: asked for, not checked: the timer runs, but the command its service holds could not be "
                 f"read (the line above), so it is not said to be set up. {step}")
     if st == "not-enabled":
         return (f"   Fleet mode is NOT set up to last: {unit} runs now but will not start again after a restart. "
-                f"Enable it with: systemctl --user enable {unit}")
+                + (take_off or f"Enable it with: systemctl --user enable {unit}"))
+    if st == "stopped" and take_off:
+        return f"   Fleet mode is NOT running: {unit} is {'written but ' if wrote_now else ''}stopped. {take_off}"
+    if st == "unknown" and unit == "pit-stop-restart.timer" and not darwin and take_off:
+        return f"   Fleet mode is NOT running: its file is written but systemd does not know {unit}. {take_off}"
     if st == "stopped":
         return (f"   Fleet mode is NOT running: {unit} is {'written but ' if wrote_now else ''}stopped. Start it with: "
                 + (f"launchctl bootstrap gui/{os.getuid()} {shlex.quote(PLIST)}" if darwin else
@@ -1229,12 +1236,24 @@ def undo(ledger=None, run_cmd=None):
     else:
         out.append("1. timer: none of setup's here")
     others = [h for h in already_scheduled() if h not in (svc, tmr, PLIST) or not ours(h, ledger)]
+    # G12.52: where what else runs the helper could not be read, the launcher and restart.json stay, said so (read
+    # only where one of them would be removed)
+    rj = rec.get("restart_json") if isinstance(rec.get("restart_json"), dict) else None
+    rj_ours = bool(rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256"))
+    unread = [u for u in schedule_read()[1] if u not in (svc, tmr, PLIST)] if not others and (
+        rj_ours or (os.path.exists(BIN) and ours(BIN, ledger))) else []
+    unread_said = (f"whether something else still runs it could not be read: "
+                   f"{', '.join(one_line(home(u))[0] for u in unread)}"
+                   + (" (a name holds a character shown as \\x and its code)" if any(one_line(u)[1] for u in unread)
+                      else ""))
     if os.path.exists(BIN) and not ours(BIN, ledger):
         out.append(f"   launcher {home(BIN)} not written by Pit Stop's setup: left as it is")
     elif os.path.exists(BIN) and others:
         out.append(f"   launcher {home(BIN)} kept: something else still runs it: "
                    f"{', '.join(one_line(home(h))[0] for h in others)}"
                    + (" (a name holds a character shown as \\x and its code)" if any(one_line(h)[1] for h in others) else ""))
+    elif os.path.exists(BIN) and unread:
+        out.append(f"   launcher {home(BIN)} kept: {unread_said}")
     elif os.path.exists(BIN):
         os.remove(BIN)
         try:
@@ -1243,20 +1262,15 @@ def undo(ledger=None, run_cmd=None):
             pass
         out.append(f"   launcher: removed {home(BIN)}")
     # 2. restart.json
-    rj = rec.get("restart_json") if isinstance(rec.get("restart_json"), dict) else None
     # G12.52: while something else still runs the helper, its settings stay (the launcher's judge and words); where
     # what else runs it could not be read, they stay too, said so, never removed on that answer
-    unread = [u for u in schedule_read()[1] if u not in (svc, tmr, PLIST)] if rj and not others else []
     if rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256") and others:
         out.append(f"2. restart.json: kept {home(rj['path'])}: something else still runs it: "
                    f"{', '.join(one_line(home(h))[0] for h in others)}"
                    + (" (a name holds a character shown as \\x and its code)" if any(one_line(h)[1] for h in others)
                       else ""))
     elif rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256") and unread:
-        out.append(f"2. restart.json: kept {home(rj['path'])}: whether something else still runs it could not be "
-                   f"read: {', '.join(one_line(home(u))[0] for u in unread)}"
-                   + (" (a name holds a character shown as \\x and its code)" if any(one_line(u)[1] for u in unread)
-                      else ""))
+        out.append(f"2. restart.json: kept {home(rj['path'])}: {unread_said}")
     elif rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256"):
         os.remove(rj["path"])
         out.append(f"2. restart.json: removed {home(rj['path'])} (setup wrote it; unchanged since)")
@@ -1474,50 +1488,66 @@ def fleet_states(hits, darwin):
 
 
 OWN_TIMER = "setup's own timer"
-DOES_NOT = ("differs", "stopped", "not-enabled", "unknown")    # read as not starting the helper (else: not checked)
+NOW = ("running", "not-enabled")             # a timer read as active, enabled or not: it runs the helper now
+DOES_NOT = ("differs", "stopped", "unknown")  # read as not starting the helper (else: not checked)
 
 
 def names_joined(names):
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
+def take_off_step(carriers):
+    """G12.52: the one step for setup's own unit where another schedule is found: undo takes it off and keeps
+    restart.json, and setup's next run writes no second schedule. CARRIERS: what runs the helper besides it, or ""."""
+    undo = f"{own_command('--undo')}, then this setup again, {give_again(True)}"
+    if carriers:
+        return f"To take it off, so that {carriers} alone {'runs' if ' and ' not in carriers else 'run'} the helper: {undo}"
+    return f"Setup does not write its timer again while another schedule is found. To take it off: {undo}"
+
+
 def setups_own_line(st, unit, wrote_now, darwin, step, carriers):
     """G12.52, more than one schedule and one runs the helper: the line for setup's own unit that does not start the
-    launcher, with its one step, never opening with "Fleet mode is NOT set up" (the closing sentence carries the
-    whole). Undo, then setup again, takes it off there: setup then writes no second schedule."""
+    launcher, or runs now but will not start again, with its one step, never opening with "Fleet mode is NOT set up"
+    (the closing sentence carries the whole)."""
     if st == "differs":
-        if step == rewrite_step():
-            step = (f"To take it off, so that {carriers} alone runs the helper: {own_command('--undo')}, then this "
-                    f"setup again, {give_again(True)}")
+        step = take_off_step(carriers) if step == rewrite_step() else step
         return f"   {OWN_TIMER}: it runs, but its service does not start the launcher (the line above). {step}"
     if st == "cmd-unread":
         return (f"   {OWN_TIMER}: it runs, but the command its service holds could not be read (the line above), so "
                 f"it is not said to start the launcher. {step}")
-    return f"   {OWN_TIMER}: " + fleet_stop_line(st, unit, wrote_now, darwin, step).split(": ", 1)[1]
+    return f"   {OWN_TIMER}: " + fleet_stop_line(st, unit, wrote_now, darwin, step,
+                                                 take_off_step(carriers)).split(": ", 1)[1]
 
 
-def closing_line(states):
+def closing_line(states, own_said):
     """G12.52: the one sentence true of the whole when more than one schedule is found and one runs the helper: what
-    runs it first, then what does not and what was not checked."""
+    runs it now first, then what does not and what was not checked; with two or more running now, that one is
+    enough and the step that takes setup's own timer off (OWN_SAID: its line, with that step, is printed above)."""
     name = lambda who: OWN_TIMER if who == "setup" else who
-    run = [name(w) for st, *_, w in states if st == "running"]
-    parts = [f"{name(w)} does not start the helper" + (" (its line and step are above)" if w == "setup" else "")
-             for st, *_, w in states if st in DOES_NOT and w]
+    now = [name(w) for st, *_, w in states if st in NOW]
+    parts = [f"{name(w)} will not start again after a restart" for st, *_, w in states if st == "not-enabled" and w]
+    parts += [f"{name(w)} does not start the helper" + (" (its line and step are above)" if w == "setup" else "")
+              for st, *_, w in states if st in DOES_NOT and w]
     parts += [f"whether {name(w)} starts it is not checked (the line above)"
-              for st, *_, w in states if st != "running" and st not in DOES_NOT and w]
-    unnamed = sum(1 for st, *_, w in states if st != "running" and not w)
+              for st, *_, w in states if st not in NOW and st not in DOES_NOT and w]
+    unnamed = sum(1 for st, *_, w in states if st not in NOW and not w)
     if unnamed:
         parts.append(f"{unnamed} other schedule(s) found are not checked (the lines above)")
-    head = (f"{run[0]} runs the helper" if len(run) == 1 else
-            f"{names_joined(run)} each run the helper, so {len(run)} schedules run it")
+    head = (f"{now[0]} runs the helper" if len(now) == 1 else
+            f"{names_joined(now)} each run the helper now, so {len(now)} schedules run it")
     line = "   fleet mode is set up: " + head + "".join("; " + p for p in parts)
-    if len(run) > 1:            # two runs can act on one session at the same break: one schedule is enough
-        others = [n for n in run if n != OWN_TIMER]
+    if len(now) > 1:            # two runs can act on one session at the same break: one schedule is enough
+        others = [n for n in now if n != OWN_TIMER]
+        steady = [name(w) for st, *_, w in states if st == "running" and w != "setup"]   # they start after a restart
         line += ". One schedule is enough."
-        if OWN_TIMER in run:
-            line += (f" To take {OWN_TIMER} off, so that {names_joined(others)} alone "
-                     f"{'runs' if len(others) == 1 else 'run'} the helper: {own_command('--undo')}, then this setup "
-                     f"again, {give_again(True)}. Taking off {names_joined(others)} instead is yours to do, in your own schedule.")
+        if OWN_TIMER in now and (own_said or steady):
+            line += (f" The step that takes {OWN_TIMER} off is above." if own_said else
+                     f" To take {OWN_TIMER} off, so that {names_joined(steady)} alone "
+                     f"{'runs' if len(steady) == 1 else 'run'} the helper: {own_command('--undo')}, then this setup "
+                     f"again, {give_again(True)}.")
+            line += f" Taking off {names_joined(others)} instead is yours to do, in your own schedule."
+        elif OWN_TIMER in now:          # the others will not start again after a restart: setup's own stays
+            line += f" Taking off {names_joined(others)} is yours to do, in your own schedule."
         else:
             line += " Taking one off is yours to do, in your own schedule."
     return line
@@ -1525,27 +1555,32 @@ def closing_line(states):
 
 def say_fleet_states(states, notes, steps, darwin):
     """Prints step 7's finding from fleet_states: what was read, the person's own additions, then "fleet mode is set
-    up" with the first look, or the one next step. True when set up. The same words on the plan and when applied
-    (G12.52). More than one schedule with one that runs the helper: setup's own unit gets its line and step when it
-    does not start the launcher, and one closing sentence names what runs the helper first."""
+    up" with the first look, or the one next step. True when set up (a schedule read as running). The same words on
+    the plan and when applied (G12.52). More than one schedule found: no step for setup's own unit makes a second
+    schedule or says setup writes its timer again; where one runs the helper, setup's own unit gets its line and
+    step when it is not read as starting the launcher, and one closing sentence names what runs the helper first."""
     for st, said, *_ in states:
         print(f"   the timer: {said}")
     for line in notes:
         print(line)
     running = [s for s in states if s[0] == "running"]
     if running and len(states) > 1:
-        carriers = names_joined([OWN_TIMER if w == "setup" else w for st, *_, w in running])
+        own_said = False
         for st, said, unit, wrote_now, who in states:
             if who == "setup" and st != "running":
+                carriers = names_joined([OWN_TIMER if w == "setup" else w for s2, *_, w in states
+                                         if s2 in NOW and w != "setup"])
                 print(setups_own_line(st, unit, wrote_now, darwin, steps.get(unit), carriers))
-        print(closing_line(states))
+                own_said = True
+        print(closing_line(states, own_said))
     elif running:
         print("   fleet mode is set up")
     if running:
         print(f"   First look at what it would do: {helper_command()}")
         return True
-    for st, said, unit, wrote_now, _ in states:
-        print(fleet_stop_line(st, unit, wrote_now, darwin, steps.get(unit)))
+    for st, said, unit, wrote_now, who in states:
+        print(fleet_stop_line(st, unit, wrote_now, darwin, steps.get(unit),
+                              take_off_step("") if who == "setup" and len(states) > 1 else None))
     return False
 
 
