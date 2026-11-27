@@ -703,13 +703,16 @@ def command_read_back(darwin, wrote_now):
     over = f"; {len(dropins)} drop-in file(s) are read over the file setup wrote" if dropins else ""
     again = look if (dropins or wrote_now) else \
         f"To write it again as this version writes it: {own_command('--undo')}, then this setup again"
+    # The first word is read from the file on disk, which may have been changed by hand: it is never printed as
+    # setup's; the words after it are setup's own.
     if len(run_as) != len(meant):
         return "differs", (f"the service's start line holds {len(run_as)} arguments where setup wrote {len(meant)}: "
-                           f"{shlex.quote(prog)} -I {shlex.quote(BIN)} --live{over}"), again, []
+                           f"its Python, -I, {shlex.quote(BIN)}, --live{over}"), again, []
     for i, (a, m) in enumerate(zip(run_as, meant)):
         if a != m:
-            return "differs", (f"argument {i + 1} of the service's start line is not setup's word "
-                               f"{shlex.quote(m)}{over}"), again, []
+            return "differs", ((f"argument {i + 1} of the service's start line is not setup's word {shlex.quote(m)}"
+                                if i else "argument 1 of the service's start line is not the Python the file setup "
+                                "wrote names") + over), again, []
     paths = [e.split("=", 1)[1] for e in envs if e.startswith("PATH=")]
     if paths != [path]:
         return "differs", ("its PATH, which setup wrote, is missing" if not paths else

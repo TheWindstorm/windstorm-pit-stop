@@ -5295,8 +5295,8 @@ def test_G12_49_fleet_mode_is_set_up_only_when_the_timers_command_line_is_read_w
     set_up = "fleet mode is set up" in said
     if case == "0.6.2's unit, a home with a space":
         assert not set_up and r.returncode == 1, said
-        assert ("the service's start line holds 5 arguments where setup wrote 4: /usr/bin/python3 -I "
-                f"{shlex.quote(launcher)} --live") in said, said
+        assert ("the service's start line holds 5 arguments where setup wrote 4: its Python, -I, "
+                f"{shlex.quote(launcher)}, --live") in said, said
         assert "Fleet mode is NOT set up: the timer runs, but its service does not start the launcher" in said
         assert "--undo, then this setup again" in said, said
     elif case == "a manager that cannot be asked":
@@ -5322,12 +5322,14 @@ def test_G12_49_fleet_mode_is_set_up_only_when_the_timers_command_line_is_read_w
 
 @pytest.mark.parametrize("case", ["0.6.2's unit, a home with a space", "the unit as this version writes it",
                                   "a manager that cannot be asked", "a person's drop-in over PATH",
-                                  "a person's unit of another shape"])
+                                  "a person's unit of another shape", "setup's marked unit changed by hand"])
 def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, case):
     """Row P86: over a unit setup wrote (an earlier version's too), setup --fleet without --apply, the plan, makes the
     same read-only read-back as the apply road and says the same finding and the same one next step, word for word;
     it never gives the line meant for a person's own timer for such a unit; it changes nothing in the home. A unit
-    setup did not write keeps the plan's words of before. The answers are systemd 255's, recorded (G12.49)."""
+    setup did not write keeps the plan's words of before. A unit that carries setup's mark but was changed by hand:
+    the plan's read-back gives the count and place, and no word of the changed file is printed as setup's. The
+    answers are systemd 255's, recorded (G12.49)."""
     home = tmp_path / ("pit space" if "space" in case else "home")
     stub, ud = tmp_path / "stub", home / ".config" / "systemd" / "user"
     (home / "proj").mkdir(parents=True)
@@ -5351,6 +5353,11 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
             "[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
             f"Environment=PATH=/usr/bin:/bin\nExecStart=/usr/bin/python3 -I {launcher} --live\nTimeoutStartSec=1200\n")
         answers = {"ExecStart": "lab-062.service, 0.6.2's shape"}
+    elif case == "setup's marked unit changed by hand":     # the mark kept, no record, a hand-made first word
+        ud.mkdir(parents=True)
+        (ud / "pit-stop-restart.service").write_text(
+            "[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
+            f"Environment=PATH=/usr/bin:/bin\nExecStart=/opt/hand-made/python3 -I {launcher} --live --hand\n")
     elif case == "a person's unit of another shape":
         ud.mkdir(parents=True)
         (ud / "my-fleet.service").write_text("[Service]\nExecStart=/bin/sh -c 'exec python3 -I \"$HOME/.claude/pit-stop/"
@@ -5370,9 +5377,15 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
     before = look()
     plan = setup()
     assert plan.returncode == 0 and look() == before, (plan.stdout[-1500:], sorted(set(look()) ^ set(before)))
-    applied = setup("--apply")
     step = lambda out: out[out.find("7. check"):]
     six = lambda out: out[out.find("6. timer"):out.find("7. check")]
+    if case == "setup's marked unit changed by hand":
+        assert ("the service's start line holds 5 arguments where setup wrote 4: its Python, -I, "
+                f"{shlex.quote(os.path.join(home, '.claude', 'pit-stop', 'bin', 'pit-stop-restart'))}, --live") \
+            in step(plan.stdout), plan.stdout
+        assert "hand-made" not in plan.stdout + plan.stderr, plan.stdout
+        return
+    applied = setup("--apply")
     if case == "a person's unit of another shape":          # not setup's: the plan's words of before
         assert "the timer:" not in step(plan.stdout) and "First look at what it would do:" in step(plan.stdout), plan.stdout
         assert "To follow plugin updates by itself, make its command:" in six(plan.stdout), plan.stdout
