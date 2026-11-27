@@ -5498,26 +5498,34 @@ def test_G12_18_the_walk_covers_what_decides_what_runs():
         shutil.rmtree(tmp_path)
 
 
-def _g12_50_home(base, name):
-    """A made home named NAME whose own folder another account can write (777), with an installed copy of Pit Stop
-    made where Pit Stop finds them (the plugin cache), one file in it left open, and the folders a path taken in
-    parts would name, each 777."""
-    home = base / name
+def _g12_50_home(base, name, where):
+    """A made home where NAME is the last part of the one path a chmod line names: WHERE "home", the home's own
+    folder (777, another account can write it); WHERE "copy", the version folder of an installed copy of Pit Stop
+    made where Pit Stop finds them (the plugin cache), one file in it left open. Also the folders a path taken in
+    parts would name, each 777. Returns the home, its .claude, the folder the line names, the file it opens
+    (None for the home) and those folders."""
+    home = base / (name if where == "home" else "h")
     cfg = home / ".claude"
-    copy = cfg / "plugins" / "cache" / name / "windstorm-pit-stop" / name
+    copy = cfg / "plugins" / "cache" / "m" / "windstorm-pit-stop" / (name if where == "copy" else "0.1.0")
     (copy / "scripts").mkdir(parents=True)
     (cfg / "pit-stop").mkdir()
-    (copy / "scripts" / "restart_at_break.py").write_text("")
-    for d in (cfg, cfg / "pit-stop", cfg / "plugins", cfg / "plugins" / "cache", cfg / "plugins" / "cache" / name,
-              copy.parent, copy, copy / "scripts"):
+    opened = copy / "scripts" / "restart_at_break.py"
+    opened.write_text("")
+    for d in (home, cfg, cfg / "pit-stop", cfg / "plugins", cfg / "plugins" / "cache", copy.parent.parent, copy.parent,
+              copy, copy / "scripts"):
         os.chmod(d, 0o755)
-    os.chmod(copy / "scripts" / "restart_at_break.py", 0o666)
-    os.chmod(home, 0o777)
-    decoys = [base / "pit", base / "space", cfg / "plugins" / "cache" / "pit"]
+    os.chmod(opened, 0o644)
+    if where == "home":
+        os.chmod(home, 0o777)
+        target, opened = home, None
+    else:
+        os.chmod(opened, 0o666)
+        target = copy
+    decoys = [base / "pit", base / "space"]
     for d in decoys:
         d.mkdir(exist_ok=True)
         os.chmod(d, 0o777)
-    return home, cfg, copy, decoys
+    return home, cfg, target, opened, decoys
 
 
 def _g12_50_roads(home, cfg, uid=None):
@@ -5559,54 +5567,54 @@ def _g12_50_commands(out):
 
 
 def test_G12_50_the_chmod_lines_hold_the_folders_path_as_one_value():
-    """G12.50 (i): through both roads (setup's own print and /pit-stop status), in made homes whose path holds a
-    space, an apostrophe, a semicolon, or a leading dash in its last part, each chmod line stands alone on its own
-    line and, handed to a shell exactly as printed, closes the named folder (the home; the installed copy, with
-    -R) and leaves every folder a path taken in parts would name as it was. A path the line cannot carry as one
-    value gets no command: a sentence names it shown changed, and nothing is run."""
+    """G12.50 (i): through both roads (setup's own print and /pit-stop status), in made homes where the last part
+    of the path a chmod line names holds a space, an apostrophe, a semicolon or a leading dash (the home's own
+    folder for the chmod go-w line; an installed copy's version folder for the chmod -R go-w line), the line stands
+    alone on its own line and, handed to a shell exactly as printed, closes that folder and leaves every folder a
+    path taken in parts would name as it was. A path the line cannot carry as one value gets no command: a sentence
+    names it shown changed, and no command is printed."""
     import shutil
     import stat
     mode = lambda p: stat.S_IMODE(os.lstat(p).st_mode)
     bad = []
-    for name in ("pit space", "pit's", "pit;x", "-pit"):
-        base = _open_home()
-        try:
-            home, cfg, copy, decoys = _g12_50_home(base, name)
-            opened = copy / "scripts" / "restart_at_break.py"
-            for road, out in _g12_50_roads(home, cfg).items():
-                alone, inline = _g12_50_commands(out)
-                cmds = alone or inline
-                if len(alone) != 2:                                             # the command alone on its own line
-                    bad.append((name, road, "not alone on a line", inline))
-                for c in cmds:
-                    subprocess.run(["sh", "-c", c], cwd=str(base), capture_output=True, timeout=30)
-                if (mode(home), mode(opened)) != (0o755, 0o644):                # that folder, closed
-                    bad.append((name, road, "not closed", oct(mode(home)), oct(mode(opened))))
-                if [mode(d) for d in decoys] != [0o777] * len(decoys):          # and nothing else
-                    bad.append((name, road, "another folder changed", [str(d) for d in decoys if mode(d) != 0o777]))
-                for d in decoys:
-                    os.chmod(d, 0o777)
-                os.chmod(home, 0o777)
-                os.chmod(opened, 0o666)
-        finally:
-            shutil.rmtree(base)
-    for name, shown in (("pit`x", "pit\\x60x"), ("pit$(x)", "pit\\x24(x)"), ("pit\nx", "pit\\x0ax"),
-                        ("pit\x1bx", "pit\\x1bx")):
-        base = _open_home()
-        try:
-            home, cfg, copy, decoys = _g12_50_home(base, name)
-            for road, out in _g12_50_roads(home, cfg).items():
-                said = [l for l in out.splitlines() if "Pit Stop gives no command for it" in l]
-                if "chmod" in out:
-                    bad.append((name, road, "a command printed", [l for l in out.splitlines() if "chmod" in l]))
-                if len(said) != 2 or not all(f"{base}/{shown}" in l and "character(s) shown as \\x and its code" in l
-                                             for l in said):
-                    bad.append((name, road, "not named shown changed"))
-                if "\x1b" in out or name in out:
-                    bad.append((name, road, "the name went out raw"))
-            assert mode(home) == 0o777
-        finally:
-            shutil.rmtree(base)
+    for where in ("home", "copy"):
+        for name in ("pit space", "pit's", "pit;", "-pit"):
+            base = _open_home()
+            try:
+                home, cfg, target, opened, decoys = _g12_50_home(base, name, where)
+                for road, out in _g12_50_roads(home, cfg).items():
+                    alone, inline = _g12_50_commands(out)
+                    if len(alone) != 1:                                         # the command alone on its own line
+                        bad.append((where, name, road, "not alone on a line", inline))
+                    for c in alone or inline:
+                        subprocess.run(["sh", "-c", c], cwd=str(base), capture_output=True, timeout=30)
+                    if mode(opened or target) != (0o644 if opened else 0o755):   # that folder, closed
+                        bad.append((where, name, road, "not closed", oct(mode(opened or target))))
+                    if [mode(d) for d in decoys] != [0o777] * len(decoys):      # and nothing else
+                        bad.append((where, name, road, "another folder changed",
+                                    [str(d) for d in decoys if mode(d) != 0o777]))
+                    for d in decoys:
+                        os.chmod(d, 0o777)
+                    os.chmod(opened or target, 0o666 if opened else 0o777)
+            finally:
+                shutil.rmtree(base)
+        for name, shown in (("pit``", "pit\\x60\\x60"), ("pit$()", "pit\\x24()"), ("pit\n", "pit\\x0a"),
+                            ("pit\x1b", "pit\\x1b")):
+            base = _open_home()
+            try:
+                home, cfg, target, opened, decoys = _g12_50_home(base, name, where)
+                for road, out in _g12_50_roads(home, cfg).items():
+                    said = [l for l in out.splitlines() if "Pit Stop gives no command for it" in l]
+                    if "chmod" in out:
+                        bad.append((where, name, road, "a command printed", [l for l in out.splitlines() if "chmod" in l]))
+                    if len(said) != 1 or not all(f"{target.parent}/{shown} ." in l and
+                                                 "character(s) shown as \\x and its code" in l for l in said):
+                        bad.append((where, name, road, "not named shown changed"))
+                    if "\x1b" in out or name in out:
+                        bad.append((where, name, road, "the name went out raw"))
+                assert mode(opened or target) == (0o666 if opened else 0o777)
+            finally:
+                shutil.rmtree(base)
     assert not bad, bad
 
 
