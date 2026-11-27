@@ -5390,6 +5390,29 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
         assert "systemctl --user cat pit-stop-restart.service" in said and "fleet mode is set up" not in said, said
 
 
+@pytest.mark.parametrize("image", ["macos-15-intel-15.7.9", "macos-15-15.8.2", "macos-26-intel-26.6.1", "macos-26-26.7.2"])
+def test_G12_49_launchd_parsed_reads_the_runner_images_prints(image):
+    """Row P76, the Mac's side, on the form GitHub's macOS runner images print (tests/fixtures/launchctl-print, the
+    bytes unchanged): each print read by launchd_parsed gives the agent's arguments whole and its own environment
+    block, never the inherited or default ones; what launchd adds there itself is what setup counts as launchd's.
+    Lines end at a line feed only: a value of the job's own that holds a character Python also breaks lines on
+    (U+2028, U+0085, U+001C) is read whole, and the entries after it are read too."""
+    import setup as su
+    with open(os.path.join(ROOT, "tests", "fixtures", "launchctl-print", image + ".txt"), encoding="utf-8",
+              newline="") as f:
+        text = f.read()
+    args, env = su.launchd_parsed(text)
+    assert args == ["/bin/sh", "-c", "sleep 300"], args
+    launchds = {"XPC_SERVICE_NAME", "OSLogRateLimit"} if image.startswith("macos-26") else {"XPC_SERVICE_NAME"}
+    assert env.pop("TRIAL_VALUE") == "made up" and set(env) == launchds, env
+    assert set(env) <= set(su.LAUNCHD_OWN_ENV) and "SSH_AUTH_SOCK" not in env and "PATH" not in env
+    for c in (" ", "\u0085", "\x1c"):
+        planted = text.replace("\tenvironment = {\n", f"\tenvironment = {{\n\t\tMADE_UP => a{c}b\n", 1)
+        args, env = su.launchd_parsed(planted)
+        assert args == ["/bin/sh", "-c", "sleep 300"] and env.get("MADE_UP") == f"a{c}b", (repr(c), env)
+        assert env.get("TRIAL_VALUE") == "made up" and "XPC_SERVICE_NAME" in env, (repr(c), env)
+
+
 def test_G12_49_launchd_answers_as_printed(tmp_path, monkeypatch):
     """Row P76, the Mac's side: the job file setup wrote, then `launchctl print` in the form the family recorded on
     macOS 15, 26 and 27 (11-25): the arguments one to a line after two tabs, the job's own environment block beside

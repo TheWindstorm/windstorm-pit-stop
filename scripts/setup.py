@@ -626,9 +626,10 @@ def systemd_read(unit=SERVICE):
 def launchd_parsed(text):
     """(arguments, environment) from `launchctl print` of a job: "\\targuments = {" then one argument to a line after
     two tabs; the job's own "\\tenvironment = {" with "\\t\\tNAME => value" (beside the inherited and default blocks,
-    which are not the job's). None for a block not there."""
+    which are not the job's). None for a block not there. A line ends at a line feed only: a value
+    holding another character Python breaks lines on is read whole."""
     args = env = block = None
-    for line in text.splitlines():
+    for line in text.split("\n"):
         if line == "\targuments = {":
             block, args = "args", []
         elif line == "\tenvironment = {":

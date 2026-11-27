@@ -1,0 +1,71 @@
+gui/501/org.example.trial.print = {
+	active count = 1
+	path = /private/var/folders/fq/bhsbs5bd52791c8x2z6s3dh40000gn/T/tmp.APe3Z0QrPO/org.example.trial.print.plist
+	type = LaunchAgent
+	state = running
+
+	program = /bin/sh
+	arguments = {
+		/bin/sh
+		-c
+		sleep 300
+	}
+
+	inherited environment = {
+		SSH_AUTH_SOCK => /var/run/com.apple.launchd.INP6cP9zaU/Listeners
+	}
+
+	default environment = {
+		PATH => /usr/bin:/bin:/usr/sbin:/sbin
+	}
+
+	environment = {
+		OSLogRateLimit => 64
+		TRIAL_VALUE => made up
+		XPC_SERVICE_NAME => org.example.trial.print
+	}
+
+	domain = gui/501 [100001]
+	asid = 100001
+	minimum runtime = 10
+	exit timeout = 5
+	runs = 1
+	pid = 7867
+	immediate reason = speculative
+	forks = 0
+	execs = 3
+	initialized = 1
+	trampolined = 1
+	started suspended = 0
+	proxy started suspended = 0
+	checked allocations = 0 (queried = 1)
+	checked allocations reason = no host
+	checked allocations flags = 0x0
+	last exit code = (never exited)
+
+	resource coalition = {
+		ID = 1276
+		type = resource
+		state = active
+		active count = 1
+		name = org.example.trial.print
+	}
+
+	jetsam coalition = {
+		ID = 1277
+		type = jetsam
+		state = active
+		active count = 1
+		name = org.example.trial.print
+	}
+
+	spawn type = daemon (3)
+	jetsam priority = 40
+	jetsam memory limit (active) = (unlimited)
+	jetsam memory limit (inactive) = (unlimited)
+	jetsamproperties category = daemon
+	jetsam thread limit = 32
+	cpumon = default
+
+	properties = runatload | inferred program | system service | tle system
+}
