@@ -679,6 +679,8 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 
 **G19.12 A run that ends early is never green (open).** CI's test job fails unless the runner's summary line and the gate's last line are both in its output, read by a step outside the test process; a planted `os._exit(0)` makes the job fail. Proof: `test_G19_12_a_run_that_ends_early_is_never_green`.
 
+**G19.13 Every row number the tree names is a row in the tree (open).** The test reads the README, the changelog, the plan, the rows' own words and the comments and messages in scripts and tests, and fails naming the number and the file for a row number PROMISES.json does not hold; row numbers only, present not built. Proof: `test_G19_13_every_row_number_the_tree_names_is_a_row`.
+
 ## Part 5. Milestones
 
 - M0 (released 0.1 to 0.5): G1, G2, G3, G4, G5, G7 (fleet), G8, G9, G10, G11, G12.

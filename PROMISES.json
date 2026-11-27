@@ -1142,6 +1142,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P91",
+   "codon": "G19.13",
+   "issue": 157,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.4",
+   "ship_in": "0.6.4",
+   "seen": "2026-11-27, read in the tests at the 0.6.3 build (no machine): no test reads the tree's own texts for the row numbers they name. A row number in the README, the changelog, the plan, a row's own words, or a comment or message in the scripts and tests is a pointer for whoever reads the release; nothing yet fails when that number is not a row in the same tree's PROMISES.json. A count made by hand at the 0.6.3 build found every named number present.",
+   "promise": "AIM: a person or an agent who reads a row's number in a release finds that row in the release. A test reads the tree's README, changelog, plan, the words of its own rows, and the comments and messages in its scripts and tests, and fails, naming the number and the file, for each row number that is not a row in that tree's PROMISES.json. LIMIT: row numbers only, not issue numbers and not codons (a codon is held by the plan's own check); it asks that a named row is present, not that it is built; a number in an older changelog entry counts too. A test holds it, seen red first on a planted number in each kind of text.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
