@@ -5325,7 +5325,8 @@ def test_G12_49_fleet_mode_is_set_up_only_when_the_timers_command_line_is_read_w
                                   "a person's unit of another shape", "setup's marked unit changed by hand",
                                   "0.6.2's unit and a crontab line, a home with a space",
                                   "setup's unit that differs and a person's unit",
-                                  "setup's unit as this version writes it and a crontab line"])
+                                  "setup's unit as this version writes it and a crontab line",
+                                  "setup's unit and a crontab that cannot be read"])
 def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, case):
     """Row P86: over a unit setup wrote (an earlier version's too), setup --fleet without --apply, the plan, makes the
     same read-only read-back as the apply road and says the same finding and the same one next step, word for word;
@@ -5335,7 +5336,8 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
     one schedule, setup's unit not starting the launcher and a person's schedule that does: both roads read the same
     schedules and say the same words; setup's unit gets its line and step, the screen never says "NOT set up", and
     the closing sentence names what runs the helper first. The step is walked exactly as printed: then only the
-    person's schedule runs the helper, and nothing of the person's changed. The answers are systemd 255's, recorded
+    person's schedule runs the helper, nothing of the person's changed, and restart.json is kept byte for byte (undo
+    keeps it while something else runs the helper, and where what else runs it could not be read). The answers are systemd 255's, recorded
     (G12.49)."""
     home = tmp_path / ("pit space" if "space" in case else "home")
     stub, ud = tmp_path / "stub", home / ".config" / "systemd" / "user"
@@ -5390,6 +5392,16 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
             (ud / "pit-stop-restart.service.d" / "10-own.conf").write_text("[Service]\nEnvironment=PATH=/opt/made-up/bin\n")
         if "crontab line" in case:          # the person adds a crontab line after setup wrote its unit
             (stub / "crontab").write_text(f"#!/bin/sh\n{cron_line}\n")
+        if "cannot be read" in case:        # crontab -l answers with words Pit Stop does not know as "none"
+            (stub / "crontab").write_text("#!/bin/sh\necho 'crontab: made-up refusal' >&2; exit 1\n")
+            rj = home / ".claude" / "pit-stop" / "restart.json"
+            kept = rj.read_bytes()
+            u = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--undo"],
+                               cwd=str(home / "proj"), env=env, capture_output=True, text=True, timeout=120)
+            assert u.returncode == 0 and rj.read_bytes() == kept, u.stdout
+            assert ("2. restart.json: kept ~/.claude/pit-stop/restart.json: whether something else still runs it "
+                    "could not be read: crontab\n") in u.stdout, u.stdout
+            return
     busctl_standin.plant(str(stub), answers)
     look = lambda: {str(f): (f.is_symlink(), f.read_bytes() if f.is_file() else None) for f in home.rglob("*")}
     before = look()
@@ -5415,8 +5427,10 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
             assert ("   fleet mode is set up: setup's own timer and a crontab line each run the helper, so 2 schedules "
                     "run it. One schedule is enough. To take setup's own timer off, so that a crontab line alone runs "
                     "the helper: ") in said, said
-            assert said.rstrip("\n").split("\n")[-2].endswith(", then this setup again. Taking off a crontab line "
-                                                               "instead is yours to do, in your own schedule."), said
+            assert said.rstrip("\n").split("\n")[-2].endswith(
+                ", then this setup again, giving again --fleet and any of --budget, --no-auto-tune, --no-self-update, "
+                "--no-tune-now or --days that you gave it before; restart.json is kept, so --plugin-updates holds. "
+                "Taking off a crontab line instead is yours to do, in your own schedule."), said
             assert not any(w in said for w in ("crontab -e", "crontab -r", "*/5")) and "setup's own timer:" not in said, said
         else:
             assert ("   setup's own timer: it runs, but its service does not start the launcher (the line above). To "
@@ -5424,6 +5438,8 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
             assert (f"   fleet mode is set up: {carrier} runs the helper; setup's own timer does not start the helper "
                     "(its line and step are above)\n") in said, said
         cmd = said.split(f"{carrier} alone runs the helper: ", 1)[1].split(", then this setup again", 1)[0]
+        rj = home / ".claude" / "pit-stop" / "restart.json"
+        kept = rj.read_bytes()
         walked = subprocess.run(["/bin/sh", "-c", cmd], cwd=str(home / "proj"), env=env, capture_output=True, text=True,
                                 timeout=120)
         assert walked.returncode == 0, walked.stdout + walked.stderr
@@ -5433,7 +5449,8 @@ def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, c
         assert not (ud / "pit-stop-restart.service").exists() and not (ud / "pit-stop-restart.timer").exists()
         assert step(applied.stdout).count("fleet mode is set up\n") == 1 and "setup's own timer" not in applied.stdout
         assert {f: b for f, (_, b) in look().items() if "my-fleet" in f} == theirs
-        assert (home / ".claude" / "pit-stop" / "restart.json").is_file(), applied.stdout
+        assert rj.read_bytes() == kept and f"5. {rj}: exists, left exactly as it is" in applied.stdout, applied.stdout
+        assert "2. restart.json: kept ~/.claude/pit-stop/restart.json: something else still runs it: " in walked.stdout
         return
     if case == "a person's unit of another shape":          # not setup's: the plan's words of before
         assert "the timer:" not in step(plan.stdout) and "First look at what it would do:" in step(plan.stdout), plan.stdout

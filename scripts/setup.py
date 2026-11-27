@@ -60,7 +60,8 @@ Nothing here needs sudo. --apply keeps what it found before each change in
 
 What --undo does (each step is listed as it goes):
   1. Stops and removes the timer it installed, and the launcher.
-  2. Removes the restart.json it wrote, if nobody has changed it since.
+  2. Removes the restart.json it wrote, if nobody has changed it since and nothing else still runs
+     the helper (then it is kept, named, as the launcher is).
   3. Puts "auto_tune" (and "budget") in config.json back as they were.
   4. Puts the marketplace entry in ~/.claude/settings.json back as it was
      (backed up first). After a setup from before 0.6.2, which kept no record,
@@ -725,7 +726,18 @@ def command_read_back(darwin, wrote_now):
 def rewrite_step():
     """The read-back's one step for a unit setup wrote that does not start the launcher, when no other schedule is
     found: undo, then setup again, which writes the unit as this version writes it."""
-    return f"To write it again as this version writes it: {own_command('--undo')}, then this setup again"
+    return (f"To write it again as this version writes it: {own_command('--undo')}, then this setup again, "
+            f"{give_again(False)}")
+
+
+def give_again(kept):
+    """G12.52: the options undo does not keep for setup's next run, named (setup's own words, never a value read
+    from a file): KEPT when undo kept restart.json (something else still runs the helper), so --plugin-updates
+    holds and no timer of setup's is written again."""
+    names = ("--budget, --no-auto-tune, --no-self-update, --no-tune-now or --days" if kept else
+             "--interval, --plugin-updates, --budget, --no-auto-tune, --no-self-update, --no-tune-now or --days")
+    return (f"giving again --fleet and any of {names} that you gave it before"
+            + ("; restart.json is kept, so --plugin-updates holds" if kept else ""))
 
 
 def own_unit_note(unit):
@@ -1232,7 +1244,20 @@ def undo(ledger=None, run_cmd=None):
         out.append(f"   launcher: removed {home(BIN)}")
     # 2. restart.json
     rj = rec.get("restart_json") if isinstance(rec.get("restart_json"), dict) else None
-    if rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256"):
+    # G12.52: while something else still runs the helper, its settings stay (the launcher's judge and words); where
+    # what else runs it could not be read, they stay too, said so, never removed on that answer
+    unread = [u for u in schedule_read()[1] if u not in (svc, tmr, PLIST)] if rj and not others else []
+    if rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256") and others:
+        out.append(f"2. restart.json: kept {home(rj['path'])}: something else still runs it: "
+                   f"{', '.join(one_line(home(h))[0] for h in others)}"
+                   + (" (a name holds a character shown as \\x and its code)" if any(one_line(h)[1] for h in others)
+                      else ""))
+    elif rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256") and unread:
+        out.append(f"2. restart.json: kept {home(rj['path'])}: whether something else still runs it could not be "
+                   f"read: {', '.join(one_line(home(u))[0] for u in unread)}"
+                   + (" (a name holds a character shown as \\x and its code)" if any(one_line(u)[1] for u in unread)
+                      else ""))
+    elif rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256"):
         os.remove(rj["path"])
         out.append(f"2. restart.json: removed {home(rj['path'])} (setup wrote it; unchanged since)")
     elif rj and os.path.exists(rj.get("path") or ""):
@@ -1463,7 +1488,7 @@ def setups_own_line(st, unit, wrote_now, darwin, step, carriers):
     if st == "differs":
         if step == rewrite_step():
             step = (f"To take it off, so that {carriers} alone runs the helper: {own_command('--undo')}, then this "
-                    f"setup again")
+                    f"setup again, {give_again(True)}")
         return f"   {OWN_TIMER}: it runs, but its service does not start the launcher (the line above). {step}"
     if st == "cmd-unread":
         return (f"   {OWN_TIMER}: it runs, but the command its service holds could not be read (the line above), so "
@@ -1492,7 +1517,7 @@ def closing_line(states):
         if OWN_TIMER in run:
             line += (f" To take {OWN_TIMER} off, so that {names_joined(others)} alone "
                      f"{'runs' if len(others) == 1 else 'run'} the helper: {own_command('--undo')}, then this setup "
-                     f"again. Taking off {names_joined(others)} instead is yours to do, in your own schedule.")
+                     f"again, {give_again(True)}. Taking off {names_joined(others)} instead is yours to do, in your own schedule.")
         else:
             line += " Taking one off is yours to do, in your own schedule."
     return line
