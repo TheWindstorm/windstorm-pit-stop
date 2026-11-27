@@ -1100,6 +1100,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P88",
+   "codon": "G12.53",
+   "issue": 154,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.4",
+   "ship_in": "0.6.4",
+   "seen": "2026-11-27, read in the 0.6.3 build's code (no machine). Row P79's stop, no command for a path the line should not carry, holds only setup's two chmod lines. Twelve other places in setup and the restart helper print a command that holds a path read at run time, quoted for the shell, without that stop: the helper's command, in the first look (two places) and in the line for a person's own timer; setup's own command, in the undo step of the read-back and in the step to run setup again; four launchctl lines that name the Mac's job file; the line to see a person's file that cannot be read; and the helper's two lines of steps for a `restart.json` that cannot be read (three commands).",
+   "promise": "AIM: one function makes every line of setup and the helper that prints a command holding a path read at run time. It gives the command, alone on its own line, only when each path can be carried as one shell word with none of the characters row P79 stops; otherwise no command: the step in words, with the path shown changed as row P79 shows it and said to be shown changed. A test holds it, seen red first: each such line, with a planted path ending in each character row P79 stops, gives no command; with an ordinary path and one with a space, the command as today, taken by a shell as printed. A second test reads the code: every line that prints such a command goes through that function.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

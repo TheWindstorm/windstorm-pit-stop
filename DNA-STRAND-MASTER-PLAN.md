@@ -579,6 +579,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.52 Setup's plan reads back a unit setup wrote, as applying it does (open).** Over a unit setup wrote, an earlier version's too, the plan makes the same read-only read-back as the apply road and says the same finding and the same one next step; it never gives the line meant for a person's own timer for such a unit, and it changes nothing. Proof: `test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does`.
 
+**G12.53 Every printed command that holds a path goes through one function (open).** Each line of setup and the helper that prints a command holding a path read at run time gives the command only when each path can be carried as one shell word with none of the characters G12.50 stops; otherwise the step in words, the path shown changed and said to be so. Proof: `test_G12_53_every_printed_command_with_a_path_has_one_stop`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.
