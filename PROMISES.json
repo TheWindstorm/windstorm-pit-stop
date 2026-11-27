@@ -1114,6 +1114,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P89",
+   "codon": "G4.49",
+   "issue": 155,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.4",
+   "ship_in": "0.6.4",
+   "seen": "2026-11-27, read in the code (no machine). Nothing holds two runs of the restart helper apart: `restart_at_break.py` takes no lock over a run, and its only process-id file is the one for the tune it starts. The restart cooldown is a record each run reads early and writes later, with nothing between the two, so two runs that start together can both pass it and both act on one session at the same break; the rule against two commands into one session holds within one run only. Claude Code's update and the plugin updates could also run twice at once. Two ways reach this today: two schedules for the helper (setup's own timer and a person's crontab line or own unit, both running), and one crontab schedule whose run outlasts its interval, since cron starts a line at each interval whether or not the last run ended and a run's longest road by the helper's own limits is 960 seconds. A systemd timer or a launchd job does not start a run while its last one still runs.",
+   "promise": "AIM: one run of the helper at a time for one Pit Stop home. A run that starts while another is going changes nothing in any session, starts no update, and logs one line. LIMIT: the kernel holds the lock for the life of the process, so a crash or a restart leaves none behind. A lock that cannot be made or read is the third answer: that run types nothing and its log line says so. A run that has held the lock longer than a bound is named by status, never silent. A line about the holder names its process id and command name only. The ordinary single run's steps and their order stay. A test holds it, seen red first: two runs started together against one stand-in session act once; a lock that cannot be made types nothing; a run that ends by a crash leaves no lock. Proven on a real machine.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []

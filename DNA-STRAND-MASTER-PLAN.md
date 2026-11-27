@@ -313,6 +313,8 @@ The helper `scripts/restart_at_break.py` types `/compact`, `/restart` or a short
 
 **G4.48 Status says when the helper's last run failed (open).** While the timer or launch agent setup wrote failed at its last run, status never says nothing needs the person: it names that run and the one next step; a read that cannot be made is said as that; none of the service manager's or the program's own words is printed. Proof: `test_G4_48_status_says_when_the_helpers_last_run_failed`.
 
+**G4.49 One run of the helper at a time (open).** For one Pit Stop home, a run that starts while another is going changes nothing in any session, starts no update, and logs one line; the kernel holds the lock for the life of the process; a lock that cannot be made or read types nothing and says so; a run holding it past a bound is named by status. Proof: `test_G4_49_one_run_of_the_helper_at_a_time`.
+
 ### G5 Hook reload
 
 With `reload_plugins: true` in `restart.json`, the helper types `/reload-plugins` (no turn starts) into a session whose Pit Stop hooks are missing or of the wrong hook generation, at a break, and confirms it from the screen.
