@@ -583,6 +583,8 @@ The `/pit-stop` skill's frontmatter avoids what strict YAML parsers reject (G12.
 
 **G12.53 Every printed command that holds a path goes through one function (open).** Each line of setup and the helper that prints a command holding a path read at run time gives the command only when each path can be carried as one shell word with none of the characters G12.50 stops; otherwise the step in words, the path shown changed and said to be so. Proof: `test_G12_53_every_printed_command_with_a_path_has_one_stop`.
 
+**G12.54 A settings file Pit Stop writes keeps its mode, and a link stays a link (open).** The account's `settings.json` and a folder's `settings.local.json` keep their mode when Pit Stop writes them; a symbolic link is written through to its target and stays a link; a link to a missing target is not written and the line says so; the backup line says where the copy is. Proof: `test_G12_54_a_settings_file_keeps_its_mode_and_a_link_stays_a_link`.
+
 ### G13 Self-update for everyone (open)
 
 Every install, not only fleet mode, moves to a new Pit Stop release by itself and tells the person once.

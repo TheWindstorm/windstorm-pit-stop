@@ -1128,6 +1128,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P90",
+   "codon": "G12.54",
+   "issue": 156,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.4",
+   "ship_in": "0.6.4",
+   "seen": "2026-11-26, seen once, on a stock Ubuntu 24.04 guest with Claude Code 2.1.332: when 0.6.2's setup switched Pit Stop's own updates on, it rewrote `~/.claude/settings.json` from mode 664 to mode 644. 0.6.1's setup, on a second stock guest the next day, kept mode 664. Read in the code at 0.6.2 and at the 0.6.3 build: the write takes the file's mode and drops group and other write from it; it writes a temporary file beside the path and renames it over the path, so where the path is a symbolic link, the link is replaced by a plain file and the file it pointed to keeps its old content; the backup copy is made beside the link, from the content it pointed to. The same write is used for a folder's `settings.local.json` when tuning. Not tried on a machine: a linked settings file.",
+   "promise": "AIM: a person's settings file that Pit Stop writes (the account's `settings.json`, a folder's `settings.local.json`) keeps its mode, and a symbolic link stays a link: the change is written to the file it points to, and the link is left as it is. A link whose target is not there is not written: the line says not changed and why, no file is made at the missing target, and the link stays. The line that names the backup copy says where it is. LIMIT: Pit Stop's own files keep the modes they have today; undo puts back the content it found, and the mode with it. A test holds it, seen red first: a file of mode 664 keeps 664; a linked file stays a link and its target holds the change; a link to a missing target is not written; each through setup's road, tuning's road and undo.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
