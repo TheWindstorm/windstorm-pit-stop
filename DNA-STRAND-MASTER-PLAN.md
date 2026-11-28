@@ -681,6 +681,8 @@ A codon or a PROMISES row counts as proven only by a test the runner collected a
 
 **G19.13 Every row number the tree names is a row in the tree (open).** The test reads the README, the changelog, the plan, the rows' own words and the comments and messages in scripts and tests, and fails naming the number and the file for a row number PROMISES.json does not hold; row numbers only, present not built. Proof: `test_G19_13_every_row_number_the_tree_names_is_a_row`.
 
+**G19.14 The repository refuses a merge into main while a required check fails (open).** GitHub itself refuses to merge a pull request into main while a required check fails or has not run; the maintainer's way back, a pull request that puts a catalog pin back (red by design), is merged by the maintainer's hand and is said in the same words. Proof: `test_G19_14_main_refuses_a_merge_while_a_required_check_fails`.
+
 ## Part 5. Milestones
 
 - M0 (released 0.1 to 0.5): G1, G2, G3, G4, G5, G7 (fleet), G8, G9, G10, G11, G12.

@@ -1156,6 +1156,20 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P92",
+   "codon": "G19.14",
+   "issue": 158,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.4",
+   "ship_in": "0.6.4",
+   "seen": "2026-11-28, read on GitHub (no machine): the repository's main branch had no rule that requires the checks, and an open pull request whose test jobs had failed was reported as mergeable. A row's promise said a pull request could not merge while a check failed; nothing enforced that.",
+   "promise": "AIM: the repository itself refuses to merge a pull request into main while a required check fails or has not run. LIMIT: the maintainer's own way back stays, said in the same words: a pull request that puts a catalog pin back is red by design and is merged by the maintainer's hand, the hour a pin has to go back. The setting is the maintainer's act; its read-back is the maintainer's; how a suite holds it is proposed with 0.6.4's pull request.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": ""
   }
  ],
  "declined": []
