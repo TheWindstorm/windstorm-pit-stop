@@ -6,7 +6,8 @@
   "When it has been seen to work on a real machine: say which machine, which version and when in 'proven'.",
   "'ship_in' moves only with a reason in 'moved_why'. A row whose owner is 'person' was seen by the person the plugin is for, on their own machine: its date moves only by their word, restated in 'moved_by_person'.",
   "A row is never deleted. A promise that turns out wrong is closed by a row that says why.",
-  "A lesson that was heard and not taken goes under 'declined' with the reason, so that nothing is dropped without a word."
+  "A lesson that was heard and not taken goes under 'declined' with the reason, so that nothing is dropped without a word.",
+  "'filed' holds text only by the maintainer's word or the owner's, beginning \"By the maintainer's word, \" or \"By the owner's word, \" with the date: the row waits for a real report. A filed row is kept and is due in no version, whatever 'ship_in' says; if it names a test, the test must still pass, and 'proven' is not asked of it. When a real report or a real sighting comes, 'filed' is emptied in the commit that gives the row its version or its 'proven' line."
  ],
  "rows": [
   {
@@ -18,7 +19,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G9_7_checkup_names_an_older_install_that_wins",
-   "proven": "",
+   "proven": "2026-11-25, seen once, on a stock Ubuntu 24.04.5 guest with Claude Code 2.1.332, at a 0.6.2 build head whose code is the v0.6.2 tag's. An account-wide install was older than a folder's own. The checkup, run from that folder and from a folder inside it, named the older install as the one sessions load and gave the one update command; typed as printed, it updated it, and the checkup then said nothing. From the home folder it said nothing. A folder's own older install was named with the one uninstall command; typed as printed, it was uninstalled. Log sha256 96900ec9b487a289.... Steered: the catalog was served from a local copy; the newer copy was a made copy whose plugin.json alone said 0.6.3; a second catalog was made for the run; the checkup was run by hand, so which copy a live session loads was not watched.",
    "issue": 28,
    "moved_why": "",
    "moved_by_person": ""
@@ -46,7 +47,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G12_7_setup_undo_puts_back_what_apply_changed",
-   "proven": "",
+   "proven": "2026-11-25, on a stock Ubuntu 24.04.5 guest (systemd 255) with Claude Code 2.1.332, at a 0.6.2 build head whose code is the v0.6.2 tag's. After setup's apply with fleet mode, undo stopped and removed the timer, its service and the launcher, removed restart.json and config.json, which setup made, put the catalog entry back as it was, and named the history it left; systemd then knew no such timer (log 8faaac139c4c6f2e...). After an apply without fleet mode, a value changed by hand since was left as set and named (log 96900ec9b487a289...). On macOS 27.2.1, in a clean test account at the v0.6.2 tag's commit, undo removed the launch agent's file and named the four history files it left (log 765c757cdf0a781b...). The settings backups it leaves are not named by undo: row P46. Steered: the catalog was served from a local copy pinned to the head.",
    "issue": 30,
    "moved_why": "",
    "moved_by_person": ""
@@ -63,7 +64,8 @@
    "proven": "",
    "issue": 34,
    "moved_why": "",
-   "moved_by_person": ""
+   "moved_by_person": "",
+   "filed": "By the maintainer's word, 2026-11-28: waits for a real report. Built and tested; the limit taken from a model's id has been seen only on the maintainer's own machines (a read-only run on real session history), not in a clean account."
   },
   {
    "id": "P5",
@@ -88,7 +90,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G3_9_optimize_apply_keeps_three_backups",
-   "proven": "",
+   "proven": "2026-11-28, seen once, on a stock Ubuntu 24.04.5 guest, Pit Stop 0.6.2 installed from GitHub: in a made folder holding a settings file of the person's, the optimizer run by hand with --apply five times, a second apart, left one, two, three, three and three backups, the newest three, and the person's own key stayed in the file. Steered: a session history was planted in the form the suite plants it; with none, the optimizer said there was no session history and wrote nothing. Log sha256 345f40901e691601...",
    "issue": 40,
    "moved_why": "",
    "moved_by_person": ""
@@ -102,7 +104,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G1_16_readme_says_claude_code_asks_before_the_window",
-   "proven": "",
+   "proven": "On GitHub's runner (image ubuntu-24.04), at the v0.6.2 tag's commit: run 45611324474, job 139195298796 (image 20261116.376.1, Python 3.13.18, log sha256 e5406f2a6b4afb1b...) and job 139195299262 (image 20261116.133.1, Python 3.10.22, log 4b4557ca74e6c670...); at the later head 746eab2: run 45921275413, job 140252331933 (image 20261122.23.1, Python 3.13.18, log 21e578f070403db4...) and job 140252332190 (image 20261116.133.1, Python 3.10.22, log 8aaba2ef909f7a40...). In each job test_G1_16_readme_says_claude_code_asks_before_the_window prints PASSED, and the gate prints \"whole run; 193 of 193 named proofs passed; 0 problems\".",
    "issue": 44,
    "moved_why": "",
    "moved_by_person": ""
@@ -131,7 +133,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G7_6_every_catalog_entry_installs_over_https_with_no_key",
-   "proven": "",
+   "proven": "2026-11-28, seen once, on a stock Ubuntu 24.04.5 guest with no GitHub key, no ssh agent and no git settings: Claude Code 2.1.280 from Anthropic's installer (its own updater held off for the run: steered). The README's two install lines, typed as they stand, added the catalog over https and installed Pit Stop, and the catalog's other entry installed too; the registry named Pit Stop 0.6.2 at the v0.6.2 tag's commit and Pit Board 0.1.3 at its tag's commit. Log sha256 345f40901e691601... Not seen before the tag.",
    "moved_why": "",
    "moved_by_person": ""
   },
@@ -145,7 +147,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G7_7_pit_stops_catalog_entry_pins_a_release_tag",
-   "proven": "",
+   "proven": "2026-11-26, after the v0.6.2 tag. On a stock Ubuntu 24.04.5 guest with Claude Code 2.1.332, the catalog added from GitHub over https with no key gave Pit Stop's entry the tag v0.6.2 at its own commit, and the update went from 0.6.1 to 0.6.2 (log a7ae6afc2f85ffa0...; steered: the catalog's clone was put back to before the pin, so the update could be seen). On macOS 27.2.1 in a clean test account, a fresh install's registry row named 0.6.2 at the tag's commit (log eec06ef745b9c043...). On GitHub's runner, the run on the tag's push failed test_G7_7 while the tag waited for its pin (run 45829019724, jobs 139940545761 and 139940546181), and the pin's pull request ran green (run 45829691090). Not seen before the tag.",
    "moved_why": "",
    "moved_by_person": ""
   },
@@ -159,20 +161,20 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.4",
    "test": "",
-   "proven": "",
+   "proven": "2026-11-27, seen once, on a stock Ubuntu 24.04.5 guest, in a home of its own, walked by a script with no model session (sha256 bb97c304895427cf...), with Claude Code 2.1.321 from Anthropic's installer. Steered, each step: the walk added the catalog from GitHub and set its local copy back by hand to the commit that listed Pit Stop as './' with plugin.json 0.6.1 (e695537); 0.6.1 was installed from that entry (registry row 0.6.1 at e695537f; its scripts/setup.py, sha256 e1fe113b9cf7bf47..., the same bytes as tag v0.6.1's); that setup.py was run by hand with --apply --no-tune-now (setup.py's exit 0), not typed in a session, so pit-stop/config.json and the catalog's autoUpdate were in place. Then the README's two update lines, typed by the script as written: the catalog line fetched GitHub's catalog afresh (its head 1ebf1994, Pit Stop pinned to v0.6.2) and the plugin line said \"updated from 0.6.1 to 0.6.2\" (Claude Code's exit 0 for each). After them: one registry row under the same key, version 0.6.2 at 9597d25a, its install time the same as before (no reinstall); settings.json the same bytes and mode 664 as before; pit-stop/config.json the same bytes, mode 600; Claude Code marked the 0.6.1 cache folder as left. An install of 0.1.4, the same day, on the same guest, in a home of its own, walked by a second script with no model session (sha256 9b5e74f365e73b35...), with Claude Code 2.1.321 from Anthropic's installer. Steered, each step: the walk set the catalog's local copy back by hand to the commit that listed Pit Stop as './' at 0.1.4 (85274ea), installed 0.1.4 from that entry (registry row 0.1.4 at 85274eae), wrote a made-up settings.json (5 keys, mode 664), and started one Claude Code process in tmux at its first screen, not signed in, nothing pressed. Then the README's two update lines, typed by the script as written: the catalog line fetched GitHub's catalog afresh (head 1ebf1994) and the plugin line said \"updated from 0.1.4 to 0.6.2\" (Claude Code's exit 0 for each). After them: one registry row under the same key, version 0.6.2 at 9597d25a; settings.json the same bytes and mode 664 as before; no pit-stop/config.json before or after; the running process the same one as before.",
    "moved_why": "The proof is a test that needs the conformance kit's interactive session (G16.1, open), and no honest test of it can be written before the 0.6.2 tag: moved once, on the maintainer's ruling of 2026-11-24. The README's two update lines ship in 0.6.2. Seen by hand, not by a test: on a stock virtual machine on 2026-11-23, against a copy of the catalog, installs of 0.1.4, 0.6.1 at its tag and 0.6.1 at a later commit each reached the candidate of that day with the two update lines and kept their settings; that candidate had no fleet launcher or timer in place, no session was started through it, and no way back was walked. For 0.6.4 the kit's session and the test are built, or the row goes back to the maintainer before 0.6.4's first cut. Renumbered on 2026-11-25: a cure release took the number 0.6.3; the day this row is due did not change.",
    "moved_by_person": "maintainer"
   },
   {
    "id": "P12",
-   "seen": "2026-11-22, a clean test account, Claude Code 2.1.280: with a stale cache folder labelled 0.6.1 from another commit present, 'claude plugin update' from 0.1.4 to 0.6.1 printed 'updated from 0.1.4 to 0.6.1', and installed_plugins.json named the new commit, but the folder held the old commit's files byte for byte. A fresh install overwrote such a folder. The same on Claude Code 2.1.330 (macOS, a clean test account): 3 of 51 files differed from the commit the registry named.",
-   "promise": "Every plugin update Pit Stop runs compares the cache folder's files with the commit the registry names. When they differ, Pit Stop reports it and stops there: it does not repair another program's cache by itself, and the line it prints gives the person the two commands that put it right (uninstall, then install, of that plugin at that scope). Seen on a real machine before the release that carries it is tagged.",
+   "seen": "2026-11-22, a clean test account, Claude Code 2.1.280: with a stale cache folder labelled 0.6.1 from another commit present, 'claude plugin update' from 0.1.4 to 0.6.1 printed 'updated from 0.1.4 to 0.6.1', and installed_plugins.json named the new commit, but the folder held the old commit's files byte for byte. A fresh install overwrote such a folder. The same on Claude Code 2.1.330 (macOS, a clean test account): 3 of 51 files differed from the commit the registry named. On 2026-11-28 it was read on a stock guest that an install from GitHub kept one commit in the catalog's copy, so the compare never ran there; this row had said every update compares, so that sentence is made true here, and the cure is row P62's.",
+   "promise": "Every plugin update Pit Stop runs compares the cache folder's files with the commit the registry names, where the catalog's copy on the machine holds that commit; where it does not (seen on Claude Code 2.1.332: an install from GitHub kept one commit), the folder is logged as not checked, and row P62 is the cure. When they differ, Pit Stop reports it and stops there: it does not repair another program's cache by itself, and the line it prints gives the person the two commands that put it right (uninstall, then install, of that plugin at that scope). Seen on a real machine before the release that carries it is tagged.",
    "codon": "G7.9",
    "owner": "maintainer",
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G7_9_update_checks_the_cache_folder_against_the_registry_commit",
-   "proven": "",
+   "proven": "2026-11-28, seen once, on a stock Ubuntu 24.04.5 guest with Claude Code 2.1.332, Pit Stop 0.6.2 installed by the README's lines from GitHub at the v0.6.2 tag's commit. As installed, the catalog's clone held only its newest commit, and the helper's update step logged the cache folder as not checked (row P62). Steered: the clone was given its whole history and one file in the cache folder was changed; the step then said the folder does not hold the registry's commit, one of 60 files differing, with the two commands; it repaired nothing, said it again at the next step and called the notify command once. The two commands, typed as printed, put the folder right, and the next step said nothing. Also steered: the update step was called by itself (no session on the guest), with plugin updates switched on in the helper's settings file by hand. Log sha256 87b2185ce78c94ce.... Not seen before the tag.",
    "issue": 58,
    "moved_why": "",
    "moved_by_person": ""
@@ -186,7 +188,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G19_1_a_built_proof_that_did_not_pass_fails_the_whole_run",
-   "proven": "",
+   "proven": "On GitHub's runner (image ubuntu-24.04), at the v0.6.2 tag's commit: run 45611324474, job 139195298796 (image 20261116.376.1, Python 3.13.18, log sha256 e5406f2a6b4afb1b...) and job 139195299262 (image 20261116.133.1, Python 3.10.22, log 4b4557ca74e6c670...); at the later head 746eab2: run 45921275413, job 140252331933 (image 20261122.23.1, Python 3.13.18, log 21e578f070403db4...) and job 140252332190 (image 20261116.133.1, Python 3.10.22, log 8aaba2ef909f7a40...). In each job test_G19_1_a_built_proof_that_did_not_pass_fails_the_whole_run prints PASSED, and the gate prints \"whole run; 193 of 193 named proofs passed; 0 problems\". Seen red: the test's own ten planted cases, each failing a whole run in a world of its own, ran in each job.",
    "moved_why": "",
    "moved_by_person": "",
    "issue": 62
@@ -200,21 +202,21 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G19_2_no_test_file_defines_a_name_twice",
-   "proven": "",
+   "proven": "On GitHub's runner (image ubuntu-24.04), at the v0.6.2 tag's commit: run 45611324474, job 139195298796 (image 20261116.376.1, Python 3.13.18, log sha256 e5406f2a6b4afb1b...) and job 139195299262 (image 20261116.133.1, Python 3.10.22, log 4b4557ca74e6c670...); at the later head 746eab2: run 45921275413, job 140252331933 (image 20261122.23.1, Python 3.13.18, log 21e578f070403db4...) and job 140252332190 (image 20261116.133.1, Python 3.10.22, log 8aaba2ef909f7a40...). In each job test_G19_2_no_test_file_defines_a_name_twice prints PASSED, and the gate prints \"whole run; 193 of 193 named proofs passed; 0 problems\". Seen red: the test's own planted file that defines one name twice is reported, in each job.",
    "moved_why": "",
    "moved_by_person": "",
    "issue": 62
   },
   {
    "id": "P15",
-   "seen": "2026-11-22: the plan check (codon_check.py --strict --proofs tests), which ties each codon to its proof, ran only by hand; .github/workflows/tests.yml ran only pytest, so a codon whose proof was missing could merge.",
-   "promise": "Every gate that ties codons or rows to tests runs in CI on every pull request, and a pull request cannot merge while one of them fails. Seen in CI's checks on a pull request before the release that carries it is tagged.",
+   "seen": "2026-11-22: the plan check (codon_check.py --strict --proofs tests), which ties each codon to its proof, ran only by hand; .github/workflows/tests.yml ran only pytest, so a codon whose proof was missing could merge. On 2026-11-28 it was read on GitHub that nothing stopped a merge while a check failed; this row had said a pull request could not merge then, so that sentence is taken out here, and the stop itself is row P92's.",
+   "promise": "Every gate that ties codons or rows to tests runs in CI on every pull request. Seen in CI's checks on a pull request before the release that carries it is tagged.",
    "codon": "G19.4",
    "owner": "maintainer",
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G19_4_ci_runs_the_plan_check",
-   "proven": "",
+   "proven": "On GitHub's runner (image ubuntu-24.04), at the v0.6.2 tag's commit: run 45611324474, job 139195298796 (image 20261116.376.1, Python 3.13.18, log sha256 e5406f2a6b4afb1b...) and job 139195299262 (image 20261116.133.1, Python 3.10.22, log 4b4557ca74e6c670...); at the later head 746eab2: run 45921275413, job 140252331933 (image 20261122.23.1, Python 3.13.18, log 21e578f070403db4...) and job 140252332190 (image 20261116.133.1, Python 3.10.22, log 8aaba2ef909f7a40...). In each job test_G19_4_ci_runs_the_plan_check prints PASSED, and the gate prints \"whole run; 193 of 193 named proofs passed; 0 problems\". On the pull request right after the tag, run 45829691090: jobs 139942928725 (Python 3.9.25, image 20261122.23.1, log 32b5e1d939670cbd...), 139942928906 (Python 3.10.22, image 20261116.376.1, log 365a0656ed75ca18...) and 139942928986 (Python 3.13.18, image 20261116.376.1, log 39d73337a61cf127...) each print test_G19_4_ci_runs_the_plan_check PASSED; its release-check job was skipped, as that job runs only on a release branch's pull request.",
    "issue": 62,
    "moved_why": "",
    "moved_by_person": ""
@@ -229,7 +231,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G7_10_one_version_in_every_place_and_new_code_gets_a_new_one",
-   "proven": "",
+   "proven": "On GitHub's runner (image ubuntu-24.04), at the v0.6.2 tag's commit: run 45611324474, job 139195298796 (image 20261116.376.1, Python 3.13.18, log sha256 e5406f2a6b4afb1b...) and job 139195299262 (image 20261116.133.1, Python 3.10.22, log 4b4557ca74e6c670...); at the later head 746eab2: run 45921275413, job 140252331933 (image 20261122.23.1, Python 3.13.18, log 21e578f070403db4...) and job 140252332190 (image 20261116.133.1, Python 3.10.22, log 8aaba2ef909f7a40...). In each job test_G7_10_one_version_in_every_place_and_new_code_gets_a_new_one prints PASSED, and the gate prints \"whole run; 193 of 193 named proofs passed; 0 problems\". On the tag's own push the test failed while the tag waited for its pin (run 45829019724), and it passed on the pin's pull request (run 45829691090).",
    "moved_why": "",
    "moved_by_person": ""
   },
@@ -271,7 +273,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G12_8_nothing_runs_once_the_plugin_is_gone",
-   "proven": "2026-11-23, on a stock Ubuntu 24.04.5 virtual machine with Claude Code 2.1.330 and no sign-in, from this row's code at the pull request's head 0b06cc6 (scripts/ there differs from the merged release branch only in gone_line(), which a timer's run through the launcher does not reach): fleet setup installed the timer; after Claude Code's own `claude plugin uninstall`, the timer's next passes started nothing and logged that Pit Stop is not installed, with `systemctl --user disable --now pit-stop-restart.timer`; that command, run as printed, exited 0 and the timer was gone. Installing the same version again cleared `.orphaned_at` and the helper ran again. Also on a Linux test account with Claude Code 2.1.280: the marker was cleared on the same-version reinstall, twice. Not seen on macOS (no command is printed there).",
+   "proven": "2026-11-23, on a stock Ubuntu 24.04.5 virtual machine with Claude Code 2.1.330 and no sign-in, from this row's code at the pull request's head 0b06cc6 (scripts/ there differs from the merged release branch only in gone_line(), which a timer's run through the launcher does not reach): fleet setup installed the timer; after Claude Code's own `claude plugin uninstall`, the timer's next passes started nothing and logged that Pit Stop is not installed, with `systemctl --user disable --now pit-stop-restart.timer`; that command, run as printed, exited 0 and the timer was gone. Installing the same version again cleared `.orphaned_at` and the helper ran again. Also on a Linux test account with Claude Code 2.1.280: the marker was cleared on the same-version reinstall, twice. On macOS, 2026-11-26, on a Mac test account (macOS 27.2.1, Apple silicon) with Claude Code 2.1.332 from Anthropic's installer and Pit Stop 0.6.2 from GitHub's own catalog (9597d25a), under the launch agent 0.6.2's fleet setup wrote (its log's sha256 bc712071e6c5cba2...): after Claude Code's own `claude plugin uninstall` (exit 0), the agent's next two passes, nobody starting them (launchd's own print: runs 1 to 3, last exit code 0), each started nothing and logged that Pit Stop is not installed, naming the README's \"Leaving Pit Stop\" (no command is printed there), and a sampler of the account's own processes saw no helper run; 0.6.2's undo then took the agent off. Steered: the one session there sat at Claude Code's first screen, not signed in, and its registry row was written by hand.",
    "moved_why": "",
    "moved_by_person": ""
   },
@@ -285,7 +287,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G12_20_the_way_back_in_is_walked",
-   "proven": "",
+   "proven": "2026-11-25, seen once, on a stock Ubuntu 24.04.5 guest (systemd 255) with Claude Code 2.1.332, at a 0.6.2 build head whose code is the v0.6.2 tag's. Setup with fleet mode said the launcher the timer runs finds Pit Stop and that fleet mode is set up, and answered 0. After Claude Code's own uninstall of Pit Stop, setup with fleet mode made and changed nothing (the files byte-identical before and after), named the service an earlier install left, said fleet mode is NOT set up with the one install command, and answered 1 (log 8faaac139c4c6f2e...). Steered: the catalog was served from a local copy. Not seen: a plugin list that cannot be read.",
    "moved_why": "",
    "moved_by_person": ""
   },
@@ -299,7 +301,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G12_21_a_schedule_that_could_not_be_read_is_not_none",
-   "proven": "",
+   "proven": "2026-11-25, seen once, on a stock Ubuntu 24.04.5 guest with Claude Code 2.1.332, at a 0.6.2 build head whose code is the v0.6.2 tag's. A unit file the account could not read was named as not checked, with its own ls line alone on a line; no timer was made, fleet mode was NOT set up, and setup answered 1. 'no crontab for <user>' counted as none, and a timer was made (log 8faaac139c4c6f2e...). Steered: the unreadable file was planted by hand. Not seen on a machine: a crontab -l refused, killed or silent; the option for a person's own crontab; the lines that name the crontab or a command to run, each command alone on its line with no backtick, and a name holding a control character shown changed, which the test holds as printed.",
    "moved_why": "",
    "moved_by_person": ""
   },
@@ -313,7 +315,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G12_22_fleet_mode_is_set_up_only_when_the_timer_is_read_running",
-   "proven": "",
+   "proven": "2026-11-25, on a stock Ubuntu 24.04.5 guest (systemd 255) with Claude Code 2.1.332, at a 0.6.2 build head whose code is the v0.6.2 tag's. A timer active and enabled was 'set up', answering 0; active but disabled, and stopped but enabled, were each said so with the one command, answering 1; with no user bus it was 'not checked' (log 8faaac139c4c6f2e...; steered: the timer was disabled and stopped by hand). On macOS 27.2.1 in a clean test account at the tag's commit, a loaded launch agent was 'set up' (log 765c757cdf0a781b...). Stopped, launchctl's exit 113 was said so with its command only at an earlier head whose setup code changed before the tag (log d0a3275e43f0e84f...): not seen at the tag's code. Not seen in a clean account: exit 125.",
    "moved_why": "",
    "moved_by_person": ""
   },
@@ -341,7 +343,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G12_28_the_services_time_limit_is_above_the_runs_longest_road",
-   "proven": "",
+   "proven": "2026-11-27, seen once, on a stock Ubuntu 24.04.5 guest (systemd 255), at the 0.6.3 build head 746eab2: the service setup wrote held TimeoutStartSec=1200, and the helper's run under it ended success with code 0 (log 5ebe4be6588f4c67...). On 2026-11-25, at a 0.6.2 build head whose code is the v0.6.2 tag's, systemd itself read that limit as 20min (log 8faaac139c4c6f2e...). Steered: the plugin registry row was written by hand at 746eab2. The README and CHANGELOG sentences are text, held by the test.",
    "moved_why": "",
    "moved_by_person": ""
   },
@@ -369,7 +371,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G4_39_a_pane_is_addressed_by_its_id_and_tmux_is_read_whole",
-   "proven": "",
+   "proven": "2026-11-28, seen once, on a stock Ubuntu 24.04.5 guest with the system's tmux 3.4 and Pit Stop 0.6.2 installed from GitHub: two sessions named \"tést\" and \"t_st\", each holding a plain program. Read from a systemd user service under LC_ALL=C, plain tmux printed both names as \"t_st\", while the helper's own tmux calls read both whole and found each program's pane by its id; with no language variable, and as the user manager's environment is (C.UTF-8), both read whole. Steered: the helper's own tmux call sent keys to the pane it found for \"tést\", and they landed there only. The helper's typing into a live session's input box was not seen. Log sha256 345f40901e691601...",
    "moved_why": "",
    "moved_by_person": ""
   },
@@ -397,7 +399,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G19_6_undo_in_the_suite_reaches_only_its_made_home",
-   "proven": "",
+   "proven": "On GitHub's runner (image ubuntu-24.04), at the v0.6.2 tag's commit: run 45611324474, job 139195298796 (image 20261116.376.1, Python 3.13.18, log sha256 e5406f2a6b4afb1b...) and job 139195299262 (image 20261116.133.1, Python 3.10.22, log 4b4557ca74e6c670...); at the later head 746eab2: run 45921275413, job 140252331933 (image 20261122.23.1, Python 3.13.18, log 21e578f070403db4...) and job 140252332190 (image 20261116.133.1, Python 3.10.22, log 8aaba2ef909f7a40...). In each job test_G19_6_undo_in_the_suite_reaches_only_its_made_home prints PASSED, and the gate prints \"whole run; 193 of 193 named proofs passed; 0 problems\". The test's own control, undo pointed at a stand-in outside the made home, was seen to move that file, in each job.",
    "moved_why": "",
    "moved_by_person": ""
   },
@@ -439,7 +441,7 @@
    "first_ship_in": "0.6.2",
    "ship_in": "0.6.2",
    "test": "test_G19_7_the_suites_lists_do_not_lean_on_the_machines_python",
-   "proven": "",
+   "proven": "On GitHub's runner (image ubuntu-24.04), at the v0.6.2 tag's commit: run 45611324474, job 139195298796 (image 20261116.376.1, Python 3.13.18, log sha256 e5406f2a6b4afb1b...) and job 139195299262 (image 20261116.133.1, Python 3.10.22, log 4b4557ca74e6c670...); at the later head 746eab2: run 45921275413, job 140252331933 (image 20261122.23.1, Python 3.13.18, log 21e578f070403db4...) and job 140252332190 (image 20261116.133.1, Python 3.10.22, log 8aaba2ef909f7a40...). In each job test_G19_7_the_suites_lists_do_not_lean_on_the_machines_python prints PASSED, and the gate prints \"whole run; 193 of 193 named proofs passed; 0 problems\". The test's control, the lists run from a Python in a folder left open, ran in each job.",
    "moved_why": "",
    "moved_by_person": ""
   },
@@ -469,7 +471,8 @@
    "test": "test_G1_18_a_record_is_read_whole_to_its_line_feed",
    "proven": "",
    "moved_why": "",
-   "moved_by_person": ""
+   "moved_by_person": "",
+   "filed": "By the maintainer's word, 2026-11-28: waits for a real report. Built and tested against records in the form Claude Code writes them; the hook's decision in a live session holding such a record has not been watched."
   },
   {
    "id": "P43",
@@ -744,7 +747,7 @@
    "owner": "maintainer",
    "first_ship_in": "0.6.3",
    "ship_in": "0.6.4",
-   "seen": "2026-11-25, a stock Ubuntu 24.04 virtual machine with Claude Code 2.1.332, the fleet helper of Pit Stop 0.6.2 updating the plugin from a catalog whose newest commit was not the plugin's release commit. After the update it logged `plugin update: windstorm-pit-stop@thewindstorm: cache not checked (commit 36f536a1301b is not in the marketplace clone)` (`scripts/restart_at_break.py`, line 1269). Claude Code's marketplace clone there was shallow, holding one commit, the catalog's newest. Read on one long-running machine: its marketplace clone was shallow too, with one commit, and did not hold Pit Stop's release commit. So the check that the cache folder holds the registry's commit (G7.9) logs \"not checked\" for Pit Stop's own row after an update, and checks nothing. It changes nothing either way: a row it cannot check is logged only.",
+   "seen": "2026-11-25, a stock Ubuntu 24.04 virtual machine with Claude Code 2.1.332, the fleet helper of Pit Stop 0.6.2 updating the plugin from a catalog whose newest commit was not the plugin's release commit. After the update it logged `plugin update: windstorm-pit-stop@thewindstorm: cache not checked (commit 36f536a1301b is not in the marketplace clone)` (`scripts/restart_at_break.py`, line 1269). Claude Code's marketplace clone there was shallow, holding one commit, the catalog's newest. Read on one long-running machine: its marketplace clone was shallow too, with one commit, and did not hold Pit Stop's release commit. So the check that the cache folder holds the registry's commit (G7.9) logs \"not checked\" for Pit Stop's own row after an update, and checks nothing. It changes nothing either way: a row it cannot check is logged only. Seen again 2026-11-26 on a Mac test account (macOS 27.2.1) with GitHub's own catalog and Pit Stop 0.6.2, after the fleet helper's update under launchd: `plugin update: windstorm-pit-stop@thewindstorm: cache not checked (commit 9597d25a5495 is not in the marketplace clone)`.",
    "promise": "After an update, the helper checks the cache folder against the registry's commit even when the marketplace clone holds only its newest commit, or says once a day in plain words that it cannot check and why. A test holds it with a shallow clone that lacks the commit.",
    "test": "",
    "proven": "",
@@ -843,7 +846,7 @@
    "first_ship_in": "0.6.3",
    "ship_in": "0.6.4",
    "seen": "2026-11-25, on a Mac test account under launchd. 0.6.1's setup with `--fleet` wrote `~/.claude/pit-stop/restart.json` new (its own step 5: \"new, with tmux_socket = None and plugin_updates = 'pit-stop'\"). 0.6.2's fleet setup line later left it as it was (\"exists, left exactly as it is\"), and its record, `~/.claude/pit-stop/setup-undo.json`, holds only the launcher and whether config.json existed. 0.6.2's `setup.py --undo` then printed \"2. restart.json: kept ~/.claude/pit-stop/restart.json: setup did not write it\" (`scripts/setup.py` line 913 at the release head). It kept the file, as its record says it should, but the words say who wrote the file, and an earlier version of setup had written it.",
-   "promise": "Undo's line for a file it keeps says what its record holds (for restart.json, that it is not in setup's record), never who wrote the file. What undo keeps and removes does not change. Its other lines stay as they are.",
+   "promise": "Undo's line for a file it keeps says what its record holds (for restart.json, that it is not in setup's record), never who wrote the file. What undo keeps and removes does not change, beyond row P86's: restart.json is kept while something else runs the helper. Its other lines stay as they are.",
    "test": "",
    "proven": "",
    "moved_why": "Renumbered on 2026-11-25: a cure release took the number 0.6.3; the day this row is due did not change.",
@@ -914,7 +917,7 @@
    "ship_in": "0.6.3",
    "seen": "2026-11-25, read in `scripts/setup.py` at the 0.6.2 tag's tree (9597d25), and the same lines at 0.6.1: the systemd service that `setup.py --fleet --apply` writes holds the Python program's path, the launcher's path under the home folder and the timer's PATH (the folders of tmux and claude) as plain text; the launch agent holds the same values in its string elements without escaping them for XML; and lines setup prints for the person to run (\"To follow plugin updates by itself, make its command:\", \"First look at what it would do:\", the launchctl lines that name the launch agent's file, and the chmod lines that name a folder another account can write) hold paths as plain text. Seen on a stock Ubuntu 24.04 guest (systemd 255, Claude Code 2.1.332, Pit Stop from the tag's tree through a local catalog), in an account whose home folder's path holds a space: setup's plan and `--apply` both exited 0, and `--apply` said \"fleet mode is set up\"; at the timer's first run the service did not start the helper (it failed, exit 2). Undo and the plugin uninstall then left the account as before. Tried on made files only: a percent sign in such a path also keeps the service from starting the helper, and an ampersand or a less-than sign makes the launch agent's file one a property-list reader refuses. Not seen on a Mac. The ordinary effect: in a home folder whose path holds such a character, fleet mode's timer does not start the helper while setup says fleet mode is set up (row P76). What helps until the cure: do not switch fleet mode on in such a home with this version; where it is on, take it off with `setup.py --undo`. The launcher is a copy of Pit Stop's own file and holds no such value; setup writes no crontab line. Not new in 0.6.2 (the service and launch agent lines since 0.5.3).",
    "promise": "Each value setup writes into a timer file is written as that file's grammar takes one value whole: in a systemd unit, quoted, with its specifiers and backslashes escaped; in the launch agent, escaped for XML. Each line setup prints for the person to run gives each path as one shell word, quoted as setup's own command line already is, and a test reads every such line back as a shell splits it. A value the grammar cannot hold (a line break, a character that cannot be seen) is refused before the first write, in one line saying which value and why. In a systemd unit every dollar sign in an argument is written doubled. The program's own path (the first word of the service's start line) has no escaped form: setup refuses, before its first write, a program path that holds a control character, a double quote, an apostrophe, a backslash, or a dollar sign followed by an opening brace, in one line that names the character, says nothing was made, and says where setup does run; a test plants each and reads the home unchanged. What setup says over such a timer is row P76. A test plants a space, a percent sign, a quote, a backslash, an ampersand and a less-than sign in each value, in each of the three places, seen red first on the tag's code.",
-   "test": "",
+   "test": "test_G12_48_a_value_setup_writes_into_a_timer_file_is_held_whole",
    "proven": "",
    "moved_why": "A cure release of its own, with nothing else in it, on the maintainer's ruling of 2026-11-25. Renumbered on 2026-11-25: the cure takes the number 0.6.3, the next version in the form the released tools rank; its day did not change.",
    "moved_by_person": ""
@@ -941,8 +944,8 @@
    "first_ship_in": "0.6.3",
    "ship_in": "0.6.3",
    "seen": "2026-11-25, on a stock Ubuntu 24.04 guest (systemd 255, Claude Code 2.1.332, Pit Stop 0.6.2 from the tag's tree, 9597d25, through a local catalog), in an account whose home folder's name holds a space (row P74): `setup.py --fleet --no-tune-now --no-auto-tune --no-self-update --apply` exited 0 and said \"the timer: pit-stop-restart.timer is active and enabled\" and \"fleet mode is set up\". At the timer's first run, nobody starting it, the service did not start the helper (it failed, exit 2, \"Failed to start pit-stop-restart.service\"). Read in `scripts/setup.py` at the same tree: its last check asks whether the launcher finds Pit Stop and whether the timer is active and enabled (`systemctl --user is-active` and `is-enabled`); it never reads the command line the timer's service holds, so a service that cannot start is called set up. Not seen on a Mac.",
-   "promise": "AIM: setup never says \"fleet mode is set up\" over a timer setup wrote whose service cannot start the launcher; over a person's own unit it says what it checked and what it did not. A unit setup wrote is one its record holds or one carrying Pit Stop's mark, so a unit an earlier version wrote counts too. For such a unit setup says set up only after it has read, from systemd or launchd itself, the command the timer's service holds with its arguments one by one (their count and each one whole), and its Environment line, and compared them argument by argument with what setup wrote; a read that gives one joined line is not that read. THE READ-BACK'S OWN WORDS: a line that says the unit differs names only what setup wrote (the key, the argument's position and setup's own meant word; for the Environment line the variable names only), never a value setup did not write. The meant side is what setup wrote, never what this terminal's environment says now. An Environment entry for a variable setup did not set is named as the person's own, a warning, never a stop; the stop is for what setup wrote: the start line's words, or its own entry changed or missing. A person's own drop-in over a variable setup wrote is its own entry changed: a stop, whose line names the variable and the count of drop-in files, never the value. The one next step there is the manager's own listing of the unit and its drop-ins (`systemctl --user cat pit-stop-restart.service`), never undo and never running setup again. `systemd-analyze verify` is never the read-back. The read has three answers: yes, no, could not be read. It never says set up on the third, and each of the other two says what was read and the one next step. LIMIT: setup never starts the timer's service to try it (a live pass types into sessions); it reads. A timer that runs rightly today is still called set up: (a) an ordinary home; (b) a crontab line that runs the launcher (setup never writes one): setup says, as today and in setup's own words, that a crontab line runs it, and nothing of the crontab is printed; (c) a unit setup did not write: where one of its arguments is exactly the launcher's path, set up, nothing added; otherwise set up as today (its timer active and enabled), with one line saying the command is the person's own and setup did not check what it runs, never a \"no\" from a shape setup does not know, nothing of that command printed, and the exit code as today. The check holds for any cause of a mismatch, not only a space. The test holds each case: a unit setup wrote (a home with a space, an ordinary home, a manager that cannot be asked), a person's unit with the exact argument, a person's unit of another shape that runs, a person's own file at the path of setup's unit with no record and no mark (read as the person's unit), a person's drop-in that adds an Environment entry holding a made-up secret (a warning that names the variable as the person's own, and no printed or logged line holds the value), a person's drop-in over the variable setup wrote, holding a made-up secret (a stop that names the variable and one drop-in file, the listing as its step, and no line holds the value), and the crontab line. Its planted answers are the managers' own answers, recorded on a real machine and kept as files beside the test with where and when; seen red first on the tag's code. Before v0.6.3 is tagged it is seen on a stock guest both ways: a home with a space gets no \"set up\" and is told what was read and the one next step; an ordinary home gets \"set up\".",
-   "test": "",
+   "promise": "AIM: setup never says \"fleet mode is set up\" over a timer setup wrote whose service cannot start the launcher; over a person's own unit it says what it checked and what it did not. A unit setup wrote is one its record holds or one carrying Pit Stop's mark, so a unit an earlier version wrote counts too. For such a unit setup says set up only after it has read, from systemd or launchd itself, the command the timer's service holds with its arguments one by one (their count and each one whole), and its Environment line, and compared them argument by argument with what setup wrote, unless another schedule found is read as running the helper; then the closing sentence names that schedule first and says setup's own timer does not start the helper, with its one step; a read that gives one joined line is not that read. THE READ-BACK'S OWN WORDS: a line that says the unit differs names only what setup wrote (the key, the argument's position and setup's own meant word; for the Environment line the variable names only), never a value setup did not write. The meant side is what setup wrote, never what this terminal's environment says now. An Environment entry for a variable setup did not set is named as the person's own, a warning, never a stop; the stop is for what setup wrote: the start line's words, or its own entry changed or missing. A person's own drop-in over a variable setup wrote is its own entry changed: a stop, whose line names the variable and the count of drop-in files, never the value. The one next step there is the manager's own listing of the unit and its drop-ins (`systemctl --user cat pit-stop-restart.service`), never undo and never running setup again. `systemd-analyze verify` is never the read-back. The read has three answers: yes, no, could not be read. It never says set up on the third, and each of the other two says what was read and the one next step. LIMIT: setup never starts the timer's service to try it (a live pass types into sessions); it reads. A timer that runs rightly today is still called set up: (a) an ordinary home; (b) a crontab line that runs the launcher (setup never writes one): setup says, as today and in setup's own words, that a crontab line runs it, and nothing of the crontab is printed; (c) a unit setup did not write: where one of its arguments is exactly the launcher's path, set up, nothing added; otherwise set up as today (its timer active and enabled), with one line saying the command is the person's own and setup did not check what it runs, never a \"no\" from a shape setup does not know, nothing of that command printed, and the exit code as today. The check holds for any cause of a mismatch, not only a space. The test holds each case: a unit setup wrote (a home with a space, an ordinary home, a manager that cannot be asked), a person's unit with the exact argument, a person's unit of another shape that runs, a person's own file at the path of setup's unit with no record and no mark (read as the person's unit), a person's drop-in that adds an Environment entry holding a made-up secret (a warning that names the variable as the person's own, and no printed or logged line holds the value), a person's drop-in over the variable setup wrote, holding a made-up secret (a stop that names the variable and one drop-in file, the listing as its step, and no line holds the value), and the crontab line. Its planted answers are the managers' own answers, recorded on a real machine and kept as files beside the test with where and when; seen red first on the tag's code. Before v0.6.3 is tagged it is seen on a stock guest: over the unit 0.6.2's setup wrote in a home with a space, no set up, what was read and the one next step; a fresh setup in such a home and in an ordinary home gets set up, and the timer's first run starts the helper.",
+   "test": "test_G12_49_fleet_mode_is_set_up_only_when_the_timers_command_line_is_read_whole",
    "proven": "2026-11-27, at build/0.6.3's head 746eab2 (scripts/setup.py sha256 8fee1d371302026a..., scripts/restart_at_break.py 0530634323e9f5f0...), on a stock Ubuntu 24.04.5 guest (systemd 255), the world read clean before it ran (no Claude Code settings folder, no units, no crontab), in an account whose home folder's name holds a space, over the timer that 0.6.2's setup wrote there (0.6.2's tree 9597d25, its setup.py sha256 d07b0f3cc311a123...) with no other schedule. Not set up: the plan and the apply each said \"the service's start line holds 5 arguments where setup wrote 4\" and \"Fleet mode is NOT set up\", with the one next step (plan exit 0, apply exit 1). The step, taken exactly as its line printed the command whole (one argument to /bin/sh -c), put back what setup had changed, and setup again with the options given before said \"its service's command, read from systemd, is the launcher setup wrote, argument by argument, with its PATH\" and \"fleet mode is set up\" (exit 0); the plan after it said the same. The timer's first run, nobody starting it, started the helper and ended success with code 0 (systemd's own Result=success, ExecMainStatus=0); before the head's plan, 0.6.2's unit had run once and failed there, as expected. A fresh setup in an ordinary home, and the Mac test account over the launch agent 0.6.2's setup wrote: as row P86's proven line says. Steered: the plugin registry row was written by hand (no Claude Code on the guest).",
    "moved_why": "A cure release of its own, with nothing else in it, on the maintainer's ruling of 2026-11-25. Renumbered on 2026-11-25: the cure takes the number 0.6.3, the next version in the form the released tools rank; its day did not change.",
    "moved_by_person": ""
@@ -984,7 +987,7 @@
    "ship_in": "0.6.3",
    "seen": "2026-11-26, read in `scripts/setup.py` at the 0.6.2 release commit (9597d25), in `open_lines`: the two commands that setup prints, and `/pit-stop status` repeats, to close a folder another account can write (`chmod go-w` and `chmod -R go-w`) give the folder's path unquoted. A path with a space is not read as one whole value, so the line as printed does not close that folder. Putting the path in quotes helps. The second line, `chmod -R go-w`, is also printed for an installed copy of Pit Stop the person does not own, where the command cannot work; that breaks G12.16 (a folder the person does not own gets no command). Neither line is in 0.6.1 or 0.6.0.",
    "promise": "AIM, in two parts, each with a test of its own, red first on 9597d25's code through both roads (setup's own print and the status repeat, read where they are printed). (i) Each of the two chmod lines carries the folder's path quoted for the shell, the command alone on a line of its own, so the line taken exactly as printed by a person or pasted by an agent changes that folder and nothing else, whatever the path holds. (ii) The `chmod -R go-w` line gets the owner check the other line has: an installed copy the person does not own gets no command, only the words that only an administrator can close it (G12.16). On both lines, a path that the line cannot carry as one value gets no command: the folder is named in a sentence, its name shown changed and said to be shown changed, with what to do in words. Each test hands the printed line to a shell as printed and reads the folder's mode after; the installed copies are made where Pit Stop finds them. The four tests that hold today's wording change with it: `test_G12_13_setup_closes_what_an_earlier_run_left_open`, `test_G12_14_status_repeats_an_open_folder_until_it_is_closed`, `test_G12_16_a_folder_the_person_does_not_own_gets_no_command` and `test_G12_18_the_walk_covers_what_decides_what_runs`.",
-   "test": "",
+   "test": "test_G12_50_the_chmod_lines_hold_the_folders_path_as_one_value",
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
@@ -998,7 +1001,7 @@
    "ship_in": "0.6.3",
    "seen": "2026-11-26: v0.6.2 was tagged on its release commit (9597d25) after every check on that commit was read green, and the tag was pushed before the whole suite had run with the tag at the head. The tag's own run then read `test_G7_7` and `test_G7_10` failed, as designed (issue #135), and nothing else. That red was known before the tag. A red that was not known could have been seen only by running the suite with the tag at the head before pushing it: on a branch no tag is at the head. `test_G7_7` reads the tag from GitHub with `git ls-remote`, so a tag made only in a local clone is not seen by it.",
    "promise": "AIM: the release step makes the tag LOCALLY in a fresh clone of the commit to be tagged, runs the whole suite there, and reads its exit code 0 and the G19 gate's own last line; only then is the real tag made and pushed. On anything else it makes and pushes no tag and says which test or line stopped it. A test holds the refusal, seen red first: in a made repository with a planted failing test, the step pushes no tag. The checks that act only with a tag at the head, or only with the tag on GitHub, are named in the release list.",
-   "test": "",
+   "test": "test_G7_14_a_red_suite_with_the_tag_at_its_head_pushes_no_tag",
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
@@ -1026,7 +1029,7 @@
    "ship_in": "0.6.3",
    "seen": "2026-11-26, in a made home on main's code (v0.6.2): the restart helper's settings (`~/.claude/pit-stop/restart.json`) holding `\"deny_names\": [\"keep-out\"]` were planted in five states that cannot be read: 0 bytes, cut short, one stray comma, a JSON list, and mode 000. In each, `restart_at_break` came up with its defaults: `deny_names`, `allow_names`, `deny_name_globs` and `deny_paths` all empty, and no warning. A session the person had kept out would be a candidate for a restart again.",
    "promise": "AIM: a `restart.json` that exists and cannot be read (it cannot be opened, it is empty, its JSON stops, it is not UTF-8 text, or it is not one JSON object) stops the helper's run: it acts on no session and takes no step a key of that file switches or fences. Nothing is typed into a pane; no session is restarted, compacted or reloaded; no plugin or Claude Code update, needs-you list or tune is started. One line in its log, and the same line in `/pit-stop status`, names the file, where the read stopped (line and column, the error's class, or the kind wanted) and the one next step; never a value or a byte of the file, and never the defaults. LIMIT: only the helper's own run stops; the hooks, setup, status, checkup and a session's own daily tune go on. A file that is not there keeps today's defaults. A test holds it, seen red first: with a session on the deny list and a session off the allow list, each of five states (0 bytes, cut short, one stray comma, a JSON list, mode 000) gives no step and the one line; the step taken as printed and the file mended, the next run acts with the lists in force and the stop does not come back; with the file not there, every session is a candidate, as today.",
-   "test": "",
+   "test": "test_G4_46_an_unreadable_restart_json_restarts_nothing",
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
@@ -1081,8 +1084,8 @@
    "first_ship_in": "0.6.3",
    "ship_in": "0.6.3",
    "seen": "2026-11-26, on a stock Ubuntu 24.04 guest (systemd 255), in a home whose folder's name holds a space, over the timer that 0.6.2's setup had written there (the helper's unit failed at its runs). The 0.6.3 build's `setup.py --fleet` without `--apply`, the plan, said at step 6 that something already schedules the restart helper, gave the line meant for a person's own timer (\"To follow plugin updates by itself, make its command: ...\"), and said nothing at step 7 of the command the service holds. With `--apply`, the same build read that command back from systemd (row P76) and said fleet mode is not set up, with the one next step. The plan is setup's first word and the place where a person decides, so there the finding did not reach the person. The same plan lines were seen on a Mac test account over the launch agent 0.6.2's setup wrote.",
-   "promise": "AIM: over a unit setup wrote (as row P76 defines it: one its record holds or one carrying Pit Stop's mark, an earlier version's too), the plan makes the same read-only read-back as the apply road and says the same finding (set up, differs, or could not be read) and the same one next step. It never gives the line meant for a person's own timer for such a unit. LIMIT: it reads only, and the plan still changes nothing; a unit setup did not write keeps today's words. A test holds it, seen red first: for each answer of the read-back, the plan's finding and step equal the apply road's, and no file changes.",
-   "test": "",
+   "promise": "AIM: over a unit setup wrote (as row P76 defines it: one its record holds or one carrying Pit Stop's mark, an earlier version's too), the plan makes the same read-only read-back as the apply road and says the same finding (set up, differs, or could not be read) and the same one next step. It never gives the line meant for a person's own timer for such a unit. LIMIT: it reads only, and the plan still changes nothing; a unit setup did not write keeps today's words where no schedule found is setup's; where one is, the plan reads every schedule found, as the apply road does. A test holds it, seen red first: for each answer of the read-back, the plan's finding and step equal the apply road's, and no file changes.",
+   "test": "test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does",
    "proven": "2026-11-27, at build/0.6.3's head 746eab2 (scripts/setup.py sha256 8fee1d371302026a..., scripts/restart_at_break.py 0530634323e9f5f0...), on a stock Ubuntu 24.04.5 guest (systemd 255, cron 3.0pl1-184ubuntu2) and on a macOS 27.2.1 test account (Apple's Python 3.9.6), each world read clean before it ran. Set up: on the guest, in a home whose folder's name holds a space and in an ordinary home, the plan run after the apply read the same finding in the same words (\"its service's command, read from systemd, is the launcher setup wrote, argument by argument, with its PATH\" and \"fleet mode is set up\"), and the timer's first run, nobody starting it, ended success with code 0 in both. On the Mac test account the plan and the apply over the launch agent 0.6.2's setup wrote gave the same finding, and the agent's next run came by itself (launchd's own print: runs = 1, last exit code = 0). Differs: on the guest, over the unit 0.6.2's setup wrote in a home whose folder's name holds a space, beside a crontab line that runs the launcher, the plan and the apply gave the same count line (\"the service's start line holds 5 arguments where setup wrote 4\"), the same step and the same closing sentence, exit 0 both; the unit files' sums after the apply equal those after 0.6.2's setup wrote them, the plan having run between. The limit: with only the crontab line left, the plan keeps today's words and the apply says a crontab line runs it. Could not be read: seen only with a stand-in for the service manager in the test suite, not on a machine. Steered: the plugin registry row was written by hand (no Claude Code on the guest or the Mac account), and on the Mac the account's own login PATH was given (the ssh one has no tmux). A third world, on a second stock Ubuntu 24.04.5 guest at the same head, read clean before it ran: over the unit 0.6.2's setup wrote in a home whose folder's name holds a space, with no other schedule, the plan and the apply gave the same count line, the same step and the same closing sentence (plan exit 0, apply exit 1), and the step taken as printed, then setup again, gave set up and a first run with code 0 (row P76's proven line).",
    "moved_why": "",
    "moved_by_person": ""
@@ -1108,7 +1111,7 @@
    "owner": "maintainer",
    "first_ship_in": "0.6.4",
    "ship_in": "0.6.4",
-   "seen": "2026-11-27, read in the 0.6.3 build's code (no machine). Row P79's stop, no command for a path the line should not carry, holds only setup's two chmod lines. Twelve other places in setup and the restart helper print a command that holds a path read at run time, quoted for the shell, without that stop: the helper's command, in the first look (two places) and in the line for a person's own timer; setup's own command, in the undo step of the read-back and in the step to run setup again; four launchctl lines that name the Mac's job file; the line to see a person's file that cannot be read; and the helper's two lines of steps for a `restart.json` that cannot be read (three commands).",
+   "seen": "2026-11-27, read in the 0.6.3 build's code (no machine). Row P79's stop, no command for a path the line should not carry, holds only setup's two chmod lines. Twelve other places in setup and the restart helper print a command that holds a path read at run time, quoted for the shell, without that stop: the helper's command, in the first look (two places) and in the line for a person's own timer; setup's own command, in the undo step of the read-back and in the step to run setup again; four launchctl lines that name the Mac's job file; the line to see a person's file that cannot be read; and the helper's two lines of steps for a `restart.json` that cannot be read (three commands). At the 0.6.3 release head the count is fourteen places and fifteen commands: the two more are setup's steps that take its own timer off where another schedule is found (each prints `setup.py --undo`, row P86).",
    "promise": "AIM: one function makes every line of setup and the helper that prints a command holding a path read at run time. It gives the command, alone on its own line, only when each path can be carried as one shell word with none of the characters row P79 stops; otherwise no command: the step in words, with the path shown changed as row P79 shows it and said to be shown changed. A test holds it, seen red first: each such line, with a planted path ending in each character row P79 stops, gives no command; with an ordinary path and one with a space, the command as today, taken by a shell as printed. A second test reads the code: every line that prints such a command goes through that function.",
    "test": "",
    "proven": "",
@@ -1122,7 +1125,7 @@
    "owner": "maintainer",
    "first_ship_in": "0.6.4",
    "ship_in": "0.6.4",
-   "seen": "2026-11-27, read in the code (no machine). Nothing holds two runs of the restart helper apart: `restart_at_break.py` takes no lock over a run, and its only process-id file is the one for the tune it starts. The restart cooldown is a record each run reads early and writes later, with nothing between the two, so two runs that start together can both pass it and both act on one session at the same break; the rule against two commands into one session holds within one run only. Claude Code's update and the plugin updates could also run twice at once. Two ways reach this today: two schedules for the helper (setup's own timer and a person's crontab line or own unit, both running), and one crontab schedule whose run outlasts its interval, since cron starts a line at each interval whether or not the last run ended and a run's longest road by the helper's own limits is 960 seconds. A systemd timer or a launchd job does not start a run while its last one still runs.",
+   "seen": "2026-11-27, read in the code (no machine). Nothing holds two runs of the restart helper apart: `restart_at_break.py` takes no lock over a run, and its only process-id file is the one for the tune it starts. The restart cooldown is a record each run reads early and writes later, with nothing between the two, so two runs that start together can both pass it and both act on one session at the same break; the rule against two commands into one session holds within one run only. Claude Code's update and the plugin updates could also run twice at once. Two ways reach this today: two schedules for the helper (setup's own timer and a person's crontab line or own unit, both running), and one crontab schedule whose run outlasts its interval, since cron starts a line at each interval whether or not the last run ended (seen on a stock Ubuntu 24.04 guest, cron 3.0pl1-184ubuntu2: five starts in four and a half minutes, three at once; the helper did not run in that try) and a run's longest road by the helper's own limits is 960 seconds. A systemd timer does not start its service again while the last run is still active (read in systemd.timer(5), Ubuntu 24.04, systemd 255), and a launchd job's interval that comes while the job runs is missed (a sentence read in launchd.plist(5) on macOS 27.2.1, not behaviour seen).",
    "promise": "AIM: one run of the helper at a time for one Pit Stop home. A run that starts while another is going changes nothing in any session, starts no update, and logs one line. LIMIT: the kernel holds the lock for the life of the process, so a crash or a restart leaves none behind. A lock that cannot be made or read is the third answer: that run types nothing and its log line says so. A run that has held the lock longer than a bound is named by status, never silent. A line about the holder names its process id and command name only. The ordinary single run's steps and their order stay. A test holds it, seen red first: two runs started together against one stand-in session act once; a lock that cannot be made types nothing; a run that ends by a crash leaves no lock. Proven on a real machine.",
    "test": "",
    "proven": "",
@@ -1170,6 +1173,21 @@
    "proven": "",
    "moved_why": "",
    "moved_by_person": ""
+  },
+  {
+   "id": "P93",
+   "codon": "G2.34",
+   "issue": 159,
+   "owner": "maintainer",
+   "first_ship_in": "0.6.4",
+   "ship_in": "0.6.4",
+   "seen": "2026-11-28, read in the code and in two real session records: a transcript names the model by its plain id and not the size the session runs at; the tuner takes a listed model's size from the id and says it as fact. Not seen: a session on a listed model at a smaller size.",
+   "promise": "A size the tuner takes from a model's name alone is said as assumed, with the one next step (name the size with --context-limit); it is said as fact only where the session's own record or the person names it, or the session's peak has passed the smaller size.",
+   "test": "",
+   "proven": "",
+   "moved_why": "",
+   "moved_by_person": "",
+   "filed": "By the maintainer's word, 2026-11-28: waits for a real report. A session on a listed model at a smaller size than the list's has not been seen; the public model table gives each listed model the list's size."
   }
  ],
  "declined": []
