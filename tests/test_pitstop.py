@@ -4,11 +4,15 @@ import html
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
 
 import pytest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import busctl_standin  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HOOK = os.path.join(ROOT, "hooks", "precompact_wait_for_break.py")
@@ -3241,7 +3245,8 @@ def test_G12_7_setup_undo_puts_back_what_apply_changed(tmp_path, monkeypatch, ca
     enabled = subprocess.CompletedProcess(["systemctl"], 0, "enabled\n", "")
     monkeypatch.setattr(su, "run", lambda cmd, timeout=30, env=None: ran.append(cmd) or (
         no_cron if cmd[:2] == ["crontab", "-l"] else active if cmd[:3] == ["systemctl", "--user", "is-active"]
-        else enabled if cmd[:3] == ["systemctl", "--user", "is-enabled"] else None))
+        else enabled if cmd[:3] == ["systemctl", "--user", "is-enabled"]
+        else busctl_standin.answer(cmd, unit_dir=su.UNIT_DIR) if cmd[:1] == ["busctl"] else None))
     monkeypatch.setattr(su, "tmux_servers", lambda: {})
     monkeypatch.setattr(su.platform, "system", lambda: "Linux")
     monkeypatch.setattr(su.shutil, "which", lambda n: "/usr/bin/" + n)
@@ -4069,7 +4074,8 @@ def _g12_13(tmp_path, stat):
     named = [l.strip() for l in r.stdout.splitlines() if "Pit Stop cannot tell whether it made this folder" in l]
     assert [l.split(" (")[0] for l in named] == ["1. ~/.config", "2. ~/.config/systemd", "3. ~/.config/systemd/user"], r.stdout
     assert named[2].endswith(f"below it is Pit Stop's systemd timer, which runs as you. Pit Stop cannot tell whether it made this folder, "
-                             f"so it stays. To close it: chmod go-w {units}") and "rm " not in r.stdout
+                             f"so it stays. To close it, run this line:") and "rm " not in r.stdout
+    assert f"chmod go-w '{units}'" in [l.strip() for l in r.stdout.splitlines()], r.stdout         # G12.50: alone, quoted
     r = run("--apply")                                                 # a second run finds nothing of ours open
     assert "none of what Pit Stop wrote has group or other write in its permission bits (access lists are not read)" in r.stdout, r.stdout
 
@@ -4101,7 +4107,7 @@ def test_G12_14_status_repeats_an_open_folder_until_it_is_closed():
         assert "Can be written by another account" in r.stdout and "Nothing needs you" not in r.stdout
         assert "1. 1 of Pit Stop's own files or folders (such as ~/.claude/pit-stop, 777)" in r.stdout, r.stdout
         assert f"2. ~/.config/systemd (777)" in r.stdout and f"3. ~/.config/systemd/user (777)" in r.stdout
-        assert f"To close it: chmod go-w {units}" in r.stdout and "3 thing(s) another account can write" in r.stdout
+        assert f"To close it, run this line:\n      chmod go-w '{units}'" in r.stdout and "3 thing(s) another account can write" in r.stdout
         subprocess.run([made_python(), "-I", os.path.join(ROOT, "scripts", "setup.py"), "--apply", "--no-tune-now"],
                        cwd=str(home), env=env, capture_output=True, timeout=120)
         r = status()                                                   # setup closed its own; the folders stay named
@@ -4203,7 +4209,7 @@ def test_G12_16_a_folder_the_person_does_not_own_gets_no_command():
         run = lambda me: _json.loads(subprocess.run([sys.executable, "-I", "-c", code, os.path.join(ROOT, "scripts"), str(me)],
                                                     env=env, capture_output=True, text=True, timeout=60).stdout or "null")
         own = run(os.getuid())                                          # the person's folder: the chmod
-        assert len(own) == 1 and "below it is Pit Stop's launch agent, which runs as you." in own[0] and own[0].endswith(f"chmod go-w {agents}"), own
+        assert len(own) == 1 and "below it is Pit Stop's launch agent, which runs as you." in own[0] and own[0].endswith(f"To close it, run this line:\n      chmod go-w '{agents}'"), own
         other = run(os.getuid() + 4242)                                 # Pit Stop runs as another number: not the person's
         assert len(other) == 1 and "chmod" not in other[0], other
         assert f"(number {os.getuid()}), not to you, so only an administrator can close it." in other[0], other
@@ -4227,6 +4233,7 @@ def test_G12_17_undo_leaves_the_home_as_it_was_before_setup(tmp_path):
     os.chmod(stub / "tmux", 0o755)
     (stub / "systemctl").write_text(f"#!/bin/sh\n{SYSTEMCTL_RUNNING}\n")
     os.chmod(stub / "systemctl", 0o755)
+    busctl_standin.plant(str(stub))
 
     def listing():
         out = {}
@@ -4327,6 +4334,7 @@ def test_G12_20_the_way_back_in_is_walked(tmp_path):
     for n, body in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
         (stub / n).write_text(f"#!/bin/sh\n{body}\n")
         os.chmod(stub / n, 0o755)
+    busctl_standin.plant(str(stub))
     cache = home / ".claude" / "plugins" / "cache" / "thewindstorm" / "windstorm-pit-stop" / "0.6.2"
     reg = home / ".claude" / "plugins" / "installed_plugins.json"
 
@@ -4455,6 +4463,7 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
             if body:
                 (s2 / n).write_text(f"#!/bin/sh\n{body}\n")
                 os.chmod(s2 / n, 0o755)
+        busctl_standin.plant(str(s2))
         r2 = h2 / ".claude" / "plugins" / "installed_plugins.json"
         r2.parent.mkdir(parents=True)
         r2.write_text(json.dumps({"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
@@ -4559,6 +4568,7 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
                     'else echo "keine Crontab fuer x" >&2; fi; exit 1')):
         (s3 / n).write_text(f"#!/bin/sh\n{body}\n")
         os.chmod(s3 / n, 0o755)
+    busctl_standin.plant(str(s3))
     (h3 / ".claude" / "plugins").mkdir(parents=True)
     (h3 / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
         {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
@@ -4576,6 +4586,7 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
     for n, body in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
         (s5 / n).write_text(f"#!/bin/sh\n{body}\n")
         os.chmod(s5 / n, 0o755)
+    busctl_standin.plant(str(s5))
     (h5 / ".claude" / "plugins").mkdir(parents=True)
     (h5 / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
         {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
@@ -4606,6 +4617,7 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
     for n, body in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
         (s6 / n).write_text(f"#!/bin/sh\n{body}\n")
         os.chmod(s6 / n, 0o755)
+    busctl_standin.plant(str(s6))
     (h6 / ".claude" / "plugins").mkdir(parents=True)
     (h6 / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
         {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
@@ -4635,6 +4647,7 @@ def test_G12_21_a_schedule_that_could_not_be_read_is_not_none(tmp_path):
                     ("crontab", 'echo "*/5 * * * * ~/.claude/pit-stop/bin/pit-stop-restart --live"; exit 0')):
         (s4 / n).write_text(f"#!/bin/sh\n{body}\n")
         os.chmod(s4 / n, 0o755)
+    busctl_standin.plant(str(s4))
     (h4 / ".claude" / "plugins").mkdir(parents=True)
     (h4 / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
         {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
@@ -4686,6 +4699,7 @@ def test_G12_22_fleet_mode_is_set_up_only_when_the_timer_is_read_running(tmp_pat
         for n, b in (("tmux", "exit 0"), ("systemctl", systemctl), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
             (stub / n).write_text(f"#!/bin/sh\n{b}\n")
             os.chmod(stub / n, 0o755)
+        busctl_standin.plant(str(stub))
         (home / ".claude" / "plugins").mkdir(parents=True)
         (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
             {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
@@ -4827,6 +4841,7 @@ def test_G12_23_nothing_setup_writes_names_a_plugin_cache_folder(tmp_path, monke
     for n, b in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
         (stub / n).write_text(f"#!/bin/sh\n{b}\n")
         os.chmod(stub / n, 0o755)
+    busctl_standin.plant(str(stub))
     cache = home / ".claude" / "plugins" / "cache" / "thewindstorm" / "windstorm-pit-stop" / "0.6.2"
     (home / ".claude" / "plugins").mkdir(parents=True)
     (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
@@ -4845,7 +4860,7 @@ def test_G12_23_nothing_setup_writes_names_a_plugin_cache_folder(tmp_path, monke
             assert "plugins/cache" not in text, f
         assert not FIXED_VERSION_FOLDER.search(text) and str(ROOT) not in text, f
     exec_line = [l for l in (unit_dir / "pit-stop-restart.service").read_text().splitlines() if l.startswith("ExecStart=")]
-    assert exec_line == [f"ExecStart={sys.executable} -I {home}/.claude/pit-stop/bin/pit-stop-restart --live"], exec_line
+    assert exec_line == [f'ExecStart="{sys.executable}" -I "{home}/.claude/pit-stop/bin/pit-stop-restart" --live'], exec_line
     # the macOS job file, written in-process with the platform said to be Darwin
     sys.path.insert(0, os.path.join(ROOT, "scripts"))
     import setup as su
@@ -4873,6 +4888,7 @@ def test_G12_23_setup_run_from_a_cache_version_folder_writes_that_path_nowhere(t
     for n, b in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
         (stub / n).write_text(f"#!/bin/sh\n{b}\n")
         os.chmod(stub / n, 0o755)
+    busctl_standin.plant(str(stub))
     cfg = home / ".claude"
     ver = cfg / "plugins" / "cache" / "thewindstorm" / "windstorm-pit-stop" / "0.6.2"
     for part in ("scripts", "hooks", "skills", ".claude-plugin"):
@@ -5029,6 +5045,643 @@ def test_G12_28_the_services_time_limit_is_above_the_runs_longest_road(tmp_path,
     assert len(limits) == 1 and int(limits[0]) > su.RUN_BOUND, (limits, su.RUN_BOUND, unit)
 
 
+def systemd_words(line):
+    """A start line or Environment= value split as systemd 255 reads it (systemd.syntax: words split on blanks,
+    double and single quotes held whole, a backslash takes the next character), then each word's specifiers and,
+    past the first word of a start line, its $ read: "%%" and "$$" are one character; any other "%" or "$" is a
+    specifier or a variable the word does not hold whole, and is answered None."""
+    words, i = [], 0
+    while i < len(line):
+        if line[i] in " \t":
+            i += 1
+            continue
+        w = []
+        while i < len(line) and line[i] not in " \t":
+            if line[i] in "\"'":
+                q, i = line[i], i + 1
+                while line[i] != q:
+                    if line[i] == "\\":
+                        i += 1
+                    w.append(line[i])
+                    i += 1
+                i += 1
+            elif line[i] == "\\":
+                w.append(line[i + 1])
+                i += 2
+            else:
+                w.append(line[i])
+                i += 1
+        words.append("".join(w))
+    return words
+
+
+def systemd_unescape(word, dollars):
+    out, i = [], 0
+    while i < len(word):
+        c = word[i]
+        if c == "%" or (dollars and c == "$"):
+            if word[i + 1:i + 2] != c:
+                return None
+            i += 1
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+P74_CHARS = (" ", "%", '"', "\\", "&", "<", "$")
+
+
+@pytest.mark.parametrize("c", P74_CHARS + ("".join(P74_CHARS),), ids=lambda c: "all" if len(c) > 1 else f"U+{ord(c):04X}")
+def test_G12_48_a_value_setup_writes_into_a_timer_file_is_held_whole(tmp_path, c):
+    """Row P74: setup --fleet --apply in a home whose path holds C, with tmux found in a folder whose path holds C
+    (so the timer's PATH holds it too). The service's start line and Environment= line, read as systemd splits
+    them, give the launcher's path and the PATH whole; every line setup prints for a person to run, split as a
+    shell splits it, gives each path whole."""
+    import shlex
+    home, stub = tmp_path / f"ho{c}me", tmp_path / f"st{c}ub"
+    (home / "proj").mkdir(parents=True)
+    stub.mkdir()
+    for n, b in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
+        (stub / n).write_text(f"#!/bin/sh\n{b}\n")
+        os.chmod(stub / n, 0o755)
+    busctl_standin.plant(str(stub))
+    (home / ".claude" / "plugins").mkdir(parents=True)
+    (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
+    env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "PATH": str(stub),
+           "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    setup = [sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--fleet", "--no-tune-now"]
+    plan = subprocess.run(setup, cwd=str(home / "proj"), env=env, capture_output=True, text=True, timeout=120)
+    r = subprocess.run(setup + ["--apply"], cwd=str(home / "proj"), env=env, capture_output=True, text=True, timeout=120)
+    launcher = str(home / ".claude" / "pit-stop" / "bin" / "pit-stop-restart")
+    want_path = ":".join([str(stub), "/usr/local/bin", "/usr/bin", "/bin"])
+    unit = (home / ".config" / "systemd" / "user" / "pit-stop-restart.service").read_text()
+    start = [l[len("ExecStart="):] for l in unit.splitlines() if l.startswith("ExecStart=")]
+    envs = [l[len("Environment="):] for l in unit.splitlines() if l.startswith("Environment=")]
+    assert len(start) == 1 and len(envs) == 1, unit
+    words = systemd_words(start[0])
+    read = [systemd_unescape(words[0], False)] + [systemd_unescape(w, True) for w in words[1:]]
+    assert read == [sys.executable, "-I", launcher, "--live"], (start[0], read)
+    assert [systemd_unescape(w, False) for w in systemd_words(envs[0])] == [f"PATH={want_path}"], envs[0]
+    shown = [l.split("First look at what it would do: ", 1)[1] for l in (plan.stdout + r.stdout).splitlines()
+             if "First look at what it would do: " in l]
+    assert len(shown) == 2 and "fleet mode is set up" in r.stdout, plan.stdout[-1200:] + r.stdout[-1200:] + r.stderr[-800:]
+    for s in shown:
+        assert shlex.split(s) == [sys.executable, "-I", launcher], s
+
+
+@pytest.mark.parametrize("c", P74_CHARS + ("".join(P74_CHARS),), ids=lambda c: "all" if len(c) > 1 else f"U+{ord(c):04X}")
+def test_G12_48_the_launch_agent_and_its_lines_hold_each_value_whole(tmp_path, monkeypatch, capsys, c):
+    """Row P74, the Mac's side: the launch agent setup writes, with C in the Python program's path, the launcher's
+    path and the PATH, is read by a property-list reader and gives each value whole; the lines setup prints that
+    name the job's file (load it, switch it off, start it) split as a shell splits them give the path whole."""
+    import plistlib
+    import shlex
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    agents = tmp_path / f"La{c}unch"
+    py, binp, path = f"/op{c}t/python3", str(tmp_path / f"b{c}in" / "pit-stop-restart"), f"/us{c}r/bin:/bin"
+    monkeypatch.setattr(su.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(su, "PLIST", str(agents / "ai.thewindstorm.pit-stop-restart.plist"))
+    monkeypatch.setattr(su, "BIN", binp)
+    monkeypatch.setattr(su, "UNDO", str(tmp_path / "setup-undo.json"))
+    monkeypatch.setattr(su, "timer_path", lambda: path)
+    monkeypatch.setattr(su.sys, "executable", py)
+    monkeypatch.setattr(su, "run", lambda cmd, t=30, env=None: subprocess.CompletedProcess(
+        cmd, 113 if cmd[:2] == ["launchctl", "print"] else 5, "", ""))
+    assert su.install_timer(5, True) is True
+    job = plistlib.loads((agents / "ai.thewindstorm.pit-stop-restart.plist").read_bytes())
+    assert job["ProgramArguments"] == [py, "-I", binp, "--live"] and job["EnvironmentVariables"] == {"PATH": path}, job
+    lines = [capsys.readouterr().out.split("load it with: ", 1)[1].strip(),
+             su.fleet_stop_line("stopped", su.LAUNCHD_LABEL, False, True).split("Start it with: ", 1)[1]]
+    (agents / "ai.thewindstorm.pit-stop-restart.plist").write_text("<plist>a person's own job</plist>\n")
+    lines += [l.split("To switch it off: ", 1)[1] for l in su.undo(ledger=str(tmp_path / "none.json"),
+                                                                   run_cmd=lambda *a, **k: None) if "To switch it off: " in l]
+    assert len(lines) == 3, lines
+    for s in lines:
+        assert shlex.split(s)[-1] == su.PLIST, s
+    assert shlex.split(su.helper_command("--live")) == [py, "-I", binp, "--live"]
+
+
+@pytest.mark.parametrize("where,value,named", [
+    ("program", 'py"x', "a double quote"), ("program", "py'x", "an apostrophe"), ("program", "py\\x", "a backslash"),
+    ("program", "py${x", "a dollar sign followed by an opening brace"), ("program", "py\x01x", "\\x01"),
+    ("home", "ho\nme", "a line break"), ("home", "ho​me", "a character that cannot be seen"),
+    ("path", "st ub", "a line break"), ("path", "st\x7fub", "\\x7f")],
+    ids=lambda v: v if v in ("program", "home", "path") else None)
+def test_G12_48_a_value_no_timer_file_can_hold_is_refused_before_the_first_write(tmp_path, where, value, named):
+    """Row P74: a value the unit cannot hold is refused by setup --fleet --apply before its first write, in one
+    line that names the character and says nothing was made; the home's bytes are read unchanged."""
+    home = tmp_path / ("ho me" if where != "home" else value)
+    stub = tmp_path / (value if where == "path" else "stub")
+    (home / "proj").mkdir(parents=True)
+    stub.mkdir()
+    for n, b in (("tmux", "exit 0"), ("systemctl", SYSTEMCTL_RUNNING), ("crontab", 'echo "no crontab for x" >&2; exit 1')):
+        (stub / n).write_text(f"#!/bin/sh\n{b}\n")
+        os.chmod(stub / n, 0o755)
+    busctl_standin.plant(str(stub))
+    (home / ".claude" / "plugins").mkdir(parents=True)
+    (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
+    py = sys.executable
+    if where == "program":
+        (tmp_path / value).mkdir()
+        py = str(tmp_path / value / "python3")
+        os.symlink(sys.executable, py)
+    before = {str(f): (f.is_symlink(), f.read_bytes() if f.is_file() else None) for f in home.rglob("*")}
+    r = subprocess.run([py, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--fleet", "--no-tune-now", "--apply"],
+                       cwd=str(home / "proj"), env={"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home),
+                                                    "PATH": str(stub), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
+                       capture_output=True, text=True, timeout=120)
+    after = {str(f): (f.is_symlink(), f.read_bytes() if f.is_file() else None) for f in home.rglob("*")}
+    out = r.stdout.splitlines()
+    assert after == before, sorted(set(after) ^ set(before))
+    assert r.returncode == 1 and len(out) == 1 and named in out[0] and "nothing was made" in out[0], r.stdout + r.stderr
+
+
+def test_G12_49_the_stand_in_answers_as_systemd_was_seen_to(tmp_path):
+    """The busctl stand-in the setup tests use, read against systemd 255's own recorded answers: the same unit files
+    and drop-ins, planted in a home, give word for word what systemd gave (fixtures/systemd-255-bus-answers.json)."""
+    home = str(tmp_path / "pit space")
+    ud = os.path.join(home, ".config", "systemd", "user")
+    os.makedirs(os.path.join(ud, "pit-stop-restart.service.d"))
+    with open(os.path.join(ud, "pit-stop-restart.service"), "w") as f:
+        f.write('[Service]\nType=oneshot\nEnvironment="PATH=/usr/bin:/usr/local/bin:/bin"\n'
+                f'ExecStart="/usr/bin/python3" -I "{home}/.claude/pit-stop/bin/pit-stop-restart" --live\n')
+    with open(os.path.join(ud, "lab-062.service"), "w") as f:
+        f.write(f"[Service]\nEnvironment=PATH=/usr/bin:/bin\nExecStart=/usr/bin/python3 -I {home}/.claude/pit-stop/bin/"
+                "pit-stop-restart --live\n")
+    with open(os.path.join(ud, "lab-own.service"), "w") as f:
+        f.write("[Service]\nExecStart=/bin/sh -c 'exec python3 -I \"$HOME/.claude/pit-stop/bin/pit-stop-restart\" --live'\n")
+
+    def ask(unit, key):
+        for prop in ("LoadState", "FragmentPath", "ExecStart", "Environment", "DropInPaths"):
+            cmd = ["busctl", "--user", "--json=short", "get-property", "org.freedesktop.systemd1",
+                   "/org/freedesktop/systemd1/unit/" + busctl_standin.bus_label(unit), "x", prop]
+            got = json.loads(busctl_standin.answer(cmd, home=home).stdout)
+            want = busctl_standin.recorded(key, prop, home)
+            assert got == want, (key, prop, got, want)
+    ask("pit-stop-restart.service", "pit-stop-restart.service, as 0.6.3's setup writes it")
+    with open(os.path.join(ud, "pit-stop-restart.service.d", "10-own.conf"), "w") as f:
+        f.write("[Service]\nEnvironment=MADE_UP_TOKEN=madeup-not-a-secret-7f3a\n")
+    ask("pit-stop-restart.service", "pit-stop-restart.service, with one drop-in that adds a variable")
+    with open(os.path.join(ud, "pit-stop-restart.service.d", "20-path.conf"), "w") as f:
+        f.write("[Service]\nEnvironment=PATH=/opt/made-up/bin\n")
+    ask("pit-stop-restart.service", "pit-stop-restart.service, with that drop-in and a second one over PATH")
+    ask("lab-062.service", "lab-062.service, 0.6.2's shape")
+    ask("lab-own.service", "lab-own.service, a person's own shape")
+    ask("not-there-at-all.service", "not-there-at-all.service, not there")
+
+
+SECRET = "madeup-not-a-secret-7f3a"
+
+
+@pytest.mark.parametrize("case", ["0.6.2's unit, a home with a space", "an ordinary home", "a manager that cannot be asked",
+                                  "a person's unit with the exact argument", "a person's unit of another shape",
+                                  "a person's file at setup's path", "a person's drop-in adding a variable",
+                                  "a person's drop-in over PATH", "a crontab line"])
+def test_G12_49_fleet_mode_is_set_up_only_when_the_timers_command_line_is_read_whole(tmp_path, case):
+    """Row P76: setup --fleet --apply, the timer read active and enabled (systemd 255's words), then the command the
+    timer's service holds read from systemd's bus (busctl's JSON form; the stand-in answers in systemd's recorded
+    words) and compared argument by argument with the launcher setup wrote. A unit setup wrote is set up only when
+    it is the launcher; could not be read is never set up; a person's unit is never called wrong; a value setup did
+    not write is never printed or logged; setup never starts the service to try it."""
+    home = tmp_path / ("pit space" if "space" in case else "home")
+    stub, ud = tmp_path / "stub", home / ".config" / "systemd" / "user"
+    (home / "proj").mkdir(parents=True)
+    stub.mkdir()
+    cron = 'echo "no crontab for x" >&2; exit 1'
+    if case == "a crontab line":
+        cron = f'echo "*/5 * * * * python3 -I {home}/.claude/pit-stop/bin/pit-stop-restart --live"'
+    started = tmp_path / "started.txt"
+    for n, b in (("tmux", "exit 0"), ("crontab", cron),
+                 ("systemctl", f'case "$2" in start|restart) echo "$*" >> "{started}";; esac; ' + SYSTEMCTL_RUNNING)):
+        (stub / n).write_text(f"#!/bin/sh\n{b}\n")
+        os.chmod(stub / n, 0o755)
+    answers = {"a manager that cannot be asked": "no bus",
+               "a person's unit of another shape": {"ExecStart": "lab-own.service, a person's own shape"},
+               "0.6.2's unit, a home with a space": {"ExecStart": "lab-062.service, 0.6.2's shape"}}.get(case, "file")
+    busctl_standin.plant(str(stub), answers)
+    (home / ".claude" / "plugins").mkdir(parents=True)
+    (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
+    launcher = f"{home}/.claude/pit-stop/bin/pit-stop-restart"
+    if case == "0.6.2's unit, a home with a space":        # 0.6.2's own words, its mark, no record
+        ud.mkdir(parents=True)
+        (ud / "pit-stop-restart.service").write_text(
+            "[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
+            f"Environment=PATH=/usr/bin:/bin\nExecStart=/usr/bin/python3 -I {launcher} --live\nTimeoutStartSec=1200\n")
+    if case in ("a person's unit with the exact argument", "a person's unit of another shape"):
+        ud.mkdir(parents=True)
+        (ud / "my-fleet.service").write_text(f'[Service]\nExecStart=/usr/bin/env python3 -I "{launcher}" --live\n'
+                                             if "exact" in case else
+                                             "[Service]\nExecStart=/bin/sh -c 'exec python3 -I \"$HOME/.claude/pit-stop/"
+                                             "bin/pit-stop-restart\" --live'\n")
+    if case == "a person's file at setup's path":           # no record, no mark
+        ud.mkdir(parents=True)
+        (ud / "pit-stop-restart.service").write_text(f'[Service]\nExecStart=/usr/bin/python3 "{launcher}"\n')
+    if "drop-in" in case:
+        (ud / "pit-stop-restart.service.d").mkdir(parents=True)
+        (ud / "pit-stop-restart.service.d" / "10-own.conf").write_text(
+            f"[Service]\nEnvironment={'MADE_UP_TOKEN' if 'variable' in case else 'PATH'}={SECRET}\n")
+    r = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--fleet", "--no-tune-now", "--apply"],
+                       cwd=str(home / "proj"), env={"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home),
+                                                    "PATH": str(stub), "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"},
+                       capture_output=True, text=True, timeout=120)
+    out, said = r.stdout + r.stderr, r.stdout[r.stdout.find("7. check"):]
+    assert not started.exists(), "setup started the service to try it"
+    kept = [f for f in home.rglob("*") if f.is_file() and ".claude/pit-stop" in str(f) and SECRET.encode() in f.read_bytes()]
+    assert SECRET not in out and kept == [], (out[-1500:], kept)
+    set_up = "fleet mode is set up" in said
+    if case == "0.6.2's unit, a home with a space":
+        assert not set_up and r.returncode == 1, said
+        assert ("the service's start line holds 5 arguments where setup wrote 4: its Python, -I, "
+                f"{shlex.quote(launcher)}, --live") in said, said
+        assert "Fleet mode is NOT set up: the timer runs, but its service does not start the launcher" in said
+        assert "--undo, then this setup again" in said, said
+    elif case == "a manager that cannot be asked":
+        assert not set_up and r.returncode == 1, said
+        assert "Failed to set bus address" in said and "could not be read" in said, said
+        assert "systemctl --user cat pit-stop-restart.service" in said, said
+    elif case == "a person's drop-in over PATH":
+        assert not set_up and r.returncode == 1, said
+        assert "its PATH is not the one setup wrote; 1 drop-in file(s) are read over the file setup wrote" in said, said
+        assert "To see the unit and its drop-ins as systemd reads them: systemctl --user cat pit-stop-restart.service" in said
+        assert "--undo" not in said and "this setup again" not in said, said
+    else:
+        assert set_up and r.returncode == 0, said
+        own = "'s command is your own: setup did not check what it runs"
+        assert (own in said) == (case in ("a person's unit of another shape", "a person's file at setup's path")), said
+        warned = "the service also sets MADE_UP_TOKEN, which setup did not set: yours, left as it is"
+        assert (warned in said) == (case == "a person's drop-in adding a variable"), said
+        if case == "an ordinary home":
+            assert "is the launcher setup wrote, argument by argument, with its PATH" in said, said
+        if case == "a crontab line":
+            assert "a crontab line runs it" in said and "*/5" not in out, said
+
+
+@pytest.mark.parametrize("case", ["0.6.2's unit, a home with a space", "the unit as this version writes it",
+                                  "a manager that cannot be asked", "a person's drop-in over PATH",
+                                  "a person's unit of another shape", "setup's marked unit changed by hand",
+                                  "0.6.2's unit and a crontab line, a home with a space",
+                                  "setup's unit that differs and a person's unit",
+                                  "setup's unit as this version writes it and a crontab line",
+                                  "setup's unit and a crontab that cannot be read"])
+def test_G12_52_the_plan_reads_back_a_unit_setup_wrote_as_apply_does(tmp_path, case):
+    """Row P86: over a unit setup wrote (an earlier version's too), setup --fleet without --apply, the plan, makes the
+    same read-only read-back as the apply road and says the same finding and the same one next step, word for word;
+    it never gives the line meant for a person's own timer for such a unit; it changes nothing in the home. A unit
+    setup did not write keeps the plan's words of before. A unit that carries setup's mark but was changed by hand:
+    the plan's read-back gives the count and place, and no word of the changed file is printed as setup's. More than
+    one schedule, setup's unit not starting the launcher and a person's schedule that does: both roads read the same
+    schedules and say the same words; setup's unit gets its line and step, the screen never says "NOT set up", and
+    the closing sentence names what runs the helper first. The step is walked exactly as printed: then only the
+    person's schedule runs the helper, nothing of the person's changed, and restart.json is kept byte for byte (undo
+    keeps it while something else runs the helper, and where what else runs it could not be read). The answers are systemd 255's, recorded
+    (G12.49)."""
+    home = tmp_path / ("pit space" if "space" in case else "home")
+    stub, ud = tmp_path / "stub", home / ".config" / "systemd" / "user"
+    (home / "proj").mkdir(parents=True)
+    stub.mkdir()
+    launcher = f"{home}/.claude/pit-stop/bin/pit-stop-restart"
+    cron_line = f'echo "*/5 * * * * python3 -I {shlex.quote(launcher)} --live"'
+    cron = cron_line if "crontab line" in case and "this version" not in case else 'echo "no crontab for x" >&2; exit 1'
+
+    for n, b in (("tmux", "exit 0"), ("crontab", cron), ("systemctl", SYSTEMCTL_RUNNING)):
+        (stub / n).write_text(f"#!/bin/sh\n{b}\n")
+        os.chmod(stub / n, 0o755)
+    (home / ".claude" / "plugins").mkdir(parents=True)
+    (home / ".claude" / "plugins" / "installed_plugins.json").write_text(json.dumps(
+        {"plugins": {"windstorm-pit-stop@thewindstorm": [{"scope": "user", "installPath": ROOT}]}}))
+    env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "PATH": str(stub),
+           "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    setup = lambda *x: subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--fleet",
+                                       "--no-tune-now", *x], cwd=str(home / "proj"), env=env, capture_output=True,
+                                      text=True, timeout=120)
+    answers = "file"
+    if case.startswith("0.6.2's unit"):                     # 0.6.2's own words, its mark, no record
+        ud.mkdir(parents=True)
+        (ud / "pit-stop-restart.service").write_text(
+            "[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
+            f"Environment=PATH=/usr/bin:/bin\nExecStart=/usr/bin/python3 -I {launcher} --live\nTimeoutStartSec=1200\n")
+        answers = {"ExecStart": "lab-062.service, 0.6.2's shape"}
+    elif case == "setup's unit that differs and a person's unit":   # the mark kept, a fifth argument; the person's own
+        ud.mkdir(parents=True)
+        (ud / "pit-stop-restart.service").write_text(
+            "[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
+            f"Environment=PATH=/usr/bin:/bin\nExecStart=/usr/bin/python3 -I {launcher} --live --hand\n")
+        (ud / "my-fleet.service").write_text(f'[Service]\nExecStart=/usr/bin/env python3 -I "{launcher}" --live\n')
+    elif case == "setup's marked unit changed by hand":     # the mark kept, no record, a hand-made first word
+        ud.mkdir(parents=True)
+        (ud / "pit-stop-restart.service").write_text(
+            "[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
+            f"Environment=PATH=/usr/bin:/bin\nExecStart=/opt/hand-made/python3 -I {launcher} --live --hand\n")
+    elif case == "a person's unit of another shape":
+        ud.mkdir(parents=True)
+        (ud / "my-fleet.service").write_text("[Service]\nExecStart=/bin/sh -c 'exec python3 -I \"$HOME/.claude/pit-stop/"
+                                             "bin/pit-stop-restart\" --live'\n")
+        answers = {"ExecStart": "lab-own.service, a person's own shape"}
+    else:                                                   # this version's setup wrote the unit first
+        busctl_standin.plant(str(stub), "file")
+        r = setup("--apply")
+        assert r.returncode == 0 and "fleet mode is set up" in r.stdout, r.stdout[-1500:]
+        if case == "a manager that cannot be asked":
+            answers = "no bus"
+        if case == "a person's drop-in over PATH":
+            (ud / "pit-stop-restart.service.d").mkdir(parents=True)
+            (ud / "pit-stop-restart.service.d" / "10-own.conf").write_text("[Service]\nEnvironment=PATH=/opt/made-up/bin\n")
+        if "crontab line" in case:          # the person adds a crontab line after setup wrote its unit
+            (stub / "crontab").write_text(f"#!/bin/sh\n{cron_line}\n")
+        if "cannot be read" in case:        # crontab -l answers with words Pit Stop does not know as "none"
+            (stub / "crontab").write_text("#!/bin/sh\necho 'crontab: made-up refusal' >&2; exit 1\n")
+            rj = home / ".claude" / "pit-stop" / "restart.json"
+            kept = rj.read_bytes()
+            launcher_was = (home / ".claude" / "pit-stop" / "bin" / "pit-stop-restart").read_bytes()
+            u = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "setup.py"), "--undo"],
+                               cwd=str(home / "proj"), env=env, capture_output=True, text=True, timeout=120)
+            assert u.returncode == 0 and rj.read_bytes() == kept, u.stdout
+            assert ("2. restart.json: kept ~/.claude/pit-stop/restart.json: whether something else still runs it "
+                    "could not be read: crontab\n") in u.stdout, u.stdout
+            assert (home / ".claude" / "pit-stop" / "bin" / "pit-stop-restart").read_bytes() == launcher_was, u.stdout
+            assert ("   launcher ~/.claude/pit-stop/bin/pit-stop-restart kept: whether something else still runs it "
+                    "could not be read: crontab\n") in u.stdout, u.stdout
+            return
+    busctl_standin.plant(str(stub), answers)
+    look = lambda: {str(f): (f.is_symlink(), f.read_bytes() if f.is_file() else None) for f in home.rglob("*")}
+    before = look()
+    plan = setup()
+    assert plan.returncode == 0 and look() == before, (plan.stdout[-1500:], sorted(set(look()) ^ set(before)))
+    step = lambda out: out[out.find("7. check"):]
+    six = lambda out: out[out.find("6. timer"):out.find("7. check")]
+    if case == "setup's marked unit changed by hand":
+        assert ("the service's start line holds 5 arguments where setup wrote 4: its Python, -I, "
+                f"{shlex.quote(os.path.join(home, '.claude', 'pit-stop', 'bin', 'pit-stop-restart'))}, --live") \
+            in step(plan.stdout), plan.stdout
+        assert "hand-made" not in plan.stdout + plan.stderr, plan.stdout
+        return
+    applied = setup("--apply")
+    if case in ("0.6.2's unit and a crontab line, a home with a space", "setup's unit that differs and a person's unit",
+                "setup's unit as this version writes it and a crontab line"):
+        carrier = "a crontab line" if "crontab" in case else "my-fleet.timer"
+        theirs = {f: b for f, (_, b) in before.items() if "my-fleet" in f}
+        assert applied.returncode == 0 and step(plan.stdout) == step(applied.stdout), (step(plan.stdout), step(applied.stdout))
+        said = step(applied.stdout)
+        assert "NOT set up" not in plan.stdout + applied.stdout, said
+        if "this version" in case:          # both run the helper: the count, one is enough, setup's step, no command for theirs
+            assert ("   fleet mode is set up: setup's own timer and a crontab line each run the helper now, so 2 schedules "
+                    "run it. One schedule is enough. To take setup's own timer off, so that a crontab line alone runs "
+                    "the helper: ") in said, said
+            assert said.rstrip("\n").split("\n")[-2].endswith(
+                ", then this setup again, giving again --fleet and any of --budget, --no-auto-tune, --no-self-update, "
+                "--no-tune-now or --days that you gave it before; restart.json is kept, so --plugin-updates holds. "
+                "Taking off a crontab line instead is yours to do, in your own schedule."), said
+            assert not any(w in said for w in ("crontab -e", "crontab -r", "*/5")) and "setup's own timer:" not in said, said
+        else:
+            assert ("   setup's own timer: it runs, but its service does not start the launcher (the line above). To "
+                    f"take it off, so that {carrier} alone runs the helper: ") in said, said
+            assert (f"   fleet mode is set up: {carrier} runs the helper; setup's own timer does not start the helper "
+                    "(its line and step are above)\n") in said, said
+        cmd = said.split(f"{carrier} alone runs the helper: ", 1)[1].split(", then this setup again", 1)[0]
+        rj = home / ".claude" / "pit-stop" / "restart.json"
+        kept = rj.read_bytes()
+        walked = subprocess.run(["/bin/sh", "-c", cmd], cwd=str(home / "proj"), env=env, capture_output=True, text=True,
+                                timeout=120)
+        assert walked.returncode == 0, walked.stdout + walked.stderr
+        plan, applied = setup(), setup("--apply")      # one schedule, the person's: each road keeps its words
+        assert plan.returncode == 0 and "First look at what it would do:" in step(plan.stdout), plan.stdout
+        assert applied.returncode == 0, applied.stdout
+        assert not (ud / "pit-stop-restart.service").exists() and not (ud / "pit-stop-restart.timer").exists()
+        assert step(applied.stdout).count("fleet mode is set up\n") == 1 and "setup's own timer" not in applied.stdout
+        assert {f: b for f, (_, b) in look().items() if "my-fleet" in f} == theirs
+        assert rj.read_bytes() == kept and f"5. {rj}: exists, left exactly as it is" in applied.stdout, applied.stdout
+        assert "2. restart.json: kept ~/.claude/pit-stop/restart.json: something else still runs it: " in walked.stdout
+        return
+    if case == "a person's unit of another shape":          # not setup's: the plan's words of before
+        assert "the timer:" not in step(plan.stdout) and "First look at what it would do:" in step(plan.stdout), plan.stdout
+        assert "To follow plugin updates by itself, make its command:" in six(plan.stdout), plan.stdout
+        return
+    assert step(plan.stdout) == step(applied.stdout), (step(plan.stdout), step(applied.stdout))
+    assert "To follow plugin updates by itself" not in six(plan.stdout) + six(applied.stdout), plan.stdout
+    said = step(plan.stdout)
+    if case == "0.6.2's unit, a home with a space":
+        assert "the service's start line holds 5 arguments where setup wrote 4:" in said and "--undo, then this setup again" in said
+    elif case == "the unit as this version writes it":
+        assert "is the launcher setup wrote, argument by argument, with its PATH" in said and "fleet mode is set up" in said
+    elif case == "a manager that cannot be asked":
+        assert "could not be read" in said and "fleet mode is set up" not in said, said
+    else:
+        assert "systemctl --user cat pit-stop-restart.service" in said and "fleet mode is set up" not in said, said
+
+
+@pytest.mark.parametrize("world", ["a person's unit not read, alone", "setup's unit that differs and a person's unit not read",
+                                   "a crontab line and setup's timer active but disabled",
+                                   "a crontab line and setup's timer stopped",
+                                   "setup's timer and a person's timer active but disabled"])
+def test_G12_52_another_schedule_found_gets_no_step_to_a_second(world):
+    """Row P86, where more than one schedule is found: a timer read as active, enabled or not, is said to run the
+    helper now and is counted; no step printed for setup's own unit starts, enables or writes again setup's timer
+    (a second schedule), and none says setup writes its timer again where it does not; no screen says both "set up"
+    and "NOT set up", and nothing says a timer that runs now does not start the helper. A world with one schedule
+    keeps its words. Step 7's finding from made states (the read itself is G12.49's)."""
+    import io
+    import contextlib
+    import setup as su
+    T = "pit-stop-restart.timer"
+    cron = ("running", "a crontab line runs it (read from crontab -l)", None, False, "a crontab line")
+    mine_unread = ("unread", "what starts mine.service was not read (x)", "mine.timer", False, "mine.timer")
+    states, steps = {
+        "a person's unit not read, alone": ([mine_unread], {}),
+        "setup's unit that differs and a person's unit not read": (
+            [("differs", "argument 5 ...", T, False, "setup"), mine_unread], {T: su.rewrite_step()}),
+        "a crontab line and setup's timer active but disabled": (
+            [cron, ("not-enabled", f"{T} is active but disabled: it runs now and will not start again after a restart",
+                    T, False, "setup")], {}),
+        "a crontab line and setup's timer stopped": ([cron, ("stopped", f"{T} is inactive (enabled)", T, False, "setup")], {}),
+        "setup's timer and a person's timer active but disabled": (
+            [("running", "its service's command ... is the launcher setup wrote", T, False, "setup"),
+             ("not-enabled", "mine.timer is active but disabled: it runs now and will not start again after a restart",
+              "mine.timer", False, "mine.timer")], {}),
+    }[world]
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        set_up = su.say_fleet_states(states, [], steps, False)
+    out = buf.getvalue()
+    if world == "a person's unit not read, alone":
+        assert out.endswith(su.fleet_stop_line("unread", "mine.timer", False, False) + "\n") and not set_up, out
+        return
+    assert "enable --now" not in out and "Enable it with" not in out and "write it again" not in out, out
+    assert not ("set up" in out.replace("NOT set up", "") and "NOT set up" in out), out
+    if world == "setup's unit that differs and a person's unit not read":
+        assert not set_up and "Setup does not write its timer again while another schedule is found. To take it off: " in out
+        assert "restart.json is kept, so --plugin-updates holds" in out, out
+    if world == "a crontab line and setup's timer active but disabled":
+        assert set_up and "a crontab line and setup's own timer each run the helper now, so 2 schedules run it" in out
+        assert "setup's own timer does not start" not in out and "The step that takes setup's own timer off is above." in out
+        assert "To take it off, so that a crontab line alone runs the helper: " in out, out
+    if world == "a crontab line and setup's timer stopped":
+        assert set_up and "   setup's own timer: pit-stop-restart.timer is stopped. To take it off, so that a crontab line " \
+            "alone runs the helper: " in out, out
+        assert "a crontab line runs the helper; setup's own timer does not start the helper (its line and step are above)" in out
+    if world == "setup's timer and a person's timer active but disabled":
+        assert set_up and "setup's own timer and mine.timer each run the helper now, so 2 schedules run it; mine.timer " \
+            "will not start again after a restart. One schedule is enough. Taking off mine.timer is yours to do" in out, out
+        assert "mine.timer does not start" not in out and "To take setup's own timer off" not in out, out
+
+
+@pytest.mark.parametrize("image", ["macos-15-intel-15.7.9", "macos-15-15.8.2", "macos-26-intel-26.6.1", "macos-26-26.7.2"])
+def test_G12_49_launchd_parsed_reads_the_runner_images_prints(image):
+    """Row P76, the Mac's side, on the form GitHub's macOS runner images print (tests/fixtures/launchctl-print, the
+    bytes unchanged): each print read by launchd_parsed gives the agent's arguments whole and its own environment
+    block, never the inherited or default ones; what launchd adds there itself is what setup counts as launchd's.
+    Lines end at a line feed only: a value of the job's own that holds a character Python also breaks lines on
+    (U+2028, U+0085, U+001C) is read whole, and the entries after it are read too."""
+    import setup as su
+    with open(os.path.join(ROOT, "tests", "fixtures", "launchctl-print", image + ".txt"), encoding="utf-8",
+              newline="") as f:
+        text = f.read()
+    args, env = su.launchd_parsed(text)
+    assert args == ["/bin/sh", "-c", "sleep 300"], args
+    launchds = {"XPC_SERVICE_NAME", "OSLogRateLimit"} if image.startswith("macos-26") else {"XPC_SERVICE_NAME"}
+    assert env.pop("TRIAL_VALUE") == "made up" and set(env) == launchds, env
+    assert set(env) <= set(su.LAUNCHD_OWN_ENV) and "SSH_AUTH_SOCK" not in env and "PATH" not in env
+    for c in (" ", "\u0085", "\x1c"):
+        planted = text.replace("\tenvironment = {\n", f"\tenvironment = {{\n\t\tMADE_UP => a{c}b\n", 1)
+        args, env = su.launchd_parsed(planted)
+        assert args == ["/bin/sh", "-c", "sleep 300"] and env.get("MADE_UP") == f"a{c}b", (repr(c), env)
+        assert env.get("TRIAL_VALUE") == "made up" and "XPC_SERVICE_NAME" in env, (repr(c), env)
+
+
+def test_G12_49_launchd_answers_as_printed(tmp_path, monkeypatch):
+    """Row P76, the Mac's side: the job file setup wrote, then `launchctl print` in the form the family recorded on
+    macOS 15, 26 and 27 (11-25): the arguments one to a line after two tabs, the job's own environment block beside
+    the inherited and default ones, launchd's own XPC_SERVICE_NAME and OSLogRateLimit in it. The launcher read whole
+    is set up; one argument off, or the print not read, is not."""
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import setup as su
+    binp = str(tmp_path / "pit space" / "pit-stop-restart")
+    monkeypatch.setattr(su.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(su, "PLIST", str(tmp_path / "ai.thewindstorm.pit-stop-restart.plist"))
+    monkeypatch.setattr(su, "BIN", binp)
+    monkeypatch.setattr(su, "timer_path", lambda: "/usr/bin:/bin")
+    monkeypatch.setattr(su, "run", lambda cmd, t=30, env=None: subprocess.CompletedProcess(cmd, 113, "", ""))
+    assert su.install_timer(5, True) is True
+
+    def printed(args, env):
+        return ("gui/501/ai.thewindstorm.pit-stop-restart = {\n\tactive count = 0\n\tpath = x\n\ttype = LaunchAgent\n"
+                "\tstate = not running\n\n\tprogram = " + args[0] + "\n\targuments = {\n" + "".join(f"\t\t{a}\n" for a in args)
+                + "\t}\n\n\tinherited environment = {\n\t\tSSH_AUTH_SOCK => /private/tmp/x/Listeners\n\t}\n\n"
+                "\tdefault environment = {\n\t\tPATH => /usr/bin:/bin:/usr/sbin:/sbin\n\t}\n\n\tenvironment = {\n"
+                + "".join(f"\t\t{k} => {v}\n" for k, v in env.items()) + "\t}\n\n\tdomain = gui/501 [100003]\n}\n")
+    whole = [sys.executable, "-I", binp, "--live"]
+    own = {"PATH": "/usr/bin:/bin", "OSLogRateLimit": "64", "XPC_SERVICE_NAME": "ai.thewindstorm.pit-stop-restart"}
+    for args, env, want in ((whole, own, "running"), (whole[:2] + binp.split(" ") + ["--live"], own, "differs"),
+                            (whole, dict(own, PATH="/opt/x"), "differs"), (None, None, "cmd-unread")):
+        answer = subprocess.CompletedProcess([], 0, printed(args, env), "") if args else \
+            subprocess.CompletedProcess([], 113, "", "Could not find service \"x\" in domain for user gui: 501\n")
+        monkeypatch.setattr(su, "run", lambda cmd, t=30, env=None, a=answer: a)
+        st, said, step, notes = su.command_read_back(True, True)
+        assert st == want and notes == [], (want, st, said)
+        assert (step is None) == (want == "running") and "/opt/x" not in said, (said, step)
+
+
+P82_GOOD = {"allow_names": ["on-list", "keep-out"], "deny_names": ["keep-out"], "deny_name_globs": [], "deny_paths": [],
+            "notify_command": "echo made-up-token-5c2e"}
+P82_STATES = ("0 bytes", "cut short", "a stray comma", "a JSON list", "mode 000")
+
+
+def _p82_run(tmp_path, monkeypatch, state):
+    """One helper run (--live) after restart.json is planted in STATE (None: not there; "good": P82_GOOD), the
+    module read again as a new run reads it. Every step the helper can take is a recorder: (what it did, its log)."""
+    cfg = tmp_path / "cfg" / "pit-stop"
+    cfg.mkdir(parents=True, exist_ok=True)
+    rj = cfg / "restart.json"
+    good = json.dumps(P82_GOOD, indent=2).encode()
+    if os.path.exists(rj):
+        os.chmod(rj, 0o600)
+        os.remove(rj)
+    if state is not None:
+        rj.write_bytes({"0 bytes": b"", "cut short": good[:len(good) // 2], "a JSON list": b'["deny_names", "keep-out"]',
+                        "a stray comma": good.replace(b'"deny_paths": []', b'"deny_paths": [],', 1)}.get(state, good))
+    if state == "mode 000":
+        os.chmod(rj, 0)
+    monkeypatch.setattr(sys, "argv", ["pit-stop-restart", "--live"])
+    rab = _rab(tmp_path, monkeypatch)
+    did, names = [], ("keep-out", "off-list", "on-list")
+    sessions = [dict(_sess(name=n), sessionId=f"{n}-0000", pid=1000 + i) for i, n in enumerate(names)]
+    monkeypatch.setattr(rab.pc, "live_sessions", lambda *a, **k: (sessions, "registry"))
+    monkeypatch.setattr(rab.pc, "newest_installed_version", lambda *a: "2.1.400")
+    monkeypatch.setattr(rab, "panes", lambda: {f"tty{1000 + i}": f"pane-{n}" for i, n in enumerate(names)})
+    monkeypatch.setattr(rab, "pid_tty", lambda pid: f"tty{pid}")
+    monkeypatch.setattr(rab, "type_line", lambda target, text: did.append(("typed", target, text)) or (True, ""))
+    monkeypatch.setattr(rab, "handle", lambda s, *a: did.append(("handle", s["name"])))
+    monkeypatch.setattr(rab, "maybe_reload", lambda s, *a: did.append(("reload", s["name"])))
+    monkeypatch.setattr(rab, "update_claude_code", lambda *a: did.append(("Claude Code update",)))
+    monkeypatch.setattr(rab, "update_plugins", lambda *a: did.append(("plugin update",)))
+    monkeypatch.setattr(rab, "start_tune", lambda *a: did.append(("tune",)))
+    import needs_you
+    monkeypatch.setattr(needs_you, "refresh", lambda *a, **k: did.append(("needs-you list",)))
+    before = os.path.getsize(rab.LOG) if os.path.exists(rab.LOG) else 0
+    rab.main()
+    if not os.path.exists(rab.LOG):
+        return rab, did, ""
+    with open(rab.LOG) as f:
+        f.seek(before)
+        return rab, did, f.read()
+
+
+@pytest.mark.parametrize("state", P82_STATES)
+def test_G4_46_an_unreadable_restart_json_restarts_nothing(tmp_path, monkeypatch, capsys, state):
+    """Row P82: restart.json holding a deny list and an allow list, planted in a state that cannot be read. The
+    helper's run acts on no session (neither the deny-listed one nor the one off the allow list) and takes no step
+    a key of the file switches: no typing, restart, reload, plugin or Claude Code update, needs-you list or tune. One
+    log line names the file, where the read stopped and the one next step; no value of the file is in it. The step,
+    taken as printed, and the file mended: the next run acts with the lists in force and the stop does not come back.
+    Not there: today's defaults, every session a candidate."""
+    rab, did, log = _p82_run(tmp_path, monkeypatch, None)                    # not there: the defaults, as today
+    assert ("handle", "keep-out") in did and ("handle", "off-list") in did and "could not be read" not in log, (did, log)
+    rab, did, log = _p82_run(tmp_path, monkeypatch, state)
+    if state == "mode 000" and os.geteuid() == 0:                          # the administrator reads it: the lists hold
+        assert [d for d in did if d[0] == "handle"] == [("handle", "on-list")] and "could not be read" not in log
+        return
+    stop = [l for l in log.splitlines() if "restart.json could not be read" in l]
+    assert did == [] and len(stop) == 1 and len(log.splitlines()) == 1, (did, log)
+    where = {"0 bytes": "it is empty (0 bytes)", "cut short": "its JSON stops at line ", "a stray comma":
+             "its JSON stops at line ", "a JSON list": "it holds a JSON list where one JSON object ({ ... }) is wanted",
+             "mode 000": "it could not be opened (PermissionError)"}[state]
+    assert where in stop[0] and str(tmp_path / "cfg" / "pit-stop" / "restart.json") in stop[0], stop[0]
+    assert "made-up-token" not in log + capsys.readouterr().out and "keep-out" not in stop[0], stop[0]
+    step = stop[0].split("The one next step, ", 1)[1].split("; the next run reads it again.", 1)[0]
+    if ": " in step:                                                    # a command: run as printed
+        ran = subprocess.run(["sh", "-c", step.split(": ", 1)[1]], capture_output=True, text=True, timeout=60)
+        if state in ("cut short", "a stray comma"):
+            line, col = re.search(r"line (\d+), column (\d+)", stop[0]).groups()
+            assert ran.returncode != 0 and f"line {line} column {col}" in ran.stderr, (step, ran.stderr)
+        else:
+            assert ran.returncode == 0, (step, ran.stderr)
+    if state != "mode 000":                                             # the person mends what it showed
+        (tmp_path / "cfg" / "pit-stop" / "restart.json").write_text(json.dumps(P82_GOOD))
+    else:
+        assert json.loads((tmp_path / "cfg" / "pit-stop" / "restart.json").read_text()) == P82_GOOD
+    rab, did, log = _p82_run(tmp_path, monkeypatch, "kept")
+    assert [d for d in did if d[0] == "handle"] == [("handle", "on-list")] and "could not be read" not in log, (did, log)
+
+
+def test_G4_46_status_says_the_helper_is_stopped_and_never_uses_the_defaults(tmp_path, monkeypatch):
+    """Row P82 in /pit-stop status: with restart.json not read, status (not stopped itself) says the helper is
+    stopped with the same line, and a session behind is never judged by the default lists."""
+    rab, did, log = _p82_run(tmp_path, monkeypatch, "a stray comma")
+    import needs_you as ny
+    monkeypatch.setattr(ny, "_rab", lambda: rab)
+    monkeypatch.setattr(ny, "behind_since", lambda v: time.time() - 3 * 86400)
+    monkeypatch.setattr(rab, "plugin_info", lambda: {"root": None, "gen": None, "versions": []})
+    d = ny.collect([dict(_sess(name="off-list"), sessionId="off-list-0000")], "2.1.400", time.time())
+    page = ny.render(d, time.time())
+    assert "The restart helper is stopped:" in page and rab.CFG_STOP in page and "Nothing needs you." not in page, page
+    assert "the restart helper does nothing while restart.json cannot be read" in page, page
+    assert "not on the list the helper may touch" not in page and "made-up-token" not in page, page
+    assert "the restart helper is stopped" in ny.headline(d)
+
+
 def test_G12_18_the_walk_covers_what_decides_what_runs():
     """Rule 28, WHAT RUNS INCLUDES WHAT DECIDES WHAT RUNS: besides Pit Stop's own settings, launcher, timer and
     code, status names, when another account can write them, installed_plugins.json (it tells the launcher
@@ -5065,7 +5718,7 @@ def test_G12_18_the_walk_covers_what_decides_what_runs():
         assert r.returncode == 0, r.stderr[-600:]
         assert (f"~/.claude/plugins/installed_plugins.json (666) can be written by another account, by its permission bits: "
                 f"it is the plugin list that tells Pit Stop's launcher which code to run. It is not Pit Stop's, so it stays. "
-                f"To close it: chmod go-w {plist}") in out, out
+                f"To close it, run this line:\n      chmod go-w '{plist}'") in out, out
         assert "~/.claude/sessions (777)" in out and "Claude Code's list of sessions, which tells Pit Stop's helper where to type" in out
         assert "~/.local/bin (777)" in out and "below it is the claude program Pit Stop runs as you" in out
         assert ("~/pybin (777) can be written by another account, by its permission bits: it could delete and replace "
@@ -5074,6 +5727,165 @@ def test_G12_18_the_walk_covers_what_decides_what_runs():
                 f"(~/.claude/plugins/cache/m/windstorm-pit-stop/0.1.0) can be written by another account") in out, out
     finally:
         shutil.rmtree(tmp_path)
+
+
+def _g12_50_home(base, name, where):
+    """A made home where NAME is the last part of the one path a chmod line names: WHERE "home", the home's own
+    folder (777, another account can write it); WHERE "copy", the version folder of an installed copy of Pit Stop
+    made where Pit Stop finds them (the plugin cache), one file in it left open. Also the folders a path taken in
+    parts would name, each 777. Returns the home, its .claude, the folder the line names, the file it opens
+    (None for the home) and those folders."""
+    home = base / (name if where == "home" else "h")
+    cfg = home / ".claude"
+    copy = cfg / "plugins" / "cache" / "m" / "windstorm-pit-stop" / (name if where == "copy" else "0.1.0")
+    (copy / "scripts").mkdir(parents=True)
+    (cfg / "pit-stop").mkdir()
+    opened = copy / "scripts" / "restart_at_break.py"
+    opened.write_text("")
+    for d in (home, cfg, cfg / "pit-stop", cfg / "plugins", cfg / "plugins" / "cache", copy.parent.parent, copy.parent,
+              copy, copy / "scripts"):
+        os.chmod(d, 0o755)
+    os.chmod(opened, 0o644)
+    if where == "home":
+        os.chmod(home, 0o777)
+        target, opened = home, None
+    else:
+        os.chmod(opened, 0o666)
+        target = copy
+    decoys = [base / "pit", base / "space"]
+    for d in decoys:
+        d.mkdir(exist_ok=True)
+        os.chmod(d, 0o777)
+    return home, cfg, target, opened, decoys
+
+
+def _g12_50_roads(home, cfg, uid=None):
+    """Setup's own print (its plan, as main() prints close_open) and /pit-stop status's repeat (needs_you), each as
+    printed, for a made home; UID: the number Pit Stop is made to run as (G12.16's way)."""
+    env = {"TMUX_TMPDIR": os.environ["TMUX_TMPDIR"], "HOME": str(home), "CLAUDE_CONFIG_DIR": str(cfg),
+           "PATH": "/nonexistent", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"}
+    pre = ("import os, sys; sys.path.insert(0, sys.argv[1]); "
+           + (f"os.getuid = lambda: {uid}; " if uid is not None else "")
+           + "import setup as su; su.group_members = lambda gid: set(); ")
+    codes = {"setup": pre + "print('\\n'.join(su.close_open(False)))",
+             "status": pre + ("import needs_you as ny, time; now = time.time(); "
+                              "print(ny.render(ny.collect([], None, now, open_=ny.open_now()), now))")}
+    if uid is None:
+        r = subprocess.run([made_python(), "-I", os.path.join(ROOT, "scripts", "setup.py"), "--no-tune-now"],
+                           cwd=str(cfg), env=env, capture_output=True, text=True, timeout=120)
+        assert r.returncode == 0, r.stderr[-600:]
+        assert "would close" in r.stdout or "none of what Pit Stop wrote" in r.stdout, r.stdout
+        out = {"setup": r.stdout}
+    else:
+        out = {}
+    for road, code in codes.items():
+        if road in out:
+            continue
+        r = subprocess.run([made_python(), "-I", "-c", code, os.path.join(ROOT, "scripts")], env=env,
+                           capture_output=True, text=True, timeout=120)
+        assert r.returncode == 0, r.stderr[-600:]
+        out[road] = r.stdout
+    return out
+
+
+def _g12_50_commands(out):
+    """The chmod commands as printed: each line that is the command alone; where none is alone on its line (the
+    form before G12.50), the text after "To close it: " or "To close them: ", so the red shows what a shell does
+    with it."""
+    alone = [l.strip() for l in out.splitlines() if l.strip().startswith("chmod ")]
+    inline = [l.split(m, 1)[1] for l in out.splitlines() for m in ("To close it: ", "To close them: ") if m in l]
+    return alone, inline
+
+
+def test_G12_50_the_chmod_lines_hold_the_folders_path_as_one_value():
+    """G12.50 (i): through both roads (setup's own print and /pit-stop status), in made homes where the last part
+    of the path a chmod line names holds a space, an apostrophe, a semicolon or a leading dash (the home's own
+    folder for the chmod go-w line; an installed copy's version folder for the chmod -R go-w line), the line stands
+    alone on its own line and, handed to a shell exactly as printed, closes that folder and leaves every folder a
+    path taken in parts would name as it was. A path the line cannot carry as one value gets no command: a sentence
+    names it shown changed, and no command is printed."""
+    import shutil
+    import stat
+    mode = lambda p: stat.S_IMODE(os.lstat(p).st_mode)
+    bad = []
+    for where in ("home", "copy"):
+        for name in ("pit space", "pit's", "pit;", "-pit"):
+            base = _open_home()
+            try:
+                home, cfg, target, opened, decoys = _g12_50_home(base, name, where)
+                for road, out in _g12_50_roads(home, cfg).items():
+                    alone, inline = _g12_50_commands(out)
+                    if len(alone) != 1:                                         # the command alone on its own line
+                        bad.append((where, name, road, "not alone on a line", inline))
+                    for c in alone or inline:
+                        subprocess.run(["sh", "-c", c], cwd=str(base), capture_output=True, timeout=30)
+                    if mode(opened or target) != (0o644 if opened else 0o755):   # that folder, closed
+                        bad.append((where, name, road, "not closed", oct(mode(opened or target))))
+                    if [mode(d) for d in decoys] != [0o777] * len(decoys):      # and nothing else
+                        bad.append((where, name, road, "another folder changed",
+                                    [str(d) for d in decoys if mode(d) != 0o777]))
+                    for d in decoys:
+                        os.chmod(d, 0o777)
+                    os.chmod(opened or target, 0o666 if opened else 0o777)
+            finally:
+                shutil.rmtree(base)
+        for name, shown in (("pit``", "pit\\x60\\x60"), ("pit$()", "pit\\x24()"), ("pit\n", "pit\\x0a"),
+                            ("pit\x1b", "pit\\x1b")):
+            base = _open_home()
+            try:
+                home, cfg, target, opened, decoys = _g12_50_home(base, name, where)
+                for road, out in _g12_50_roads(home, cfg).items():
+                    said = [l for l in out.splitlines() if "Pit Stop gives no command for it" in l]
+                    if "chmod" in out:
+                        bad.append((where, name, road, "a command printed", [l for l in out.splitlines() if "chmod" in l]))
+                    if len(said) != 1 or not all(f"{target.parent}/{shown} ." in l and
+                                                 "character(s) shown as \\x and its code" in l for l in said):
+                        bad.append((where, name, road, "not named shown changed"))
+                    if "\x1b" in out or name in out:
+                        bad.append((where, name, road, "the name went out raw"))
+                assert mode(opened or target) == (0o666 if opened else 0o777)
+            finally:
+                shutil.rmtree(base)
+    assert not bad, bad
+
+
+def test_G12_50_a_copy_the_person_does_not_own_gets_no_command():
+    """G12.50 (ii), G12.16 on the copies line: an installed copy of Pit Stop made where Pit Stop finds them (the
+    plugin cache), and the person's own version folder there under another name, each with an entry another
+    account can write: when Pit Stop runs as the person, the line gives the chmod -R that closes it; when the copy
+    is another account's, through both roads the line says who owns it and that only an administrator can close
+    it, and gives no command."""
+    import shutil
+    base = _open_home()
+    try:
+        home, cfg = base / "home", base / "home" / ".claude"
+        cache = cfg / "plugins" / "cache"
+        made = [cache / "m" / "windstorm-pit-stop" / "0.1.0", cache / "thewindstorm" / "windstorm-pit-stop" / "0.6.2 renamed"]
+        (cfg / "pit-stop").mkdir(parents=True)
+        for c in made:
+            (c / "scripts").mkdir(parents=True)
+            (c / "scripts" / "restart_at_break.py").write_text("")
+            os.chmod(c / "scripts" / "restart_at_break.py", 0o666)
+        for d in [home, cfg, cfg / "pit-stop", cfg / "plugins", cache] + [x for c in made for x in
+                                                                          (c.parent.parent, c.parent, c, c / "scripts")]:
+            os.chmod(d, 0o755)
+        me, bad = os.getuid(), []
+        for uid, mine in ((me + 4242, False), (me, True)):
+            for road, out in _g12_50_roads(home, cfg, uid).items():
+                lines = [l for l in out.splitlines() if "another installed copy of Pit Stop" in l]
+                assert len(lines) == 2, (road, out)
+                if not mine:
+                    if not all(l.endswith(f"It belongs to account {__import__('pwd').getpwuid(me).pw_name} (number {me}), "
+                                          f"not to you, so only an administrator can close it.") for l in lines):
+                        bad.append((road, "not said as another account's", lines))
+                    if "chmod -R" in out:
+                        bad.append((road, "a command for a copy that is not the person's"))
+                elif not (all(l.endswith("To close them, run this line:") for l in lines)
+                          and sorted(_g12_50_commands(out)[0]) == sorted(f"chmod -R go-w '{c}'" for c in made)):
+                    bad.append((road, "the person's own copy lacks its command alone on a line", lines))
+    finally:
+        shutil.rmtree(base)
+    assert not bad, bad
 
 
 def test_G12_19_setup_finds_tmux_servers_where_tmux_does(tmp_path, monkeypatch):

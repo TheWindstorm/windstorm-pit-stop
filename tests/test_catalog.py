@@ -161,3 +161,64 @@ def test_G7_10_one_version_in_every_place_and_new_code_gets_a_new_one(tmp_path):
     out = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "release_check.py"), str(r)],
                          capture_output=True, text=True)
     assert out.returncode == 0 and out.stdout.startswith("release check: OK"), out.stdout
+
+
+@pytest.mark.parametrize("case", ["a planted failing test", "no gate line", "the commit is not on the remote",
+                                  "the tag's push fails", "a green suite with its gate line"])
+def test_G7_14_a_red_suite_with_the_tag_at_its_head_pushes_no_tag(tmp_path, case):
+    """G7.14, the release step (`release_check.py --tag`): in a made repository with a made remote, the tag is made
+    in a fresh clone of the commit, the whole suite runs there, and only its exit code 0 with the G19 gate's PASSED
+    line makes and pushes the real tag. A planted failing test (its suite prints the gate's line all the same), a
+    suite with no gate line, or a commit the remote does not have: no tag here, none on the remote, and the line
+    names what stopped it. A remote that refuses the tag's push: the tag stays here, the line names the one step to
+    finish, and that step, run once the remote takes it, pushes the tag. The control, green with its line: the tag is
+    made and pushed."""
+    remote, r = tmp_path / "remote.git", tmp_path / "repo"
+    g = ["git", "-C", str(r), "-c", "user.name=t", "-c", "user.email=t@localhost"]
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    subprocess.run(["git", "init", "-q", str(r)], check=True)
+    (r / ".claude-plugin").mkdir()
+    (r / "tests").mkdir()
+    (r / ".claude-plugin" / "plugin.json").write_text(json.dumps({"version": "9.9.9"}))
+    (r / "tests" / "test_a.py").write_text("def test_one():\n    assert " +
+                                           ("1 == 2" if case == "a planted failing test" else "True") + "\n")
+    if case != "no gate line":
+        (r / "tests" / "conftest.py").write_text(
+            "def pytest_terminal_summary(terminalreporter):\n"
+            "    terminalreporter.write_line('G19 gate PASSED: whole run; 1 of 1 named proofs passed; 0 problems')\n")
+    subprocess.run(g + ["add", "-A"], check=True)
+    subprocess.run(g + ["commit", "-qm", "one"], check=True)
+    subprocess.run(g + ["remote", "add", "origin", str(remote)], check=True)
+    subprocess.run(g + ["push", "-q", "origin", "HEAD:refs/heads/main"], check=True)
+    if case == "the tag's push fails":
+        hook = remote / "hooks" / "pre-receive"
+        hook.write_text("#!/bin/sh\nwhile read a b ref; do case $ref in refs/tags/*) exit 1;; esac; done\n")
+        hook.chmod(0o755)
+    if case == "the commit is not on the remote":
+        (r / "tests" / "test_b.py").write_text("def test_two():\n    assert True\n")
+        subprocess.run(g + ["add", "-A"], check=True)
+        subprocess.run(g + ["commit", "-qm", "two"], check=True)
+    out = subprocess.run([sys.executable, "-I", os.path.join(ROOT, "scripts", "release_check.py"), "--tag", str(r)],
+                         capture_output=True, text=True, timeout=300)
+    here = subprocess.run(g + ["tag", "--list"], capture_output=True, text=True).stdout.split()
+    there = subprocess.run(["git", "ls-remote", "--tags", str(remote)], capture_output=True, text=True).stdout
+    head = subprocess.run(g + ["rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
+    if case == "the tag's push fails":
+        assert out.returncode == 1 and here == ["v9.9.9"] and there.strip() == "", (out.stdout + out.stderr, here)
+        step = "to finish, run this line in this repository: git push origin refs/tags/v9.9.9"
+        assert out.stdout.rstrip().endswith(step) and "(pre-receive hook declined)" in out.stdout, out.stdout
+        hook.unlink()
+        subprocess.run(["git", "-C", str(r), *step.split(": ", 1)[1].split()[1:]], check=True, capture_output=True)
+        there = subprocess.run(["git", "ls-remote", "--tags", str(remote)], capture_output=True, text=True).stdout
+        assert f"{head}\trefs/tags/v9.9.9" in there, there
+        return
+    if case == "a green suite with its gate line":
+        assert out.returncode == 0 and here == ["v9.9.9"] and f"{head}\trefs/tags/v9.9.9" in there, out.stdout + out.stderr
+        assert "exit 0; G19 gate PASSED: whole run;" in out.stdout and "test_G7_7_" in out.stdout, out.stdout
+        return
+    assert out.returncode == 1 and here == [] and there.strip() == "", (out.stdout + out.stderr, here, there)
+    assert out.stdout.startswith("release step: no tag: "), out.stdout
+    why = {"a planted failing test": "exit code 1; failed: tests/test_a.py::test_one",
+           "no gate line": "the G19 gate's PASSED line was not read",
+           "the commit is not on the remote": f"commit {head[:12]} is not on origin"}[case]
+    assert why in out.stdout, out.stdout

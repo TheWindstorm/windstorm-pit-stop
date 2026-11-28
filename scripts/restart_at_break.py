@@ -151,8 +151,47 @@ CFG = {"tmux_socket": None, "herdr": False, "allow_names": [], "deny_names": [],
        "needs_you": True, "fleet_tune": True,
        "mismatch_backoff": 1800, "mismatch_backoff_max": 43200}
 _DEFAULTS = dict(CFG)
-_user = pc.read_json(os.path.join(pc.STATE_DIR, "restart.json"), {})
-CFG.update(_user if isinstance(_user, dict) else {})
+RESTART_JSON = os.path.join(pc.STATE_DIR, "restart.json")
+
+
+def read_settings(path):
+    """G4.46: (settings, stop) for restart.json. Not there: ({}, None), today's defaults. There and one JSON object:
+    (it, None). There and not read (it cannot be opened, it is empty, its JSON stops, it is not UTF-8, it is not a
+    JSON object): ({}, the one line that stops the helper's run), naming the file, where the read stopped (line and
+    column, the error's class, or the kind wanted) and the one next step; never a value or a byte of it, and its
+    settings are never taken for the defaults."""
+    import shlex
+    if not os.path.lexists(path):
+        return {}, None
+    shown = "~/" + shlex.quote(path[len(pc.HOME) + 1:]) if path.startswith(pc.HOME + os.sep) else shlex.quote(path)
+    look = f"to see where it stops: python3 -m json.tool {shown}"
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except OSError as e:
+        why, step = f"it could not be opened ({type(e).__name__})", (
+            f"to let the helper read it: chmod u+r {shown}" if isinstance(e, PermissionError) else f"to see it: ls -ld {shown}")
+    else:
+        try:
+            data = json.loads(raw.decode("utf-8")) if raw else None
+            why = "it is empty (0 bytes)" if not raw else None if isinstance(data, dict) else (
+                "it holds a JSON " + {list: "list", str: "string", bool: "true or false", type(None): "null"}.get(
+                    type(data), "number") + " where one JSON object ({ ... }) is wanted")
+            step = "write its settings back into it as one JSON object ({ ... })"
+        except UnicodeDecodeError as e:
+            why, step = f"it is not UTF-8 text (byte {e.start + 1} of {len(raw)})", look
+        except json.JSONDecodeError as e:
+            why, step = f"its JSON stops at line {e.lineno}, column {e.colno} ({e.msg})", look
+        if why is None:
+            return data, None
+    return {}, (f"restart.json could not be read ({path.replace(pc.HOME, '~', 1)}): {why}. The helper did nothing this "
+                f"run: no session was typed into, restarted, compacted or reloaded, no plugin or Claude Code update and "
+                f"no tune was started; its lists are never taken for the defaults. The one next step, {step}; the next "
+                f"run reads it again.")
+
+
+_user, CFG_STOP = read_settings(RESTART_JSON)
+CFG.update(_user)
 CFG_WARNINGS = []
 
 
@@ -1529,6 +1568,9 @@ def main():
     gone = gone_line()
     if gone:   # G12.8: once the plugin is gone (or its registry cannot be read), no session is touched
         log(gone)
+        return
+    if CFG_STOP:   # G4.46: its settings could not be read: acts on no session and takes no step its keys switch
+        log(CFG_STOP)
         return
     for w in CFG_WARNINGS:
         log(w)

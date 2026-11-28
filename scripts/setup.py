@@ -60,7 +60,8 @@ Nothing here needs sudo. --apply keeps what it found before each change in
 
 What --undo does (each step is listed as it goes):
   1. Stops and removes the timer it installed, and the launcher.
-  2. Removes the restart.json it wrote, if nobody has changed it since.
+  2. Removes the restart.json it wrote, if nobody has changed it since and nothing else still runs
+     the helper (then it is kept, named, as the launcher is).
   3. Puts "auto_tune" (and "budget") in config.json back as they were.
   4. Puts the marketplace entry in ~/.claude/settings.json back as it was
      (backed up first). After a setup from before 0.6.2, which kept no record,
@@ -76,6 +77,7 @@ import argparse
 import glob
 import os
 import platform
+import re
 import shlex
 import shutil
 import unicodedata
@@ -319,14 +321,27 @@ def timer_state(unit="pit-stop-restart.timer", run_cmd=None):
     return "stopped", f"{unit} is {act} ({en})"
 
 
-def fleet_stop_line(st, unit, wrote_now, darwin):
-    """Family rule 7: the one line, with the one next step, for a timer read as not running (timer_state's answers)."""
+def fleet_stop_line(st, unit, wrote_now, darwin, step=None, take_off=None):
+    """Family rule 7: the one line, with the one next step, for a timer read as not running (timer_state's answers),
+    or whose service's command was read back as not the launcher or could not be read (G12.49; STEP is its step).
+    TAKE_OFF (G12.52): setup's own unit where another schedule is found: that step replaces every step that would
+    write, start or enable setup's own timer (a second schedule); a look step stays."""
+    if st == "differs":
+        return (f"   Fleet mode is NOT set up: the timer runs, but its service does not start the launcher (the line "
+                f"above). {take_off if take_off and step == rewrite_step() else step}")
+    if st == "cmd-unread":
+        return (f"   Fleet mode: asked for, not checked: the timer runs, but the command its service holds could not be "
+                f"read (the line above), so it is not said to be set up. {step}")
     if st == "not-enabled":
         return (f"   Fleet mode is NOT set up to last: {unit} runs now but will not start again after a restart. "
-                f"Enable it with: systemctl --user enable {unit}")
+                + (take_off or f"Enable it with: systemctl --user enable {unit}"))
+    if st == "stopped" and take_off:
+        return f"   Fleet mode is NOT running: {unit} is {'written but ' if wrote_now else ''}stopped. {take_off}"
+    if st == "unknown" and unit == "pit-stop-restart.timer" and not darwin and take_off:
+        return f"   Fleet mode is NOT running: its file is written but systemd does not know {unit}. {take_off}"
     if st == "stopped":
         return (f"   Fleet mode is NOT running: {unit} is {'written but ' if wrote_now else ''}stopped. Start it with: "
-                + (f"launchctl bootstrap gui/{os.getuid()} {PLIST}" if darwin else
+                + (f"launchctl bootstrap gui/{os.getuid()} {shlex.quote(PLIST)}" if darwin else
                    ("systemctl --user daemon-reload && " if wrote_now else "") + f"systemctl --user enable --now {unit}"))
     if st == "unknown" and unit == "pit-stop-restart.timer" and not darwin:
         return (f"   Fleet mode is NOT running: its file is written but systemd does not know {unit}. Start it with: "
@@ -417,6 +432,65 @@ def timer_path():
     return ":".join(out)
 
 
+def cannot_be_seen(c):
+    """A character no timer file can hold whole (G12.48): a line break or one a reader cannot see (Unicode classes
+    Cc, Cf, Cs, Co, Cn, Zl, Zp, and every space but the plain one)."""
+    cat = unicodedata.category(c)
+    return cat in ("Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp") or (cat == "Zs" and c != " ")
+
+
+PROGRAM_PATH_STOPS = (('"', "a double quote"), ("'", "an apostrophe"), ("\\", "a backslash"),
+                      ("${", "a dollar sign followed by an opening brace"))
+
+
+def timer_value_stop(py, darwin):
+    """G12.48: the one line that refuses, before setup's first write, a value the timer file cannot hold whole; None
+    when every value can be held. The values: the Python program's path, the launcher's path, the timer's PATH.
+    In a systemd unit the program's own path (the first word of the start line) has no escaped form, so a quote,
+    an apostrophe, a backslash or "${" there is refused too."""
+    for name, value in (("the Python program's path", py), ("the launcher's path", BIN), ("the timer's PATH", timer_path())):
+        for c in value:
+            if cannot_be_seen(c):
+                what = "a line break" if c in "\n\r  " else "a character that cannot be seen"
+                return (f"fleet mode not set up: {name} holds {what} ({one_line(c)[0] if one_line(c)[1] else f'U+{ord(c):04X}'}), "
+                        f"which a timer file cannot hold whole, so nothing was made. Setup runs as it is without --fleet.")
+    if not darwin:
+        for ch, says in PROGRAM_PATH_STOPS:
+            if ch in py:
+                return (f"fleet mode not set up: the Python program's path holds {says}, which systemd cannot take in the "
+                        f"first word of a service's start line, so nothing was made. Setup runs as it is without --fleet; "
+                        f"for fleet mode, run it with a Python whose path holds no double quote, apostrophe, backslash "
+                        f"or \"${{\".")
+    return None
+
+
+def unit_word(value, first=False):
+    """VALUE as one word of a systemd start line (G12.48): in double quotes, every % doubled (a specifier), and,
+    past the first word, every backslash and double quote escaped and every $ doubled (systemd's variables). The
+    first word, the program, is never expanded; what it cannot hold is refused first (timer_value_stop)."""
+    value = value.replace("%", "%%")
+    if not first:
+        value = value.replace("\\", "\\\\").replace('"', '\\"').replace("$", "$$")
+    return f'"{value}"'
+
+
+def unit_env(name, value):
+    """One Environment= assignment held whole (G12.48): in double quotes, backslashes and double quotes escaped,
+    every % doubled; systemd does not expand $ there."""
+    return '"' + f"{name}={value}".replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%") + '"'
+
+
+def xml_text(value):
+    """VALUE escaped for a launch agent's <string> (G12.48)."""
+    from xml.sax.saxutils import escape
+    return escape(value, {'"': "&quot;", "'": "&apos;"})
+
+
+def helper_command(*extra):
+    """The helper's command as a person runs it: each path one shell word (G12.48)."""
+    return " ".join([shlex.quote(sys.executable), "-I", shlex.quote(BIN), *extra])
+
+
 RUN_BOUND = 960   # rule 30: a run's longest road by the helper's own limits: Claude Code's update (600 s), then
                   # plugin updates (300 s in all), and 60 s for the rest; launchd itself sets a job no time limit
 WAIT_STEP = 5
@@ -465,6 +539,223 @@ def run_has_ended(job, bound=RUN_BOUND):
         return "was still in a run when you left"
 
 
+SERVICE = "pit-stop-restart.service"
+LAUNCHD_OWN_ENV = ("XPC_SERVICE_NAME", "OSLogRateLimit")   # launchd sets these itself (the family's four prints, 11-25)
+
+
+def unit_line_words(line):
+    """A start line or Environment= value of a unit file split as systemd reads it (systemd.syntax: words split on
+    blanks, double and single quotes held whole, a backslash takes the next character), each "%%" read as "%"."""
+    words, i = [], 0
+    while i < len(line):
+        if line[i] in " \t":
+            i += 1
+            continue
+        w = []
+        while i < len(line) and line[i] not in " \t":
+            c = line[i]
+            if c in "\"'":
+                end = i + 1
+                while end < len(line) and line[end] != c:
+                    if line[end] == "\\":
+                        end += 1
+                    if end < len(line):
+                        w.append(line[end])
+                    end += 1
+                i = end + 1
+                continue
+            if c == "\\" and i + 1 < len(line):
+                i += 1
+            w.append(line[i])
+            i += 1
+        words.append("".join(w).replace("%%", "%"))
+    return words
+
+
+def at_start(word):
+    """A word of a service's start line as the program gets it: systemd keeps "$$" and variables as written and reads
+    them when the service starts ("$$" is "$"); None for a word that holds a variable, which is not setup's."""
+    out, i = [], 0
+    if re.fullmatch(r"\$[A-Za-z_][A-Za-z0-9_]*", word):
+        return None
+    while i < len(word):
+        if word.startswith("$$", i):
+            out.append("$")
+            i += 2
+        elif word.startswith("${", i):
+            return None
+        else:
+            out.append(word[i])
+            i += 1
+    return "".join(out)
+
+
+def bus_label(name):
+    """NAME as one part of a systemd bus object path: every character but an ASCII letter or digit (a digit too, as
+    the first) as _ and its two hex digits."""
+    return "".join(c if c.isascii() and c.isalnum() and not (i == 0 and c.isdigit()) else f"_{ord(c):02x}"
+                   for i, c in enumerate(name))
+
+
+def bus_property(unit, iface, prop, kind):
+    """(data, None) for one property of UNIT, read from systemd's own bus with busctl's JSON form; (None, why) when
+    it could not be read. Decided by what stdout holds: with no bus, busctl's JSON form writes its error and exits 0
+    (systemd 255, seen 2026-11-26), so its exit code alone says nothing."""
+    import json
+    p = run(["busctl", "--user", "--json=short", "get-property", "org.freedesktop.systemd1",
+             "/org/freedesktop/systemd1/unit/" + bus_label(unit), "org.freedesktop.systemd1." + iface, prop], 15,
+            env=c_locale())
+    try:
+        d = json.loads(p.stdout) if p and (p.stdout or "").strip() else None
+    except ValueError:
+        d = None
+    if isinstance(d, dict) and d.get("type") == kind and "data" in d:
+        return d["data"], None
+    if p is None:
+        return None, "busctl could not be run here"
+    first, _ = one_line(((p.stderr or "").strip().splitlines() or [""])[0][:160])
+    return None, f"busctl answered exit {p.returncode}" + (f': "{first}"' if first else ", with no words")
+
+
+def systemd_read(unit=SERVICE):
+    """What systemd itself holds for UNIT: ({"load", "fragment", "exec": [(path, argv)], "env": [...], "dropins":
+    [...]}, None), or (None, why) when any of it could not be read."""
+    got = {}
+    for key, iface, prop, kind in (("load", "Unit", "LoadState", "s"), ("fragment", "Unit", "FragmentPath", "s"),
+                                   ("exec", "Service", "ExecStart", "a(sasbttttuii)"),
+                                   ("env", "Service", "Environment", "as"), ("dropins", "Unit", "DropInPaths", "as")):
+        data, why = bus_property(unit, iface, prop, kind)
+        if why:
+            return None, f"{prop}: {why}"
+        got[key] = [(e[0], list(e[1])) for e in data] if key == "exec" else data
+    return got, None
+
+
+def launchd_parsed(text):
+    """(arguments, environment) from `launchctl print` of a job: "\\targuments = {" then one argument to a line after
+    two tabs; the job's own "\\tenvironment = {" with "\\t\\tNAME => value" (beside the inherited and default blocks,
+    which are not the job's). None for a block not there. A line ends at a line feed only: a value
+    holding another character Python breaks lines on is read whole."""
+    args = env = block = None
+    for line in text.split("\n"):
+        if line == "\targuments = {":
+            block, args = "args", []
+        elif line == "\tenvironment = {":
+            block, env = "env", {}
+        elif line == "\t}" or not line.startswith("\t\t"):
+            block = None
+        elif block == "args":
+            args.append(line[2:])
+        elif block == "env" and " => " in line:
+            k, v = line[2:].split(" => ", 1)
+            env[k] = v
+    return args, env
+
+
+def own_command(*extra):
+    """This setup's own script as a person runs it, each path one shell word."""
+    return " ".join([shlex.quote(sys.executable), "-I", shlex.quote(os.path.abspath(__file__)), *extra])
+
+
+def command_read_back(darwin, wrote_now):
+    """G12.49: after the timer reads active, the command its service holds, read from systemd or launchd itself and
+    compared argument by argument with the launcher setup wrote. (state, said, step, notes): state "running" (it is
+    the launcher), "differs" or "cmd-unread"; SAID names only what setup wrote (the key, the argument's place and
+    setup's own word; for the environment the variable's name), never a value setup did not write; STEP is the one
+    next step; NOTES are the warnings for what the person added. What setup meant is read from the file setup wrote,
+    never from this terminal's environment. Setup never starts the service to try it: it reads."""
+    job = f"gui/{os.getuid()}/{LAUNCHD_LABEL}"
+    look = f"To see the job as launchd holds it: launchctl print {job}" if darwin else \
+        f"To see the unit and its drop-ins as systemd reads them: systemctl --user cat {SERVICE}"
+    if darwin:
+        import plistlib
+        try:
+            with open(PLIST, "rb") as f:
+                wrote = plistlib.load(f)
+            prog, path = wrote["ProgramArguments"][0], wrote["EnvironmentVariables"]["PATH"]
+        except Exception as e:
+            return "cmd-unread", f"the job file setup wrote could not be read here ({type(e).__name__})", look, []
+        p = run(["launchctl", "print", job], 15, env=c_locale())
+        args, env = launchd_parsed(p.stdout or "") if p and p.returncode == 0 else (None, None)
+        if args is None or env is None:
+            err = ((p.stderr or "").strip().splitlines() or [""])[0][:160] if p else ""
+            first = one_line(err)[0]
+            return "cmd-unread", ("launchd's job could not be read (" + (f"launchctl print answered exit {p.returncode}"
+                                  + (f': "{first}"' if first else "") if p else "launchctl gave no answer") + ")"), look, []
+        run_as, envs, dropins, own_env = args, [f"{k}={v}" for k, v in env.items()], [], set(LAUNCHD_OWN_ENV)
+    else:
+        svc = os.path.join(UNIT_DIR, SERVICE)
+        try:
+            with open(svc, errors="surrogateescape") as f:
+                lines = f.read().splitlines()
+            prog = unit_line_words([l for l in lines if l.startswith("ExecStart=")][0][len("ExecStart="):])[0]
+            path = [w[len("PATH="):] for l in lines if l.startswith("Environment=")
+                    for w in unit_line_words(l[len("Environment="):]) if w.startswith("PATH=")][0]
+        except (OSError, IndexError):
+            return "cmd-unread", "the service file setup wrote could not be read here", look, []
+        got, why = systemd_read()
+        if why:
+            return "cmd-unread", f"systemd's own answer could not be read ({why})", look, []
+        if got["load"] != "loaded" or got["fragment"] != svc:
+            return "differs", (f"systemd does not run {SERVICE} from the file setup wrote "
+                               f"({one_line(svc.replace(pc.HOME, '~'))[0]})"), look, []
+        dropins = got["dropins"]
+        if len(got["exec"]) != 1:
+            return "differs", (f"systemd reads {len(got['exec'])} start lines for {SERVICE} where setup wrote one"
+                               + (f"; {len(dropins)} drop-in file(s) are read over the file setup wrote" if dropins
+                                  else "")), look, []
+        run_as = [got["exec"][0][1][0] if got["exec"][0][0] == got["exec"][0][1][0] else None] + \
+            [at_start(w) for w in got["exec"][0][1][1:]]
+        envs, own_env = got["env"], set()
+    meant = [prog, "-I", BIN, "--live"]
+    over = f"; {len(dropins)} drop-in file(s) are read over the file setup wrote" if dropins else ""
+    again = look if (dropins or wrote_now) else rewrite_step()
+    # The first word is read from the file on disk, which may have been changed by hand: it is never printed as
+    # setup's; the words after it are setup's own.
+    if len(run_as) != len(meant):
+        return "differs", (f"the service's start line holds {len(run_as)} arguments where setup wrote {len(meant)}: "
+                           f"its Python, -I, {shlex.quote(BIN)}, --live{over}"), again, []
+    for i, (a, m) in enumerate(zip(run_as, meant)):
+        if a != m:
+            return "differs", ((f"argument {i + 1} of the service's start line is not setup's word {shlex.quote(m)}"
+                                if i else "argument 1 of the service's start line is not the Python the file setup "
+                                "wrote names") + over), again, []
+    paths = [e.split("=", 1)[1] for e in envs if e.startswith("PATH=")]
+    if paths != [path]:
+        return "differs", ("its PATH, which setup wrote, is missing" if not paths else
+                           "its PATH is not the one setup wrote") + over, look, []
+    notes = [f"   the service also sets {one_line(n)[0]}, which setup did not set: yours, left as it is"
+             for n in dict.fromkeys(e.split("=", 1)[0] for e in envs) if n != "PATH" and n not in own_env]
+    return "running", ("its service's command, read from " + ("launchd" if darwin else "systemd") +
+                       ", is the launcher setup wrote, argument by argument, with its PATH"), None, notes
+
+
+def rewrite_step():
+    """The read-back's one step for a unit setup wrote that does not start the launcher, when no other schedule is
+    found: undo, then setup again, which writes the unit as this version writes it."""
+    return (f"To write it again as this version writes it: {own_command('--undo')}, then this setup again, "
+            f"{give_again(False)}")
+
+
+def give_again(kept):
+    """G12.52: the options undo does not keep for setup's next run, named (setup's own words, never a value read
+    from a file): KEPT when undo kept restart.json (something else still runs the helper), so --plugin-updates
+    holds and no timer of setup's is written again."""
+    names = ("--budget, --no-auto-tune, --no-self-update, --no-tune-now or --days" if kept else
+             "--interval, --plugin-updates, --budget, --no-auto-tune, --no-self-update, --no-tune-now or --days")
+    return (f"giving again --fleet and any of {names} that you gave it before"
+            + ("; restart.json is kept, so --plugin-updates holds" if kept else ""))
+
+
+def own_unit_note(unit):
+    """G12.49 (c): a running unit setup did not write. Nothing when one of its arguments is exactly the launcher's
+    path; otherwise the one line that its command is the person's own, never a "no", nothing of it printed."""
+    got, why = systemd_read(unit) if unit.endswith(".service") else (None, "not read")
+    if got and any(at_start(w) == BIN for e in got["exec"] for w in e[1]):
+        return []
+    return [f"   {unit}'s command is your own: setup did not check what it runs"]
+
+
 def install_timer(interval, apply):
     py = sys.executable
     if platform.system() == "Darwin":
@@ -472,8 +763,8 @@ def install_timer(interval, apply):
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>ai.thewindstorm.pit-stop-restart</string>
-  <key>ProgramArguments</key><array><string>{py}</string><string>-I</string><string>{BIN}</string><string>--live</string></array>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{timer_path()}</string></dict>
+  <key>ProgramArguments</key><array><string>{xml_text(py)}</string><string>-I</string><string>{xml_text(BIN)}</string><string>--live</string></array>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{xml_text(timer_path())}</string></dict>
   <key>StartInterval</key><integer>{interval * 60}</integer>
   <key>ProcessType</key><string>Background</string>
 </dict></plist>
@@ -513,9 +804,9 @@ def install_timer(interval, apply):
                       + (" (the job loaded from an earlier file was taken off first)" if was else ""))
             elif was:
                 print(f"    written; launchd still has the job loaded from an earlier file. To load this one: "
-                      f"launchctl bootout {job}, then launchctl bootstrap gui/{os.getuid()} {PLIST}")
+                      f"launchctl bootout {job}, then launchctl bootstrap gui/{os.getuid()} {shlex.quote(PLIST)}")
             else:
-                print(f"    written; load it with: launchctl bootstrap gui/{os.getuid()} {PLIST}")
+                print(f"    written; load it with: launchctl bootstrap gui/{os.getuid()} {shlex.quote(PLIST)}")
         return True
     svc, tmr = os.path.join(UNIT_DIR, "pit-stop-restart.service"), os.path.join(UNIT_DIR, "pit-stop-restart.timer")
     print(f"  timer: {tmr} (systemd user timer, every {interval} min)")
@@ -533,7 +824,8 @@ def install_timer(interval, apply):
     os.makedirs(UNIT_DIR, exist_ok=True)
     with open(svc, "w") as f:
         f.write(f"[Unit]\nDescription=Windstorm Pit Stop: restart at the break (fleet mode)\n\n[Service]\nType=oneshot\n"
-                f"Environment=PATH={timer_path()}\nExecStart={py} -I {BIN} --live\nTimeoutStartSec=1200\nNice=10\n")
+                f"Environment={unit_env('PATH', timer_path())}\nExecStart={unit_word(py, first=True)} -I {unit_word(BIN)} "
+                f"--live\nTimeoutStartSec=1200\nNice=10\n")
     with open(tmr, "w") as f:
         f.write(f"[Unit]\nDescription=Windstorm Pit Stop every {interval} minutes\n\n[Timer]\nOnBootSec=3min\n"
                 f"OnUnitActiveSec={interval}min\nAccuracySec=20s\n\n[Install]\nWantedBy=timers.target\n")
@@ -713,7 +1005,11 @@ def open_scan(home=None):
                 ways.append((d, st.st_mode & 0o7777, what, note, st.st_uid))
     counts = []
     for c in copies:
-        n = 0
+        n, owners = 0, set()
+        try:
+            owners.add(os.lstat(c).st_uid)
+        except OSError:
+            unread.append(c)
         for d, dirs, files in os.walk(c, followlinks=False, onerror=lambda e: unread.append(e.filename)):
             dirs[:] = [x for x in dirs if x != ".git"]
             for x in dirs + files:
@@ -725,8 +1021,10 @@ def open_scan(home=None):
                 except OSError:
                     unread.append(p)
                     continue
-                n += not os.path.islink(p) and writable_by_others(p, st.st_mode)
-        counts.append((c, n))
+                if not os.path.islink(p) and writable_by_others(p, st.st_mode):
+                    n += 1
+                    owners.add(st.st_uid)
+        counts.append((c, n, owners))
     return {"mine": mine, "ways": ways, "copies": counts, "unread": unread}
 
 
@@ -741,10 +1039,54 @@ def owner_name(uid):
         return f"account number {uid}"
 
 
+COMMAND_STOPS = ("`", "$(")
+
+
+def shown_path(path):
+    """(shown, changed) for a path named in a sentence instead of a command (G12.50): every character that cannot be
+    seen (cannot_be_seen), every backtick and the $ of every "$(" is shown as \\x and its code (\\xNN, or \\uNNNN
+    above 0xff; a byte that is not UTF-8 as \\xNN), and how many were changed is counted."""
+    out, changed = [], 0
+    for i, c in enumerate(path):
+        if unicodedata.category(c) == "Cs":
+            out.append(f"\\x{ord(c) - 0xdc00:02x}" if 0xdc80 <= ord(c) <= 0xdcff else f"\\u{ord(c):04x}")
+        elif cannot_be_seen(c) or c == "`" or path.startswith("$(", i):
+            out.append(f"\\x{ord(c):02x}" if ord(c) < 0x100 else f"\\u{ord(c):04x}")
+        else:
+            out.append(c)
+            continue
+        changed += 1
+    return "".join(out), changed
+
+
+def command_line(*words):
+    """G12.50: the command alone on a line of its own under the sentence, its last word (the path, always absolute)
+    in single quotes for the shell whatever it holds, so the line taken as printed changes that path and nothing else. None
+    when a word holds a character a pasted line should not carry (a line break, one that cannot be seen, a
+    backtick, "$("): that path gets a sentence instead (shown_path)."""
+    for w in words:
+        if any(cannot_be_seen(c) for c in w) or any(x in w for x in COMMAND_STOPS):
+            return None
+    return "\n      " + " ".join(words[:-1] + ("'" + words[-1].replace("'", "'\"'\"'") + "'",))
+
+
 def open_lines(scan, first=()):
     """The numbered lines that name what Pit Stop may not change (rule 28): which folder, what it means, the one
-    command. Setup prints them; /pit-stop status repeats them until they are closed."""
-    short = lambda p: p.replace(pc.HOME, "~", 1) if p.startswith(pc.HOME) else p
+    command, alone on its own line (G12.50). Setup prints them; /pit-stop status repeats them until they are
+    closed. A path no command can carry whole is named shown changed, with what to do in words."""
+    home_short = lambda p: p.replace(pc.HOME, "~", 1) if p.startswith(pc.HOME) else p
+    short = lambda p: shown_path(home_short(p))[0]
+
+    def close(p, *cmd, them=False):
+        line = command_line(*cmd, os.path.abspath(p))
+        if line:
+            return f" To close {'them' if them else 'it'}, run this line:{line}"
+        shown, n = shown_path(os.path.abspath(p))
+        return (f" Pit Stop gives no command for it: its name holds a character Pit Stop will not put in a command. "
+                f"Its full name, with {n} character(s) shown as \\x and its code, is {shown} . To close "
+                f"{'them' if them else 'it'}, take away write for group and others "
+                f"{'everywhere in that folder' if them else 'from that folder'} yourself, typing its real name.")
+
     out = list(first)
     for d, m, what, note, owner in scan["ways"]:
         folder = os.path.isdir(d) and not os.path.islink(d)
@@ -752,15 +1094,21 @@ def open_lines(scan, first=()):
                 + (f"it could delete and replace what is in it, and below it is {what}." if folder else f"it is {what}."))
         if owner == os.getuid():
             out.append(f"{head} " + ("Pit Stop cannot tell whether it made this folder, so it stays."
-                                     if folder else "It is not Pit Stop's, so it stays.") + f" To close it: chmod go-w {d}")
+                                     if folder else "It is not Pit Stop's, so it stays.") + close(d, "chmod", "go-w"))
         else:                                   # rule 28: no command the person cannot run (G12.16)
             out.append(f"{head} It belongs to {owner_name(owner)}, not to you, so only an administrator can close it.")
-    for i, (code, n) in enumerate(scan["copies"]):
+    for i, (code, n, owners) in enumerate(scan["copies"]):
         if n:
             which = "Pit Stop's installed code" if i == 0 else "another installed copy of Pit Stop"
-            out.append(f"{n} file(s) or folder(s) in {which} "
-                       f"({short(code)}) can be written by another account, and it runs as you. To close them: chmod -R go-w {code}")
-    out += [foreign(f"could not be read, so not checked: {short(p)}") for p in scan["unread"]]   # rule 31 (vi)
+            head = (f"{n} file(s) or folder(s) in {which} ({short(code)}) can be written by another account, "
+                    f"and it runs as you.")
+            others = sorted(u for u in owners if u != os.getuid())
+            if others:                          # G12.16 on this line too: no command the person cannot run whole
+                out.append(f"{head} {'Some of it belongs' if os.getuid() in owners else 'It belongs'} to "
+                           f"{owner_name(others[0])}, not to you, so only an administrator can close it.")
+            else:
+                out.append(head + close(code, "chmod", "-R", "go-w", them=True))
+    out += [foreign(f"could not be read, so not checked: {home_short(p)}") for p in scan["unread"]]   # rule 31 (vi)
     return [f"{i}. {x}" for i, x in enumerate(out, 1)]
 
 
@@ -884,16 +1232,28 @@ def undo(ledger=None, run_cmd=None):
         out.append(f"1. timer: stopped and removed {home(PLIST)}")
     elif os.path.exists(PLIST):
         out.append(f"1. timer: {home(PLIST)} not written by Pit Stop's setup: left as it is. "
-                   f"To switch it off: launchctl bootout gui/{os.getuid()} {PLIST}")
+                   f"To switch it off: launchctl bootout gui/{os.getuid()} {shlex.quote(PLIST)}")
     else:
         out.append("1. timer: none of setup's here")
     others = [h for h in already_scheduled() if h not in (svc, tmr, PLIST) or not ours(h, ledger)]
+    # G12.52: where what else runs the helper could not be read, the launcher and restart.json stay, said so (read
+    # only where one of them would be removed)
+    rj = rec.get("restart_json") if isinstance(rec.get("restart_json"), dict) else None
+    rj_ours = bool(rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256"))
+    unread = [u for u in schedule_read()[1] if u not in (svc, tmr, PLIST)] if not others and (
+        rj_ours or (os.path.exists(BIN) and ours(BIN, ledger))) else []
+    unread_said = (f"whether something else still runs it could not be read: "
+                   f"{', '.join(one_line(home(u))[0] for u in unread)}"
+                   + (" (a name holds a character shown as \\x and its code)" if any(one_line(u)[1] for u in unread)
+                      else ""))
     if os.path.exists(BIN) and not ours(BIN, ledger):
         out.append(f"   launcher {home(BIN)} not written by Pit Stop's setup: left as it is")
     elif os.path.exists(BIN) and others:
         out.append(f"   launcher {home(BIN)} kept: something else still runs it: "
                    f"{', '.join(one_line(home(h))[0] for h in others)}"
                    + (" (a name holds a character shown as \\x and its code)" if any(one_line(h)[1] for h in others) else ""))
+    elif os.path.exists(BIN) and unread:
+        out.append(f"   launcher {home(BIN)} kept: {unread_said}")
     elif os.path.exists(BIN):
         os.remove(BIN)
         try:
@@ -902,8 +1262,16 @@ def undo(ledger=None, run_cmd=None):
             pass
         out.append(f"   launcher: removed {home(BIN)}")
     # 2. restart.json
-    rj = rec.get("restart_json") if isinstance(rec.get("restart_json"), dict) else None
-    if rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256"):
+    # G12.52: while something else still runs the helper, its settings stay (the launcher's judge and words); where
+    # what else runs it could not be read, they stay too, said so, never removed on that answer
+    if rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256") and others:
+        out.append(f"2. restart.json: kept {home(rj['path'])}: something else still runs it: "
+                   f"{', '.join(one_line(home(h))[0] for h in others)}"
+                   + (" (a name holds a character shown as \\x and its code)" if any(one_line(h)[1] for h in others)
+                      else ""))
+    elif rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256") and unread:
+        out.append(f"2. restart.json: kept {home(rj['path'])}: {unread_said}")
+    elif rj and os.path.exists(rj.get("path") or "") and sha(rj["path"]) == rj.get("sha256"):
         os.remove(rj["path"])
         out.append(f"2. restart.json: removed {home(rj['path'])} (setup wrote it; unchanged since)")
     elif rj and os.path.exists(rj.get("path") or ""):
@@ -1076,6 +1444,146 @@ def json_word(v):
     return "true" if v is True else "false" if v is False else str(v)
 
 
+def setups_unit(h):
+    """G12.52: whether a schedule found is a unit setup wrote (G12.49: its record holds it, or it carries Pit Stop's
+    mark; an earlier version's too), at the path of setup's own unit."""
+    return h in (os.path.join(UNIT_DIR, "pit-stop-restart.service"), PLIST) and ours(h)
+
+
+def fleet_states(hits, darwin):
+    """Step 7's read of what schedules the helper (G12.49), read only: (states, notes, steps). STATES: (state, what was
+    read, the unit read, whether this run wrote it, who) per schedule; WHO is "setup" for a unit setup wrote, the name
+    today's lines give a person's schedule ("a crontab line", its timer's name), or None for one not named; NOTES: the
+    person's own additions (warnings); STEPS: the one next step per unit. HITS: what step 6 found ([] when this run
+    wrote the timer)."""
+    states, notes, steps = [], [], {}
+    for h in (hits or [None]):
+        if h == "crontab":
+            states.append(("running", "a crontab line runs it (read from crontab -l)", None, False, "a crontab line"))
+        elif h is None or h in (os.path.join(UNIT_DIR, "pit-stop-restart.service"), PLIST):
+            unit = LAUNCHD_LABEL if darwin else "pit-stop-restart.timer"
+            st, said = timer_state(unit)
+            if st == "running" and (h is None or ours(h)):     # G12.49: a unit setup wrote, read back
+                st, read, steps[unit], more = command_read_back(darwin, h is None)
+                said, notes = f"{said}; {read}", notes + more
+            elif st == "running":           # a person's own file at the path of setup's unit
+                notes += [f"   {os.path.basename(h)}'s command is your own: setup did not check what it runs"]
+            states.append((st, said, unit, h is None, "setup" if h is None or ours(h) else unit))
+        elif one_line(h)[1]:                    # rule 31 (vi): a name not ours never makes a line; no command for it
+            states.append(("unread", f"{one_line(h.replace(pc.HOME, '~'))[0]} is not Pit Stop's and its name holds a "
+                           f"character that cannot be typed on one line (shown here as \\x and its code); whether it "
+                           f"runs is not checked here", None, False, None))
+        elif h.endswith(".service"):
+            unit = os.path.basename(h)[:-len(".service")] + ".timer"
+            st, said = timer_state(unit)
+            if st == "unknown":                 # what starts that service was not read
+                st, said = "unread", f"what starts {h.replace(pc.HOME, '~')} was not read ({said})"
+            elif st == "running":               # G12.49 (c): a person's unit is never called wrong
+                notes += own_unit_note(os.path.basename(h))
+            states.append((st, said, unit, False, unit))
+        else:
+            states.append(("unread", f"{h.replace(pc.HOME, '~')} is not Pit Stop's; whether it runs is not checked here",
+                           None, False, None))
+    return states, notes, steps
+
+
+OWN_TIMER = "setup's own timer"
+NOW = ("running", "not-enabled")             # a timer read as active, enabled or not: it runs the helper now
+DOES_NOT = ("differs", "stopped", "unknown")  # read as not starting the helper (else: not checked)
+
+
+def names_joined(names):
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def take_off_step(carriers):
+    """G12.52: the one step for setup's own unit where another schedule is found: undo takes it off and keeps
+    restart.json, and setup's next run writes no second schedule. CARRIERS: what runs the helper besides it, or ""."""
+    undo = f"{own_command('--undo')}, then this setup again, {give_again(True)}"
+    if carriers:
+        return f"To take it off, so that {carriers} alone {'runs' if ' and ' not in carriers else 'run'} the helper: {undo}"
+    return f"Setup does not write its timer again while another schedule is found. To take it off: {undo}"
+
+
+def setups_own_line(st, unit, wrote_now, darwin, step, carriers):
+    """G12.52, more than one schedule and one runs the helper: the line for setup's own unit that does not start the
+    launcher, or runs now but will not start again, with its one step, never opening with "Fleet mode is NOT set up"
+    (the closing sentence carries the whole)."""
+    if st == "differs":
+        step = take_off_step(carriers) if step == rewrite_step() else step
+        return f"   {OWN_TIMER}: it runs, but its service does not start the launcher (the line above). {step}"
+    if st == "cmd-unread":
+        return (f"   {OWN_TIMER}: it runs, but the command its service holds could not be read (the line above), so "
+                f"it is not said to start the launcher. {step}")
+    return f"   {OWN_TIMER}: " + fleet_stop_line(st, unit, wrote_now, darwin, step,
+                                                 take_off_step(carriers)).split(": ", 1)[1]
+
+
+def closing_line(states, own_said):
+    """G12.52: the one sentence true of the whole when more than one schedule is found and one runs the helper: what
+    runs it now first, then what does not and what was not checked; with two or more running now, that one is
+    enough and the step that takes setup's own timer off (OWN_SAID: its line, with that step, is printed above)."""
+    name = lambda who: OWN_TIMER if who == "setup" else who
+    now = [name(w) for st, *_, w in states if st in NOW]
+    parts = [f"{name(w)} will not start again after a restart" for st, *_, w in states if st == "not-enabled" and w]
+    parts += [f"{name(w)} does not start the helper" + (" (its line and step are above)" if w == "setup" else "")
+              for st, *_, w in states if st in DOES_NOT and w]
+    parts += [f"whether {name(w)} starts it is not checked (the line above)"
+              for st, *_, w in states if st not in NOW and st not in DOES_NOT and w]
+    unnamed = sum(1 for st, *_, w in states if st not in NOW and not w)
+    if unnamed:
+        parts.append(f"{unnamed} other schedule(s) found are not checked (the lines above)")
+    head = (f"{now[0]} runs the helper" if len(now) == 1 else
+            f"{names_joined(now)} each run the helper now, so {len(now)} schedules run it")
+    line = "   fleet mode is set up: " + head + "".join("; " + p for p in parts)
+    if len(now) > 1:            # two runs can act on one session at the same break: one schedule is enough
+        others = [n for n in now if n != OWN_TIMER]
+        steady = [name(w) for st, *_, w in states if st == "running" and w != "setup"]   # they start after a restart
+        line += ". One schedule is enough."
+        if OWN_TIMER in now and (own_said or steady):
+            line += (f" The step that takes {OWN_TIMER} off is above." if own_said else
+                     f" To take {OWN_TIMER} off, so that {names_joined(steady)} alone "
+                     f"{'runs' if len(steady) == 1 else 'run'} the helper: {own_command('--undo')}, then this setup "
+                     f"again, {give_again(True)}.")
+            line += f" Taking off {names_joined(others)} instead is yours to do, in your own schedule."
+        elif OWN_TIMER in now:          # the others will not start again after a restart: setup's own stays
+            line += f" Taking off {names_joined(others)} is yours to do, in your own schedule."
+        else:
+            line += " Taking one off is yours to do, in your own schedule."
+    return line
+
+
+def say_fleet_states(states, notes, steps, darwin):
+    """Prints step 7's finding from fleet_states: what was read, the person's own additions, then "fleet mode is set
+    up" with the first look, or the one next step. True when set up (a schedule read as running). The same words on
+    the plan and when applied (G12.52). More than one schedule found: no step for setup's own unit makes a second
+    schedule or says setup writes its timer again; where one runs the helper, setup's own unit gets its line and
+    step when it is not read as starting the launcher, and one closing sentence names what runs the helper first."""
+    for st, said, *_ in states:
+        print(f"   the timer: {said}")
+    for line in notes:
+        print(line)
+    running = [s for s in states if s[0] == "running"]
+    if running and len(states) > 1:
+        own_said = False
+        for st, said, unit, wrote_now, who in states:
+            if who == "setup" and st != "running":
+                carriers = names_joined([OWN_TIMER if w == "setup" else w for s2, *_, w in states
+                                         if s2 in NOW and w != "setup"])
+                print(setups_own_line(st, unit, wrote_now, darwin, steps.get(unit), carriers))
+                own_said = True
+        print(closing_line(states, own_said))
+    elif running:
+        print("   fleet mode is set up")
+    if running:
+        print(f"   First look at what it would do: {helper_command()}")
+        return True
+    for st, said, unit, wrote_now, who in states:
+        print(fleet_stop_line(st, unit, wrote_now, darwin, steps.get(unit),
+                              take_off_step("") if who == "setup" and len(states) > 1 else None))
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--apply", action="store_true")
@@ -1095,6 +1603,10 @@ def main():
         for line in undo():
             print(line)
         return 0
+    stop = timer_value_stop(sys.executable, platform.system() == "Darwin") if a.fleet else None
+    if stop:      # G12.48: before the first write
+        print(f"Pit Stop setup: {stop}")
+        return 1 if a.apply else 0
     if a.apply:   # before anything is written: what this setup will make that was not here (G12.17)
         made = missing_chain(pc.STATE_DIR)
         cfg_was = os.path.lexists(pc.CONFIG)
@@ -1232,7 +1744,8 @@ def main():
         for h in hits:
             shown, bent = one_line(h)
             print(f"     {shown}" + (" (its name holds a character shown as \\x and its code)" if bent else ""))
-        print(f"   To follow plugin updates by itself, make its command: {sys.executable} -I {BIN} --live")
+        if not all(setups_unit(h) for h in hits):     # G12.52: never for a unit setup wrote
+            print(f"   To follow plugin updates by itself, make its command: {helper_command('--live')}")
     elif unread:      # rule 6: what could not be read is not "none there"; never a second schedule
         placed = False
         files = [u.replace(pc.HOME, "~") for u in unread if u != "crontab"]
@@ -1263,40 +1776,18 @@ def main():
     root, why = ln.find(pc.CLAUDE_DIR)
     if root and not a.apply:
         print(f"7. check: the launcher the timer runs finds Pit Stop at {root.replace(pc.HOME, '~')}")
-        print(f"   First look at what it would do: {sys.executable} -I {BIN}")
+        darwin = platform.system() == "Darwin"
+        # G12.52: when a schedule found is a unit setup wrote, the plan reads every schedule found as applying does
+        states, notes, steps = fleet_states(hits, darwin) if any(setups_unit(h) for h in hits) else ([], [], {})
+        if states:
+            say_fleet_states(states, notes, steps, darwin)
+        else:
+            print(f"   First look at what it would do: {helper_command()}")
         return 0
     if root:
         print(f"7. check: the launcher the timer runs finds Pit Stop at {root.replace(pc.HOME, '~')}")
-        states = []                     # (state, what was read, the unit read, whether this run wrote it)
         darwin = platform.system() == "Darwin"
-        for h in (hits or [None]):
-            if h == "crontab":
-                states.append(("running", "a crontab line runs it (read from crontab -l)", None, False))
-            elif h is None or h in (os.path.join(UNIT_DIR, "pit-stop-restart.service"), PLIST):
-                unit = LAUNCHD_LABEL if darwin else "pit-stop-restart.timer"
-                states.append((*timer_state(unit), unit, h is None))
-            elif one_line(h)[1]:                    # rule 31 (vi): a name not ours never makes a line; no command for it
-                states.append(("unread", f"{one_line(h.replace(pc.HOME, '~'))[0]} is not Pit Stop's and its name holds a "
-                               f"character that cannot be typed on one line (shown here as \\x and its code); whether it "
-                               f"runs is not checked here", None, False))
-            elif h.endswith(".service"):
-                unit = os.path.basename(h)[:-len(".service")] + ".timer"
-                st, said = timer_state(unit)
-                if st == "unknown":                 # what starts that service was not read
-                    st, said = "unread", f"what starts {h.replace(pc.HOME, '~')} was not read ({said})"
-                states.append((st, said, unit, False))
-            else:
-                states.append(("unread", f"{h.replace(pc.HOME, '~')} is not Pit Stop's; whether it runs is not checked here",
-                               None, False))
-        for st, said, _, _ in states:
-            print(f"   the timer: {said}")
-        if any(st == "running" for st, *_ in states):
-            print("   fleet mode is set up")
-            print(f"   First look at what it would do: {sys.executable} -I {BIN}")
-            return 0
-        for st, said, unit, wrote_now in states:
-            print(fleet_stop_line(st, unit, wrote_now, darwin))
-        return 1
+        return 0 if say_fleet_states(*fleet_states(hits, darwin), darwin) else 1
     print(f"7. check: the launcher the timer runs would run nothing: {ln.SAY[why]}.")
     if why == "unreadable":
         print("   Not checked, so fleet mode is not said to be set up; the timer's next pass reads the list again.")

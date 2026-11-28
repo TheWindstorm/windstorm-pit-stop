@@ -106,7 +106,9 @@ def collect(sessions, newest, now, panes=None, machine=None, machine_behind_s=No
             waiting.append((name, st_age))
         if newest and ver and pc.vkey(ver) < pc.vkey(newest):
             since = behind_since(ver)
-            if not rab.allowed(name, s.get("cwd") or "", cfg):
+            if rab.CFG_STOP:        # G4.46: its lists are not known, never the defaults
+                why = "the restart helper does nothing while restart.json cannot be read (said above)"
+            elif not rab.allowed(name, s.get("cwd") or "", cfg):
                 why = NOT_LISTED
             elif machine and not machine.get("restart_ok"):
                 why = (f"Claude Code's /restart works only with Anthropic's native installer on macOS or Linux, and this "
@@ -143,12 +145,14 @@ def collect(sessions, newest, now, panes=None, machine=None, machine_behind_s=No
     return {"newest": newest, "total": len(sessions), "on_newest": on_newest, "waiting": waiting, "stuck": stuck,
             "behind_new": behind_new, "unloaded": unloaded, "nohook": nohook, "off_reasons": off_reasons(cfg), "reload_on": bool(cfg.get("reload_plugins")),
             "machine": machine if machine_behind_s is not None and machine_behind_s >= STUCK_AFTER else None,
-            "machine_behind_s": machine_behind_s, "open": open_ or []}
+            "machine_behind_s": machine_behind_s, "open": open_ or [], "helper_stop": rab.CFG_STOP}
 
 
 def render(d, now):
     out = [f"# Pit Stop: what needs you ({time.strftime('%a %Y-%m-%d %H:%M %Z', time.localtime(now))})", ""]
     out.append(f"{d['on_newest']} of {d['total']} sessions are on the newest Claude Code ({d['newest'] or 'not found'}).")
+    if d.get("helper_stop"):
+        out += ["", "The restart helper is stopped:", f"- {d['helper_stop']}"]
     if d.get("machine"):
         import install_method as im
         out += ["", f"This machine's Claude Code is behind the newest release (for {hours(d['machine_behind_s'])}):"]
@@ -185,7 +189,7 @@ def render(d, now):
     if d.get("open"):
         out += ["", "Can be written by another account, by the permission bits (access lists are not read; until it is closed, "
                     "this is said here each time):"] + d["open"]
-    if not (d["waiting"] or d["stuck"] or d.get("machine") or d.get("open")):
+    if not (d["waiting"] or d["stuck"] or d.get("machine") or d.get("open") or d.get("helper_stop")):
         out += ["", "Nothing needs you."]
     return "\n".join(out) + "\n"
 
@@ -206,6 +210,8 @@ def headline(d):
         parts.append(f"{len(stuck)} cannot be updated")
     if d.get("open"):
         parts.append(f"{len(d['open'])} thing(s) another account can write")
+    if d.get("helper_stop"):
+        parts.append("the restart helper is stopped: restart.json could not be read")
     return ("pit-stop: " + "; ".join(parts) + f"; see {OUT}") if parts else ""
 
 
